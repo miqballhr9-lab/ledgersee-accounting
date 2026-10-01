@@ -16,6 +16,14 @@ const convertTargets: Partial<Record<RecordKind, RecordKind>> = {
   "purchase-orders": "bills",
 };
 
+const accountDetailTypes = {
+  Asset: ["Bank", "Cash", "Accounts receivable", "Other current assets", "Fixed assets", "Other assets"],
+  Liability: ["Accounts payable", "Credit card", "Current liabilities", "Long-term liabilities"],
+  Equity: ["Owner’s equity", "Retained earnings", "Opening balance equity"],
+  Income: ["Sales", "Service income", "Other income"],
+  Expense: ["Advertising", "Cost of goods sold", "Office expenses", "Payroll expenses", "Travel", "Other expenses"],
+} as const;
+
 type StoredRow = typeof bookkeepingRecord.$inferSelect;
 
 function serializeRow(row: StoredRow): BookkeepingRecord {
@@ -121,6 +129,41 @@ export async function saveBookkeepingRecord(
   if (!isRecordKind(kind)) throw new Error("That section isn’t available.");
   if (kind === "reconciliations") throw new Error("Completed reconciliations can only be created from the reconciliation screen.");
   let data = amountFromLineItems(sanitizePayload(input));
+  if (kind === "accounts") {
+    const accountRows = await db
+      .select()
+      .from(bookkeepingRecord)
+      .where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "accounts")));
+    const existing = id ? accountRows.find((account) => account.id === id) : undefined;
+    if (id && !existing) throw new Error("We couldn’t find that account. Refresh and try again.");
+
+    if (existing?.data.locked === "true") {
+      if (data.locked !== "false") throw new Error("This account is locked. Unlock it before changing its details.");
+      data = { ...existing.data, locked: "false" };
+    } else {
+      const allowedFields = new Set(["code", "name", "type", "detailType", "subAccount", "parentAccount", "openingBalance", "description", "locked"]);
+      data = Object.fromEntries(Object.entries(data).filter(([key]) => allowedFields.has(key)));
+      const accountTypes = Object.keys(accountDetailTypes) as (keyof typeof accountDetailTypes)[];
+      if (!data.code?.trim() || !data.name?.trim()) throw new Error("Enter an account number and account name.");
+      if (!accountTypes.some((type) => type === data.type)) throw new Error("Choose an account type.");
+      const selectedType = data.type as keyof typeof accountDetailTypes;
+      if (data.detailType && !accountDetailTypes[selectedType].some((detailType) => detailType === data.detailType)) {
+        throw new Error("Choose a detail type that matches this account type.");
+      }
+      if (data.openingBalance && !Number.isFinite(Number(data.openingBalance))) throw new Error("Enter a valid opening balance.");
+      if (accountRows.some((account) => account.id !== id && account.data.code?.toLowerCase() === data.code.toLowerCase())) {
+        throw new Error("That account number is already in use.");
+      }
+      if (data.subAccount === "true") {
+        const parent = accountRows.find((account) => account.id === data.parentAccount);
+        if (!parent || parent.id === id) throw new Error("Choose a valid parent account.");
+        if (parent.data.type && parent.data.type !== data.type) throw new Error("Choose a parent account with the same account type.");
+      } else {
+        data.parentAccount = "";
+      }
+      data.locked = data.locked === "true" ? "true" : "false";
+    }
+  }
   if (["invoices", "estimates", "sales-orders", "recurring-invoices", "purchase-orders"].includes(kind) && !data.lineItems?.trim()) {
     throw new Error("Add at least one line item as description | quantity | rate.");
   }
@@ -280,6 +323,32 @@ export async function deleteBookkeepingRecord(kind: string, id: string): Promise
   const me = await requireUser();
   if (!isRecordKind(kind)) throw new Error("That section isn’t available.");
   if (kind === "reconciliations") throw new Error("Completed reconciliations can’t be deleted.");
+  if (kind === "accounts") {
+    const [existing] = await db
+      .select()
+      .from(bookkeepingRecord)
+      .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, kind)))
+      .limit(1);
+    if (!existing) throw new Error("We couldn’t find that account. Refresh and try again.");
+    if (existing.data.locked === "true") throw new Error("Unlock this account before deleting it.");
+
+    const journals = await db
+      .select()
+      .from(bookkeepingRecord)
+      .where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "journals")));
+    const isReferenced = journals.some((journal) => {
+      try {
+        const lines: unknown = JSON.parse(journal.data.lines || "[]");
+        return Array.isArray(lines) && lines.some((line: unknown) => {
+          if (!line || typeof line !== "object") return false;
+          return (line as Record<string, unknown>).accountId === id;
+        });
+      } catch {
+        return false;
+      }
+    });
+    if (isReferenced) throw new Error("This account is used by a journal entry and can’t be deleted.");
+  }
   if (kind === "transactions") {
     const [existing] = await db
       .select()

@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 
 import { listAllBookkeepingRecords, listBookkeepingRecords } from "@/app/actions";
+import ChartOfAccountsWorkspace from "@/components/bookkeeping/ChartOfAccountsWorkspace";
 import ModuleWorkspace from "@/components/bookkeeping/ModuleWorkspace";
 import ReportsWorkspace from "@/components/bookkeeping/ReportsWorkspace";
 import { moduleBySlug } from "@/lib/bookkeeping-config";
@@ -25,6 +26,14 @@ export default async function SectionPage({ params }: SectionPageProps) {
 
   const module = moduleBySlug(section);
   if (!module) notFound();
+  if (module.kind === "accounts") {
+    const [accounts, settings] = await Promise.all([
+      listBookkeepingRecords("accounts"),
+      listBookkeepingRecords("settings"),
+    ]);
+    return <ChartOfAccountsWorkspace accounts={accounts} currency={settings[0]?.data.currency || "USD"} />;
+  }
+
   const [records, customers, vendors, accounts] = await Promise.all([
     listBookkeepingRecords(module.kind),
     module.fields.some((field) => field.key === "customer")

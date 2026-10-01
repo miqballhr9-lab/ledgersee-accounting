@@ -27,6 +27,7 @@ Founders, freelancers, and small operators who need practical finance workflows 
 - Invoice, estimate, sales order, credit note, and recurring invoice forms let owners choose from their saved customers, showing company or email details while keeping the customer name on the record.
 - Bill and purchase-order forms let owners choose from saved vendors, showing company or email details while keeping the vendor name on the record.
 - Manual journals support multiple debit and credit lines, account choices from Chart of Accounts, balanced totals, and CSV line import; the Trial Balance includes these entries and remains compatible with older journals.
+- Chart of Accounts has searchable and type-filtered account rows, opening-balance visibility, and a dedicated side panel for account details, sub-accounts, and locking; accounts used by journal entries cannot be deleted.
 
 ## Constraints / must-nots
 This is a working demo, not a substitute for professional accounting or tax advice. Team roles and approval settings are saved in the account’s team directory; they do not invite separate users or enforce different sign-in permissions. Financial summaries reflect the records entered by the account owner.
