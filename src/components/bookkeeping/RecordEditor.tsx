@@ -19,6 +19,7 @@ interface RecordEditorProps {
   module: ModuleDefinition;
   record: BookkeepingRecord | null;
   customers: BookkeepingRecord[];
+  vendors: BookkeepingRecord[];
   defaults: Record<string, string>;
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -52,7 +53,7 @@ function formatCurrency(value: number, currency: string) {
   }
 }
 
-export default function RecordEditor({ module, record, customers, defaults, open, onOpenChange, onSaved }: RecordEditorProps) {
+export default function RecordEditor({ module, record, customers, vendors, defaults, open, onOpenChange, onSaved }: RecordEditorProps) {
   const [values, setValues] = useState<Record<string, string>>(() => getInitialValues(module, record, defaults));
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
@@ -94,6 +95,11 @@ export default function RecordEditor({ module, record, customers, defaults, open
       setError(`Choose a saved ${missingCustomer.label.toLowerCase()} before saving.`);
       return;
     }
+    const missingVendor = module.fields.find((field) => field.key === "vendor" && field.required && !values.vendor?.trim());
+    if (missingVendor) {
+      setError(`Choose a saved ${missingVendor.label.toLowerCase()} before saving.`);
+      return;
+    }
     const missingCurrency = module.fields.find((field) => field.type === "currency" && field.required && !values[field.key]?.trim());
     if (missingCurrency) {
       setError(`${missingCurrency.label} is required.`);
@@ -114,6 +120,7 @@ export default function RecordEditor({ module, record, customers, defaults, open
 
   const lineTotal = values.lineItems ? calculateLineTotal(values.lineItems, values.taxRate ?? "", values.discount ?? "") : null;
   const customerOptions = customers.filter((customer) => customer.data.name?.trim());
+  const vendorOptions = vendors.filter((vendor) => vendor.data.name?.trim());
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -178,6 +185,30 @@ export default function RecordEditor({ module, record, customers, defaults, open
                     </>
                   ) : null}
 
+                  {field.key === "vendor" ? (
+                    <>
+                      <Select
+                        value={vendorOptions.find((vendor) => vendor.data.name === value)?.id}
+                        onValueChange={(vendorId) => {
+                          const vendor = vendorOptions.find((option) => option.id === vendorId);
+                          if (vendor?.data.name) changeValue(field.key, vendor.data.name);
+                        }}
+                      >
+                        <SelectTrigger id={`field-${field.key}`} className="w-full" aria-required={field.required}>
+                          <SelectValue placeholder={vendorOptions.length ? "Choose a vendor" : "Add a vendor first"} />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {vendorOptions.map((vendor) => {
+                            const name = vendor.data.name.trim();
+                            const detail = vendor.data.company?.trim() || vendor.data.email?.trim();
+                            return <SelectItem value={vendor.id} key={vendor.id}>{detail ? `${name} · ${detail}` : name}</SelectItem>;
+                          })}
+                        </SelectContent>
+                      </Select>
+                      {!vendorOptions.length ? <p className="text-xs leading-5 text-muted-foreground">Add a vendor in Vendors before creating this record.</p> : null}
+                    </>
+                  ) : null}
+
                   {field.type === "select" ? (
                     <Select value={value || undefined} onValueChange={(nextValue) => changeValue(field.key, nextValue ?? "")}>
                       <SelectTrigger id={`field-${field.key}`} className="w-full">
@@ -215,7 +246,7 @@ export default function RecordEditor({ module, record, customers, defaults, open
                     </div>
                   ) : null}
 
-                  {field.key !== "customer" && (!field.type || field.type === "text" || field.type === "email" || field.type === "number" || field.type === "date") ? (
+                  {field.key !== "customer" && field.key !== "vendor" && (!field.type || field.type === "text" || field.type === "email" || field.type === "number" || field.type === "date") ? (
                     <Input
                       id={`field-${field.key}`}
                       type={field.type ?? "text"}
