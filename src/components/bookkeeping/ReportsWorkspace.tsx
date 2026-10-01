@@ -140,11 +140,32 @@ function buildReport(key: ReportKey, records: BookkeepingRecord[], asOfDate: str
     const cash = records.filter((record) => record.kind === "bank-accounts").reduce((sum, record) => sum + rowAmount(record, "openingBalance"), 0);
     const receivables = invoices.reduce((sum, record) => sum + Math.max(0, rowAmount(record) - rowAmount(record, "paidAmount")), 0);
     const payables = bills.reduce((sum, record) => sum + Math.max(0, rowAmount(record) - rowAmount(record, "paidAmount")), 0);
-    const rows = [
+    const assetAccounts = accountRows.filter((row) => row.Section.toLowerCase() === "asset");
+    const liabilityAccounts = accountRows.filter((row) => row.Section.toLowerCase() === "liability");
+    const equityAccounts = accountRows.filter((row) => row.Section.toLowerCase() === "equity");
+    const assetRows: ReportRow[] = [
       { Section: "Asset", Account: "Cash & bank opening balances", Balance: cash },
       { Section: "Asset", Account: "Accounts receivable", Balance: receivables },
+      ...assetAccounts,
+    ];
+    const liabilityRows: ReportRow[] = [
       { Section: "Liability", Account: "Accounts payable", Balance: payables },
-      ...accountRows,
+      ...liabilityAccounts,
+    ];
+    const totalAssets = assetRows.reduce((sum, row) => sum + Number(row.Balance ?? 0), 0);
+    const totalLiabilities = liabilityRows.reduce((sum, row) => sum + Number(row.Balance ?? 0), 0);
+    const recordedEquity = equityAccounts.reduce((sum, row) => sum + row.Balance, 0);
+    const balancingEquity = totalAssets - totalLiabilities - recordedEquity;
+    const totalEquity = recordedEquity + balancingEquity;
+    const rows: ReportRow[] = [
+      ...assetRows,
+      { Section: "Asset", Account: "Total assets", Balance: totalAssets },
+      ...liabilityRows,
+      { Section: "Liability", Account: "Total liabilities", Balance: totalLiabilities },
+      ...equityAccounts,
+      { Section: "Equity", Account: "Unallocated equity (balancing amount)", Balance: balancingEquity },
+      { Section: "Equity", Account: "Total equity", Balance: totalEquity },
+      { Section: "Liabilities & equity", Account: "Total liabilities & equity", Balance: totalLiabilities + totalEquity },
     ];
     return { columns: ["Section", "Account", "Balance"], rows };
   }
