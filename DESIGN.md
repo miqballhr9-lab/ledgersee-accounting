@@ -1,7 +1,36 @@
 ---
-name: "workspace"
-description: "Build a functional accounting web application inspired by Zoho Books, with a left sidebar navigation and a clean, professional business-software look. The UI should be in English (with Roman Urdu labels where natural if desired). Include these working modules, each with real create/read/edit/delete and stored data (persist in the browser or a backend): 1. Dashboard — KPI cards (total income, total expenses, net profit, receivables, payables) and a simple income-vs-expense chart. 2. Customers — list, add, edit, delete customers; contact details, opening balance. 3. Vendors — same for suppliers. 4. Items / Products & Services — name, SKU, rate, unit, tax, stock quantity. 5. Invoices — create invoices with line items, tax, discount, due date; statuses (Draft, Sent, Paid, Overdue, Partially Paid); record payments; convert from an estimate. 6. Estimates / Quotes — create and convert to invoice. 7. Sales Orders — create and convert to invoice. 8. Credit Notes / Refunds — apply against invoices. 9. Recurring Invoices — simple recurring invoice setup. 10. Bills (vendor bills) — record vendor bills, mark paid, and Expense tracking with attachments/categories. 11. Purchase Orders — create and convert to bill. 12. Banking — add bank/cash accounts, record deposits and withdrawals, a simple \"reconcile/match transaction\" view, and bank rules/categorization. 13. Chart of Accounts — asset/liability/income/expense/equity account types, manual journals (double-entry). 14. Taxes — configurable tax rates (e.g. GST/VAT with CGST/SGST breakdown), tax summary. 15. Reports — Profit & Loss, Balance Sheet, Cash Flow, Trial Balance, Sales by Customer, Expenses by Category, Accounts Receivable/Payable ageing, with date-range filters and export to CSV. 16. Multi-currency — at least a currency setting and exchange rate field on invoices. 17. Users & Roles — add team members with roles (Admin, Accountant, Sales, Viewer) and a permissions switch. 18. Settings — company profile (name, logo, address, currency, fiscal year), invoice numbering, and email templates. Also include: search and filter on every list, pagination, and a simple login/signup screen so data is per-account. Make it responsive. This is a demo/working app, not a production system — but every listed module must actually function end to end, not be a dead placeholder."
+name: "Ledgerline"
+description: "A small-business bookkeeping workspace for customers, sales, purchases, banking, and financial reports."
+colors:
+  background: "oklch(0.975 0.008 244)"
+  foreground: "oklch(0.25 0.035 251)"
+  card: "oklch(1 0 0)"
+  card-foreground: "oklch(0.25 0.035 251)"
+  popover: "oklch(1 0 0)"
+  popover-foreground: "oklch(0.25 0.035 251)"
+  primary: "oklch(0.49 0.105 238)"
+  primary-foreground: "oklch(0.985 0.004 230)"
+  secondary: "oklch(0.955 0.018 226)"
+  secondary-foreground: "oklch(0.32 0.055 242)"
+  muted: "oklch(0.958 0.009 244)"
+  muted-foreground: "oklch(0.57 0.028 248)"
+  accent: "oklch(0.94 0.035 186)"
+  accent-foreground: "oklch(0.32 0.065 190)"
+  destructive: "oklch(0.57 0.22 26)"
+  border: "oklch(0.91 0.015 242)"
+  input: "oklch(0.91 0.015 242)"
+  ring: "oklch(0.61 0.1 230)"
+  sidebar-ring: "oklch(0.7 0.11 183)"
+  sidebar-border: "oklch(0.31 0.045 248)"
+  sidebar-accent-foreground: "oklch(0.97 0.008 225)"
+  sidebar-accent: "oklch(0.28 0.05 247)"
+  sidebar-primary-foreground: "oklch(0.2 0.045 248)"
+  sidebar-primary: "oklch(0.78 0.12 183)"
 typography:
+  display:
+    fontFamily: "System sans, medium-to-semibold weight with tight tracking."
+  body:
+    fontFamily: "System sans, regular weight; tabular numerals for financial values."
   mono:
     fontFamily: "ui-monospace, SFMono-Regular, \"SF Mono\", Menlo, Consolas, \"Liberation Mono\", monospace"
 rounded:
@@ -18,23 +47,34 @@ rounded:
 
 ## Overview
 
-**No visual direction has been committed for workspace yet.** The project is still on the starter's placeholder palette — shadcn's default neutral, every colour zero-chroma — so it is deliberately NOT listed above as a token set to respect. Treat this project as greenfield: decide the world, then write the palette into `globals.css`, and this file will state it from the next turn onward.
+Blue-bound operating ledger: a cool-white work surface, deep navy navigation, sea-glass active marks, and crisp financial tables.
 
 ## Colors
 
 | Token | Value |
+| background | Cool blue-white |
+| surface | Clear white |
+| text / muted | Navy-charcoal / blue-grey |
+| border | Pale blue-grey hairlines |
+| primary | Trust blue |
+| accent | Sea-glass teal |
+| success / warning / danger | Sea-glass / slate / destructive rose |
+
+Declared in `globals.css` as `--color-*` and mirrored in the frontmatter. Use the token, never a raw hex.
 
 ## Typography
 
-- Headings:
-- Body:
+- Headings: System sans, medium-to-semibold weight with tight tracking.
+- Body: System sans, regular weight; tabular numerals for financial values.
 
+- Display: `System sans, medium-to-semibold weight with tight tracking.`
+- Body: `System sans, regular weight; tabular numerals for financial values.`
 - Mono: `ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace`
 
 ## Layout
 
-- Radius / shadow / spacing rhythm:
-- Shared components:
+- Radius / shadow / spacing rhythm: 10px base radius, 8px spacing rhythm, fine borders, restrained elevation.
+- Shared components: The installed shadcn button, input, select, checkbox, dialog, table, and badge primitives.
 
 ## Shapes
 
@@ -42,7 +82,9 @@ Radii: `sm` calc(var(--radius) * 0.6), `md` calc(var(--radius) * 0.8), `lg` 0.62
 
 ## Do's and Don'ts
 
+- Voice: Plain and precise. Use clear finance labels, show actual saved figures, and make empty states invite the first real record.
+
 - Do load faces through Fontsource, not `next/font/google`.
-- Do write the direction's palette into `globals.css` as the token block; keep the token NAMES, replace the values.
+- Don't introduce a colour or radius that isn't a token above.
 - Don't use gradient text, or a purple/violet gradient as the brand signal.
 - Don't use bounce or elastic easing; real objects decelerate smoothly.
