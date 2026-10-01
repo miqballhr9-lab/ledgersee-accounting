@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowRight, BriefcaseBusiness, LockKeyhole } from "lucide-react";
 
@@ -117,9 +118,11 @@ export default function AccountAccess() {
               <Input id="email" type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} required />
             </div>
             <div className="space-y-2">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between gap-3">
                 <Label htmlFor="password">Password</Label>
-                {mode === "sign-in" ? <span className="text-xs text-muted-foreground">At least 8 characters</span> : null}
+                {mode === "sign-in" ? (
+                  <Link href="/auth/forgot-password" className="text-xs font-medium text-primary hover:underline">Forgot password?</Link>
+                ) : null}
               </div>
               <Input
                 id="password"

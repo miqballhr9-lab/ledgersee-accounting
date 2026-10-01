@@ -13,6 +13,7 @@ value_props:
 ctas:
   - "Sign in"
   - "Create account"
+  - "Forgot password?"
 palette:
   - "oklch(0.975 0.008 244)"
   - "oklch(0.25 0.035 251)"
