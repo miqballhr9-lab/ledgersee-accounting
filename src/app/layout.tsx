@@ -7,7 +7,16 @@ import "./globals.css";
 // hangs at compile and the preview renders blank. Use the zero-network stack in
 // globals.css, or self-host a .woff2 via next/font/local.
 export const metadata: Metadata = {
-  title: "App",
+  title: {
+    default: "Ledgerline — simple business accounting",
+    template: "%s · Ledgerline",
+  },
+  description: "Manage customers, invoices, expenses, banking and reports in one clear workspace.",
+  openGraph: {
+    title: "Ledgerline — simple business accounting",
+    description: "A clear place to manage your business finances.",
+    type: "website",
+  },
 };
 
 export default function RootLayout({

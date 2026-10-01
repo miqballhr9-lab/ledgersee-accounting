@@ -17,6 +17,7 @@ import { relations } from "drizzle-orm";
 import {
   boolean,
   index,
+  jsonb,
   pgTable,
   text,
   timestamp,
@@ -118,3 +119,18 @@ export const userRelations = relations(user, ({ many }) => ({
 //   // on user_id, and without this each one is a full table scan.
 //   (t) => [index("note_user_idx").on(t.userId)],
 // );
+
+export const bookkeepingRecord = pgTable(
+  "bookkeeping_record",
+  {
+    id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull(),
+    data: jsonb("data").notNull().$type<Record<string, string>>(),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (t) => [index("bookkeeping_record_user_kind_idx").on(t.userId, t.kind)],
+);

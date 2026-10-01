@@ -1,22 +1,26 @@
 <!-- OWNER: Build (with the user) · READERS: every agent · READ THIS FIRST -->
-# {{PROJECT_NAME}}
+# Ledgerline
 
-**One-liner:** {{what it is, in one sentence}}
+**One-liner:** A small-business bookkeeping workspace for customers, sales, purchases, banking, and financial reports.
 
 ## Goal
-{{the outcome the user actually wants}}
+Give owners a clear, account-specific place to manage routine bookkeeping and follow outstanding money.
 
 ## Target users
-{{who it's for}}
+Founders, freelancers, and small operators who need practical finance workflows without a complex setup.
 
 ## Status
-- Stage: {{idea | building | live}}
-- Live URL: {{url or —}}
-- Repo: {{repo or —}}
+- Stage: building
+- Live URL: —
+- Repo: —
 
 ## What exists today
 <!-- Kept current by the Build agent after each build -->
-{{high-level list of built features}}
+- Email and password sign-up/sign-in with records isolated to the signed-in account.
+- Dashboard KPIs and monthly income-versus-expense chart based on saved records.
+- CRUD workspaces for customers, vendors, items, invoices, estimates, sales orders, credit notes, recurring invoices, bills, expenses, purchase orders, banking, accounts, journals, taxes, team roles, and company settings.
+- Invoice email delivery and payment tracking; estimates and sales orders convert to invoices; purchase orders convert to bills; recurring schedules generate invoices; credit notes apply to invoices.
+- Search, category/status filters, pagination, receipt/logo uploads, date-filtered financial reports, and CSV export.
 
 ## Constraints / must-nots
-{{anything every agent must respect — brand rules, no-gos, tech limits}}
+This is a working demo, not a substitute for professional accounting or tax advice. Team roles and approval settings are saved in the account’s team directory; they do not invite separate users or enforce different sign-in permissions. Financial summaries reflect the records entered by the account owner.
