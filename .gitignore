@@ -1,0 +1,29 @@
+node_modules
+.next
+.turbo
+npm-debug.log*
+# Real env values live in .env (platform-written, holds live API keys) — never
+# commit any env file except the value-free .env.example manifest.
+.env*
+!.env.example
+tsconfig.tsbuildinfo
+
+# Figma import scratch (screenshots, raw JSON dumps) — never commit
+.tmp/
+node_modules/
+.next/
+.npm-cache/
+dist/
+build/
+out/
+.turbo/
+.vercel/
+coverage/
+*.log
+.preview-*.log
+.attachments/
+*.tsbuildinfo
+graphify-out/
+.graphifyignore
+.env
+.env*.local
