@@ -18,7 +18,7 @@ type ReportKey = "profit-loss" | "balance-sheet" | "cash-flow" | "trial-balance"
 type ReportRow = Record<string, string | number>;
 
 const reportOptions: { key: ReportKey; label: string; description: string }[] = [
-  { key: "profit-loss", label: "Profit & Loss", description: "Income and costs over the selected period." },
+  { key: "profit-loss", label: "Income Statement", description: "Revenue, gross profit, expenses, and net income over the selected period." },
   { key: "balance-sheet", label: "Balance Sheet", description: "Assets, liabilities, and equity from your recorded balances." },
   { key: "cash-flow", label: "Cash Flow", description: "Money received and paid, grouped by month." },
   { key: "trial-balance", label: "Trial Balance", description: "Debit and credit totals from opening balances and journals." },
@@ -59,14 +59,22 @@ function buildReport(key: ReportKey, records: BookkeepingRecord[], asOfDate: str
   if (key === "profit-loss") {
     const income = invoices.reduce((sum, invoice) => sum + Math.max(0, rowAmount(invoice) - rowAmount(invoice, "creditApplied")), 0);
     const expenseTotal = [...bills, ...expenses].reduce((sum, expense) => sum + rowAmount(expense), 0);
-    const costOfSales = bills.filter((bill) => bill.data.category?.toLowerCase().includes("cost")).reduce((sum, bill) => sum + rowAmount(bill), 0);
+    const costOfSales = [...bills, ...expenses]
+      .filter((record) => {
+        const category = record.data.category?.toLowerCase() ?? "";
+        return category.includes("cost") || category.includes("direct");
+      })
+      .reduce((sum, record) => sum + rowAmount(record), 0);
+    const grossProfit = income - costOfSales;
+    const operatingExpenses = expenseTotal - costOfSales;
     return {
       columns: ["Account", "Total"],
       rows: [
-        { Account: "Income · invoices", Total: income },
-        { Account: "Direct costs", Total: costOfSales },
-        { Account: "Operating expenses", Total: expenseTotal - costOfSales },
-        { Account: "Net profit", Total: income - expenseTotal },
+        { Account: "Revenue · invoices", Total: income },
+        { Account: "Cost of goods sold", Total: costOfSales },
+        { Account: "Gross profit", Total: grossProfit },
+        { Account: "Operating expenses", Total: operatingExpenses },
+        { Account: "Net income", Total: grossProfit - operatingExpenses },
       ],
     };
   }
@@ -228,7 +236,7 @@ export default function ReportsWorkspace({ records, asOfDate }: ReportsWorkspace
     const objectUrl = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
     const anchor = document.createElement("a");
     anchor.href = objectUrl;
-    anchor.download = `${reportKey}.csv`;
+    anchor.download = `${reportKey === "profit-loss" ? "income-statement" : reportKey}.csv`;
     anchor.click();
     URL.revokeObjectURL(objectUrl);
   }
@@ -241,7 +249,7 @@ export default function ReportsWorkspace({ records, asOfDate }: ReportsWorkspace
       </section>
 
       <section className="mt-6 grid gap-3 rounded-lg border border-border bg-card p-4 sm:grid-cols-[minmax(220px,1fr)_minmax(160px,0.65fr)_minmax(160px,0.65fr)] sm:items-end">
-        <div className="space-y-2"><label className="text-xs font-medium" htmlFor="report-type">Report</label><Select value={reportKey} onValueChange={(value) => setReportKey((value as ReportKey) ?? "profit-loss")}><SelectTrigger id="report-type" className="w-full"><SelectValue /></SelectTrigger><SelectContent>{reportOptions.map((item) => <SelectItem key={item.key} value={item.key}>{item.label}</SelectItem>)}</SelectContent></Select></div>
+        <div className="space-y-2"><label className="text-xs font-medium" htmlFor="report-type">Report</label><Select value={reportKey} onValueChange={(value) => setReportKey((value as ReportKey) ?? "profit-loss")}><SelectTrigger id="report-type" className="w-full"><SelectValue>{option.label}</SelectValue></SelectTrigger><SelectContent>{reportOptions.map((item) => <SelectItem key={item.key} value={item.key}>{item.label}</SelectItem>)}</SelectContent></Select></div>
         <div className="space-y-2"><label className="text-xs font-medium" htmlFor="report-from">From</label><Input id="report-from" type="date" value={fromDate} onChange={(event) => setFromDate(event.target.value)} /></div>
         <div className="space-y-2"><label className="text-xs font-medium" htmlFor="report-to">To</label><Input id="report-to" type="date" value={toDate} onChange={(event) => setToDate(event.target.value)} /></div>
       </section>
