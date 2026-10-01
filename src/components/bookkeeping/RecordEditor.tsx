@@ -18,6 +18,7 @@ import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
 interface RecordEditorProps {
   module: ModuleDefinition;
   record: BookkeepingRecord | null;
+  customers: BookkeepingRecord[];
   defaults: Record<string, string>;
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -51,7 +52,7 @@ function formatCurrency(value: number, currency: string) {
   }
 }
 
-export default function RecordEditor({ module, record, defaults, open, onOpenChange, onSaved }: RecordEditorProps) {
+export default function RecordEditor({ module, record, customers, defaults, open, onOpenChange, onSaved }: RecordEditorProps) {
   const [values, setValues] = useState<Record<string, string>>(() => getInitialValues(module, record, defaults));
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
@@ -88,6 +89,11 @@ export default function RecordEditor({ module, record, defaults, open, onOpenCha
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const missingCustomer = module.fields.find((field) => field.key === "customer" && field.required && !values.customer?.trim());
+    if (missingCustomer) {
+      setError(`Choose a saved ${missingCustomer.label.toLowerCase()} before saving.`);
+      return;
+    }
     const missingCurrency = module.fields.find((field) => field.type === "currency" && field.required && !values[field.key]?.trim());
     if (missingCurrency) {
       setError(`${missingCurrency.label} is required.`);
@@ -107,6 +113,7 @@ export default function RecordEditor({ module, record, defaults, open, onOpenCha
   }
 
   const lineTotal = values.lineItems ? calculateLineTotal(values.lineItems, values.taxRate ?? "", values.discount ?? "") : null;
+  const customerOptions = customers.filter((customer) => customer.data.name?.trim());
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -147,6 +154,30 @@ export default function RecordEditor({ module, record, defaults, open, onOpenCha
                     />
                   ) : null}
 
+                  {field.key === "customer" ? (
+                    <>
+                      <Select
+                        value={customerOptions.find((customer) => customer.data.name === value)?.id}
+                        onValueChange={(customerId) => {
+                          const customer = customerOptions.find((option) => option.id === customerId);
+                          if (customer?.data.name) changeValue(field.key, customer.data.name);
+                        }}
+                      >
+                        <SelectTrigger id={`field-${field.key}`} className="w-full" aria-required={field.required}>
+                          <SelectValue placeholder={customerOptions.length ? "Choose a customer" : "Add a customer first"} />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {customerOptions.map((customer) => {
+                            const name = customer.data.name.trim();
+                            const detail = customer.data.company?.trim() || customer.data.email?.trim();
+                            return <SelectItem value={customer.id} key={customer.id}>{detail ? `${name} · ${detail}` : name}</SelectItem>;
+                          })}
+                        </SelectContent>
+                      </Select>
+                      {!customerOptions.length ? <p className="text-xs leading-5 text-muted-foreground">Add a customer in Customers before creating this record.</p> : null}
+                    </>
+                  ) : null}
+
                   {field.type === "select" ? (
                     <Select value={value || undefined} onValueChange={(nextValue) => changeValue(field.key, nextValue ?? "")}>
                       <SelectTrigger id={`field-${field.key}`} className="w-full">
@@ -184,7 +215,7 @@ export default function RecordEditor({ module, record, defaults, open, onOpenCha
                     </div>
                   ) : null}
 
-                  {(!field.type || field.type === "text" || field.type === "email" || field.type === "number" || field.type === "date") ? (
+                  {field.key !== "customer" && (!field.type || field.type === "text" || field.type === "email" || field.type === "number" || field.type === "date") ? (
                     <Input
                       id={`field-${field.key}`}
                       type={field.type ?? "text"}

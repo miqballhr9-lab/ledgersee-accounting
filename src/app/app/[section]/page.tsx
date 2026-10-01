@@ -25,6 +25,11 @@ export default async function SectionPage({ params }: SectionPageProps) {
 
   const module = moduleBySlug(section);
   if (!module) notFound();
-  const records = await listBookkeepingRecords(module.kind);
-  return <ModuleWorkspace module={module} records={records} />;
+  const [records, customers] = await Promise.all([
+    listBookkeepingRecords(module.kind),
+    module.fields.some((field) => field.key === "customer")
+      ? listBookkeepingRecords("customers")
+      : Promise.resolve([]),
+  ]);
+  return <ModuleWorkspace module={module} records={records} customers={customers} />;
 }
