@@ -1,5 +1,5 @@
 <!-- OWNER: Build (with the user) · READERS: every agent · READ THIS FIRST -->
-# Ledgerline
+# Hisaavora
 
 **One-liner:** A small-business bookkeeping workspace for customers, sales, purchases, banking, and financial reports.
 

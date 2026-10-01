@@ -42,14 +42,14 @@ export default function ForgotPasswordForm() {
       <section className="w-full max-w-[420px]">
         <Link href="/" className="mb-10 inline-flex items-center gap-3">
           <span className="grid size-10 place-items-center rounded-xl bg-sidebar text-sidebar-primary"><BriefcaseBusiness size={19} strokeWidth={1.8} /></span>
-          <span className="text-[17px] font-semibold tracking-tight">Ledgerline</span>
+          <span className="text-[17px] font-semibold tracking-tight">Hisaavora</span>
         </Link>
 
         <div className="mt-4 rounded-xl border border-border bg-card p-6 shadow-sm sm:p-8">
           <span className="grid size-11 place-items-center rounded-lg bg-accent text-accent-foreground"><MailCheck size={19} /></span>
           <p className="mt-6 text-sm font-medium text-primary">Account recovery</p>
           <h1 className="mt-2 text-2xl font-semibold tracking-tight">Forgot your password?</h1>
-          <p className="mt-2 text-sm leading-6 text-muted-foreground">Enter the email you use for Ledgerline. If there’s an account for it, we’ll send a link to choose a new password.</p>
+          <p className="mt-2 text-sm leading-6 text-muted-foreground">Enter the email you use for Hisaavora. If there’s an account for it, we’ll send a link to choose a new password.</p>
 
           <form className="mt-6 space-y-4" onSubmit={submit}>
             <div className="space-y-2">

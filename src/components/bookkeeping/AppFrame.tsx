@@ -102,7 +102,7 @@ export default function AppFrame({ userName, userEmail, children }: AppFrameProp
             <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground">
               <BriefcaseBusiness size={18} strokeWidth={1.8} />
             </span>
-            <span className="truncate text-[16px] font-semibold tracking-tight">Ledgerline</span>
+            <span className="truncate text-[16px] font-semibold tracking-tight">Hisaavora</span>
           </Link>
           <Button variant="ghost" size="icon" className="text-sidebar-foreground hover:bg-sidebar-accent md:hidden" onClick={() => setMenuOpen(false)} aria-label="Close menu">
             <X size={18} />
@@ -165,7 +165,7 @@ export default function AppFrame({ userName, userEmail, children }: AppFrameProp
               <Menu size={19} />
             </Button>
             <div className="min-w-0">
-              <p className="truncate text-[11px] font-medium text-muted-foreground">Ledgerline / {activeLabel}</p>
+              <p className="truncate text-[11px] font-medium text-muted-foreground">Hisaavora / {activeLabel}</p>
               <p className="truncate text-sm font-semibold">{activeLabel}</p>
             </div>
           </div>

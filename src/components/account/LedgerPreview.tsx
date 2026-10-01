@@ -87,7 +87,7 @@ export default function LedgerPreview({ onCreateAccount }: { onCreateAccount: ()
             <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-sidebar text-sidebar-primary"><BriefcaseBusiness size={17} /></span>
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                <DialogTitle className="text-sm font-semibold tracking-tight">Ledgerline</DialogTitle>
+                <DialogTitle className="text-sm font-semibold tracking-tight">Hisaavora</DialogTitle>
                 <span className="rounded-full border border-accent bg-accent/60 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-accent-foreground">Sample preview</span>
               </div>
               <DialogDescription className="mt-1 hidden text-xs sm:block">Browse a read-only example workspace. Nothing here is saved.</DialogDescription>

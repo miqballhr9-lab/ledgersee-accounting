@@ -50,7 +50,7 @@ export default function ResetPasswordForm({ token, invalid }: { token: string; i
       <section className="w-full max-w-[420px]">
         <Link href="/" className="mb-10 inline-flex items-center gap-3">
           <span className="grid size-10 place-items-center rounded-xl bg-sidebar text-sidebar-primary"><BriefcaseBusiness size={19} strokeWidth={1.8} /></span>
-          <span className="text-[17px] font-semibold tracking-tight">Ledgerline</span>
+          <span className="text-[17px] font-semibold tracking-tight">Hisaavora</span>
         </Link>
 
         <div className="mt-4 rounded-xl border border-border bg-card p-6 shadow-sm sm:p-8">

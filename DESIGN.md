@@ -1,5 +1,5 @@
 ---
-name: "Ledgerline"
+name: "Hisaavora"
 description: "A small-business bookkeeping workspace for customers, sales, purchases, banking, and financial reports."
 colors:
   background: "oklch(0.975 0.008 244)"
