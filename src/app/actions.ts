@@ -119,6 +119,7 @@ export async function saveBookkeepingRecord(
 ): Promise<BookkeepingRecord> {
   const me = await requireUser();
   if (!isRecordKind(kind)) throw new Error("That section isn’t available.");
+  if (kind === "reconciliations") throw new Error("Completed reconciliations can only be created from the reconciliation screen.");
   let data = amountFromLineItems(sanitizePayload(input));
   if (["invoices", "estimates", "sales-orders", "recurring-invoices", "purchase-orders"].includes(kind) && !data.lineItems?.trim()) {
     throw new Error("Add at least one line item as description | quantity | rate.");
@@ -127,6 +128,15 @@ export async function saveBookkeepingRecord(
     const amount = Number(data.amount);
     if (!Number.isFinite(amount) || amount <= 0) throw new Error("Journal amounts must be greater than zero.");
     if (data.debitAccount && data.debitAccount === data.creditAccount) throw new Error("Choose different debit and credit accounts.");
+  }
+
+  if (id && kind === "transactions") {
+    const [existing] = await db
+      .select()
+      .from(bookkeepingRecord)
+      .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "transactions")))
+      .limit(1);
+    if (existing?.data.reconciled === "true") throw new Error("This transaction is part of a completed reconciliation and can’t be edited.");
   }
 
   if (kind === "transactions" && data.description) {
@@ -188,6 +198,15 @@ export async function saveBookkeepingRecord(
 export async function deleteBookkeepingRecord(kind: string, id: string): Promise<void> {
   const me = await requireUser();
   if (!isRecordKind(kind)) throw new Error("That section isn’t available.");
+  if (kind === "reconciliations") throw new Error("Completed reconciliations can’t be deleted.");
+  if (kind === "transactions") {
+    const [existing] = await db
+      .select()
+      .from(bookkeepingRecord)
+      .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, kind)))
+      .limit(1);
+    if (existing?.data.reconciled === "true") throw new Error("This transaction is part of a completed reconciliation and can’t be deleted.");
+  }
   const [deleted] = await db
     .delete(bookkeepingRecord)
     .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, kind)))
@@ -317,6 +336,133 @@ export async function toggleTransactionMatch(id: string): Promise<void> {
     })
     .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id)));
   revalidatePath("/app", "layout");
+}
+
+export async function completeBankReconciliation(
+  bankAccountId: string,
+  statementDate: string,
+  endingBalanceInput: string,
+  transactionIds: string[],
+): Promise<BookkeepingRecord> {
+  const me = await requireUser();
+  const endingBalance = Number(endingBalanceInput);
+  const parsedStatementDate = new Date(`${statementDate}T00:00:00.000Z`);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(statementDate) || Number.isNaN(parsedStatementDate.getTime()) || parsedStatementDate.toISOString().slice(0, 10) !== statementDate) {
+    throw new Error("Choose a valid statement ending date.");
+  }
+  if (!Number.isFinite(endingBalance)) throw new Error("Enter the ending balance shown on your bank statement.");
+  if (!Array.isArray(transactionIds) || transactionIds.length > 500) throw new Error("Select up to 500 transactions at a time.");
+  const uniqueTransactionIds = [...new Set(transactionIds)];
+  if (uniqueTransactionIds.length !== transactionIds.length) throw new Error("A transaction was selected more than once.");
+
+  const created = await db.transaction(async (tx) => {
+    const [bankAccount] = await tx
+      .select()
+      .from(bookkeepingRecord)
+      .where(and(eq(bookkeepingRecord.id, bankAccountId), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "bank-accounts")))
+      .for("update")
+      .limit(1);
+    if (!bankAccount || !bankAccount.data.name) throw new Error("Choose a bank account from your Banking section.");
+
+    const bankAccounts = await tx
+      .select()
+      .from(bookkeepingRecord)
+      .where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "bank-accounts")));
+    if (bankAccounts.filter((record) => record.data.name === bankAccount.data.name).length > 1) {
+      throw new Error("Bank account names must be unique before they can be reconciled.");
+    }
+
+    const reconciliationRows = await tx
+      .select()
+      .from(bookkeepingRecord)
+      .where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "reconciliations")));
+    const accountReconciliations = reconciliationRows.filter((record) => record.data.bankAccountId === bankAccount.id);
+    if (accountReconciliations.some((record) => record.data.statementDate === statementDate)) {
+      throw new Error("This statement date has already been reconciled for that account.");
+    }
+    if (accountReconciliations.some((record) => record.data.statementDate > statementDate)) {
+      throw new Error("Reconcile this account’s statements in date order, starting with the earliest one.");
+    }
+    const priorReconciliation = accountReconciliations
+      .filter((record) => record.data.statementDate < statementDate)
+      .sort((first, second) => second.data.statementDate.localeCompare(first.data.statementDate))[0];
+    const openingBalanceInput = priorReconciliation?.data.endingBalance ?? bankAccount.data.openingBalance ?? "0";
+    const openingBalance = Number(openingBalanceInput);
+    if (!Number.isFinite(openingBalance)) throw new Error("Update this account’s opening balance before reconciling.");
+
+    const transactionRows = await tx
+      .select()
+      .from(bookkeepingRecord)
+      .where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "transactions")))
+      .for("update");
+    const selectedRows = uniqueTransactionIds.map((id) => transactionRows.find((record) => record.id === id));
+    if (selectedRows.some((record) => !record)) throw new Error("One or more selected transactions aren’t available in this account.");
+
+    const selectedTransactions = selectedRows.filter((record): record is (typeof transactionRows)[number] => Boolean(record));
+    const openingCents = Math.round(openingBalance * 100);
+    const endingCents = Math.round(endingBalance * 100);
+    let netClearedCents = 0;
+    let depositCents = 0;
+    let withdrawalCents = 0;
+
+    for (const transaction of selectedTransactions) {
+      const amount = Number(transaction.data.amount);
+      if (transaction.data.account !== bankAccount.data.name) throw new Error("Each selected transaction must belong to the chosen bank account.");
+      if (transaction.data.reconciled === "true") throw new Error("A selected transaction is already part of a completed reconciliation.");
+      if (!transaction.data.date || transaction.data.date > statementDate || (priorReconciliation && transaction.data.date <= priorReconciliation.data.statementDate)) {
+        throw new Error("Selected transactions must fall within this statement period.");
+      }
+      if (!Number.isFinite(amount) || amount <= 0) throw new Error("Every selected transaction needs a valid amount greater than zero.");
+      const amountCents = Math.round(amount * 100);
+      if (transaction.data.type === "Withdrawal") {
+        netClearedCents -= amountCents;
+        withdrawalCents += amountCents;
+      } else if (transaction.data.type === "Deposit") {
+        netClearedCents += amountCents;
+        depositCents += amountCents;
+      } else {
+        throw new Error("Choose Deposit or Withdrawal for each selected transaction.");
+      }
+    }
+
+    const differenceCents = endingCents - openingCents - netClearedCents;
+    if (differenceCents !== 0) throw new Error("The selected transactions don’t balance to the statement ending balance yet.");
+
+    const [reconciliation] = await tx
+      .insert(bookkeepingRecord)
+      .values({
+        userId: me.id,
+        kind: "reconciliations",
+        data: {
+          bankAccountId: bankAccount.id,
+          bankAccountName: bankAccount.data.name,
+          currency: bankAccount.data.currency || "USD",
+          statementDate,
+          openingBalance: (openingCents / 100).toFixed(2),
+          endingBalance: (endingCents / 100).toFixed(2),
+          clearedDeposits: (depositCents / 100).toFixed(2),
+          clearedWithdrawals: (withdrawalCents / 100).toFixed(2),
+          clearedCount: String(selectedTransactions.length),
+          difference: "0.00",
+        },
+      })
+      .returning();
+
+    for (const transaction of selectedTransactions) {
+      await tx
+        .update(bookkeepingRecord)
+        .set({
+          data: { ...transaction.data, reconciled: "true", reconciliationId: reconciliation.id },
+          updatedAt: new Date(),
+        })
+        .where(and(eq(bookkeepingRecord.id, transaction.id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "transactions")));
+    }
+
+    return reconciliation;
+  });
+
+  revalidatePath("/app", "layout");
+  return serializeRow(created);
 }
 
 export async function applyCreditNote(id: string): Promise<void> {

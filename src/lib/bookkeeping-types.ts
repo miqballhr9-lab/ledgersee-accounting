@@ -19,6 +19,7 @@ export const recordKinds = [
   "team-members",
   "settings",
   "payments",
+  "reconciliations",
 ] as const;
 
 export type RecordKind = (typeof recordKinds)[number];

@@ -9,7 +9,7 @@ value_props:
   - "Dashboard KPIs and monthly income-versus-expense chart based on saved records"
   - "CRUD workspaces for customers, vendors, items, invoices, estimates, sales orders, credit notes, recurring invoices, bills, expenses, purchase orders, banking, accounts, journals, taxes, team roles, and company settings"
   - "Invoice email delivery and payment tracking; estimates and sales orders convert to invoices; purchase orders convert to bills; recurring schedules generate invoices; credit notes apply to invoices"
-  - "Search, category/status filters, pagination, receipt/logo uploads, date-filtered financial reports, and CSV export"
+  - "Bank reconciliation by statement date and ending balance, with transaction clearing, balanced-close validation, and per-account history"
 ctas:
   - "Sign in"
   - "Create account"

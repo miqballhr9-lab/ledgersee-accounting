@@ -211,7 +211,7 @@ export const modules: readonly ModuleDefinition[] = [
       { key: "date", label: "Date", type: "date", required: true },
       { key: "description", label: "Description", required: true },
       { key: "account", label: "Bank or cash account", required: true },
-      { key: "type", label: "Direction", type: "select", options: ["Deposit", "Withdrawal"] },
+      { key: "type", label: "Direction", type: "select", required: true, options: ["Deposit", "Withdrawal"] },
       { key: "category", label: "Category" },
       { key: "amount", label: "Amount", type: "number", required: true },
       { key: "matched", label: "Matched", type: "checkbox" },
@@ -338,6 +338,7 @@ export const navigationGroups: NavigationGroup[] = [
     items: [
       { slug: "bank-accounts", label: "Banking", icon: "Landmark" },
       { slug: "transactions", label: "Transactions", icon: "ArrowLeftRight" },
+      { slug: "reconciliation", label: "Reconciliation", icon: "ListChecks" },
       { slug: "bank-rules", label: "Bank rules", icon: "ListFilter" },
       { slug: "accounts", label: "Chart of accounts", icon: "ListTree" },
       { slug: "journals", label: "Manual journals", icon: "BookOpenCheck" },

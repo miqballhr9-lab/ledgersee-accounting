@@ -82,7 +82,10 @@ function createDefaults(module: ModuleDefinition, records: BookkeepingRecord[]) 
   }
   if (module.kind === "expenses" || module.kind === "transactions" || module.kind === "journals") values.date = dateString(today);
   if (module.kind === "expenses") values.expenseDate = dateString(today);
-  if (module.kind === "transactions") values.matched = "false";
+  if (module.kind === "transactions") {
+    values.matched = "false";
+    values.type = "Deposit";
+  }
   if (module.kind === "bank-rules" || module.kind === "taxes" || module.kind === "team-members") values.enabled = "true";
   if (module.kind === "team-members") values.canApprove = "false";
   if (module.kind === "bank-accounts") values.currency = settings?.currency || "USD";
