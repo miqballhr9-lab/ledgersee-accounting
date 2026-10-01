@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { CurrencyPicker } from "@/components/bookkeeping/CurrencyPicker";
 import type { ModuleDefinition } from "@/lib/bookkeeping-config";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
 
@@ -87,6 +88,11 @@ export default function RecordEditor({ module, record, defaults, open, onOpenCha
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const missingCurrency = module.fields.find((field) => field.type === "currency" && field.required && !values[field.key]?.trim());
+    if (missingCurrency) {
+      setError(`${missingCurrency.label} is required.`);
+      return;
+    }
     setPending(true);
     setError("");
     try {
@@ -150,6 +156,15 @@ export default function RecordEditor({ module, record, defaults, open, onOpenCha
                         {(field.options ?? []).map((option) => <SelectItem value={option} key={option}>{option}</SelectItem>)}
                       </SelectContent>
                     </Select>
+                  ) : null}
+
+                  {field.type === "currency" ? (
+                    <CurrencyPicker
+                      id={`field-${field.key}`}
+                      value={value}
+                      required={field.required}
+                      onValueChange={(nextValue) => changeValue(field.key, nextValue)}
+                    />
                   ) : null}
 
                   {field.type === "file" ? (

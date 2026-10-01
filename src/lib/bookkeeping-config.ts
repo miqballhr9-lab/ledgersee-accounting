@@ -1,6 +1,6 @@
 import type { RecordKind } from "@/lib/bookkeeping-types";
 
-export type FieldType = "text" | "email" | "number" | "date" | "select" | "textarea" | "checkbox" | "file";
+export type FieldType = "text" | "email" | "number" | "date" | "select" | "currency" | "textarea" | "checkbox" | "file";
 
 export interface FormField {
   key: string;
@@ -83,7 +83,7 @@ export const modules: readonly ModuleDefinition[] = [
       { key: "customer", label: "Customer", required: true },
       { key: "issueDate", label: "Issue date", type: "date" },
       { key: "dueDate", label: "Due date", type: "date" },
-      { key: "currency", label: "Currency", placeholder: "USD" },
+      { key: "currency", label: "Currency", type: "currency" },
       { key: "exchangeRate", label: "Exchange rate", type: "number", placeholder: "1" },
       lineItemsField,
       { key: "taxRate", label: "Tax rate (%)", type: "number" },
@@ -199,7 +199,7 @@ export const modules: readonly ModuleDefinition[] = [
       { key: "name", label: "Account name", required: true },
       { key: "accountType", label: "Type", type: "select", options: ["Bank", "Cash", "Card", "Other"] },
       { key: "institution", label: "Bank or institution" },
-      { key: "currency", label: "Currency", placeholder: "USD" },
+      { key: "currency", label: "Currency", type: "currency" },
       { key: "openingBalance", label: "Opening balance", type: "number" },
     ],
   },
@@ -286,7 +286,7 @@ export const modules: readonly ModuleDefinition[] = [
       { key: "companyName", label: "Company name", required: true },
       { key: "logo", label: "Company logo", type: "file", help: "PNG, JPEG, WebP, or GIF." },
       { key: "address", label: "Business address", type: "textarea" },
-      { key: "currency", label: "Default currency", required: true, placeholder: "USD" },
+      { key: "currency", label: "Default currency", type: "currency", required: true },
       { key: "fiscalYear", label: "Fiscal year starts", type: "select", options: ["January", "April", "July", "October"] },
       { key: "invoicePrefix", label: "Invoice number prefix", placeholder: "INV-" },
       { key: "nextInvoiceNumber", label: "Next invoice number", type: "number" },
