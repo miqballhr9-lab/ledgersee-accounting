@@ -4,6 +4,7 @@ import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowRight, BriefcaseBusiness, LockKeyhole } from "lucide-react";
 
+import LedgerPreview from "@/components/account/LedgerPreview";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -84,6 +85,8 @@ export default function AccountAccess() {
           <p className="mt-2 text-sm leading-6 text-muted-foreground">
             {mode === "sign-in" ? "Sign in to pick up where you left off." : "Start organizing your books in one place."}
           </p>
+
+          <LedgerPreview onCreateAccount={() => { setMode("sign-up"); setMessage(""); }} />
 
           <div className="mt-7 grid grid-cols-2 rounded-lg border border-border bg-muted/70 p-1">
             <button

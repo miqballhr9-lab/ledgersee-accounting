@@ -5,6 +5,7 @@ one_liner: "A small-business bookkeeping workspace for customers, sales, purchas
 audience: "Founders, freelancers, and small operators who need practical finance workflows without a complex setup."
 value_props:
   - "Email and password sign-up/sign-in with records isolated to the signed-in account"
+  - "Read-only sample workspace preview for the dashboard, invoices, and expenses; preview records are not saved"
   - "Dashboard KPIs and monthly income-versus-expense chart based on saved records"
   - "CRUD workspaces for customers, vendors, items, invoices, estimates, sales orders, credit notes, recurring invoices, bills, expenses, purchase orders, banking, accounts, journals, taxes, team roles, and company settings"
   - "Invoice email delivery and payment tracking; estimates and sales orders convert to invoices; purchase orders convert to bills; recurring schedules generate invoices; credit notes apply to invoices"
