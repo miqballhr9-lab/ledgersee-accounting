@@ -48,7 +48,7 @@ function sanitizePayload(input: Record<string, string>): Record<string, string> 
       if (!/^[a-zA-Z][a-zA-Z0-9]*$/.test(key) || typeof value !== "string") {
         throw new Error("One of the values needs to be checked.");
       }
-      return [key, value.trim().slice(0, key === "emailTemplate" ? 12000 : 4000)];
+      return [key, value.trim().slice(0, key === "emailTemplate" ? 12000 : key === "lines" ? 30000 : 4000)];
     }),
   );
 }
@@ -124,7 +124,88 @@ export async function saveBookkeepingRecord(
   if (["invoices", "estimates", "sales-orders", "recurring-invoices", "purchase-orders"].includes(kind) && !data.lineItems?.trim()) {
     throw new Error("Add at least one line item as description | quantity | rate.");
   }
-  if (kind === "journals") {
+  if (kind === "journals" && data.lines) {
+    if (!data.date || !data.reference) throw new Error("Enter the journal date and number.");
+
+    let submittedLines: unknown;
+    try {
+      submittedLines = JSON.parse(data.lines);
+    } catch {
+      throw new Error("Check the journal lines and try again.");
+    }
+    if (!Array.isArray(submittedLines) || submittedLines.length > 50) throw new Error("A journal can include up to 50 lines.");
+
+    const accountRows = await db
+      .select()
+      .from(bookkeepingRecord)
+      .where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "accounts")));
+    const accountsById = new Map(accountRows.map((account) => [account.id, account]));
+    const journalLines: {
+      accountId: string;
+      account: string;
+      accountCode: string;
+      debit: string;
+      credit: string;
+      description: string;
+      name: string;
+    }[] = [];
+    let debitTotalCents = 0;
+    let creditTotalCents = 0;
+
+    for (const [index, entry] of submittedLines.entries()) {
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) throw new Error(`Check journal line ${index + 1}.`);
+      const line = entry as Record<string, unknown>;
+      const accountId = typeof line.accountId === "string" ? line.accountId.trim() : "";
+      const debitText = typeof line.debit === "string" ? line.debit.trim() : "";
+      const creditText = typeof line.credit === "string" ? line.credit.trim() : "";
+      const description = typeof line.description === "string" ? line.description.trim().slice(0, 300) : "";
+      const name = typeof line.name === "string" ? line.name.trim().slice(0, 160) : "";
+      if (!accountId && !debitText && !creditText && !description && !name) continue;
+      if (!accountId) throw new Error(`Choose a chart account for journal line ${index + 1}.`);
+
+      const account = accountsById.get(accountId);
+      if (!account) throw new Error(`The account on journal line ${index + 1} is no longer available.`);
+
+      const debit = Number(debitText || 0);
+      const credit = Number(creditText || 0);
+      if (!Number.isFinite(debit) || !Number.isFinite(credit) || debit < 0 || credit < 0) {
+        throw new Error(`Journal line ${index + 1} must use non-negative amounts.`);
+      }
+      const debitCents = Math.round(debit * 100);
+      const creditCents = Math.round(credit * 100);
+      if (!Number.isSafeInteger(debitCents) || !Number.isSafeInteger(creditCents)) throw new Error("Journal amounts are too large.");
+      if (debitCents === 0 && creditCents === 0) throw new Error(`Enter a debit or credit for journal line ${index + 1}.`);
+      if (debitCents > 0 && creditCents > 0) throw new Error(`Use either debit or credit on journal line ${index + 1}, not both.`);
+
+      const accountName = account.data.name || account.data.code || "Account";
+      const accountCode = account.data.code || "";
+      journalLines.push({
+        accountId,
+        account: accountName,
+        accountCode,
+        debit: (debitCents / 100).toFixed(2),
+        credit: (creditCents / 100).toFixed(2),
+        description,
+        name,
+      });
+      debitTotalCents += debitCents;
+      creditTotalCents += creditCents;
+    }
+
+    if (journalLines.length < 2) throw new Error("Add at least two journal lines.");
+    if (debitTotalCents === 0 || debitTotalCents !== creditTotalCents) throw new Error("Total debits and credits must match.");
+
+    const firstDebit = journalLines.find((line) => Number(line.debit) > 0);
+    const firstCredit = journalLines.find((line) => Number(line.credit) > 0);
+    data = {
+      ...data,
+      lines: JSON.stringify(journalLines),
+      debitAccount: firstDebit?.account ?? "",
+      creditAccount: firstCredit?.account ?? "",
+      amount: (debitTotalCents / 100).toFixed(2),
+      memo: journalLines.map((line) => line.description).filter(Boolean).join(" · ").slice(0, 4000),
+    };
+  } else if (kind === "journals") {
     const amount = Number(data.amount);
     if (!Number.isFinite(amount) || amount <= 0) throw new Error("Journal amounts must be greater than zero.");
     if (data.debitAccount && data.debitAccount === data.creditAccount) throw new Error("Choose different debit and credit accounts.");

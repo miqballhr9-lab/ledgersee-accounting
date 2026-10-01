@@ -22,6 +22,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { type ModuleDefinition } from "@/lib/bookkeeping-config";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
+import JournalEntryEditor from "@/components/bookkeeping/JournalEntryEditor";
 import RecordEditor from "@/components/bookkeeping/RecordEditor";
 import RecordTable, { type RecordActionKind } from "@/components/bookkeeping/RecordTable";
 
@@ -30,6 +31,7 @@ interface ModuleWorkspaceProps {
   records: BookkeepingRecord[];
   customers: BookkeepingRecord[];
   vendors: BookkeepingRecord[];
+  accounts: BookkeepingRecord[];
 }
 
 const pageSize = 10;
@@ -83,6 +85,9 @@ function createDefaults(module: ModuleDefinition, records: BookkeepingRecord[]) 
     values.status = "Open";
   }
   if (module.kind === "expenses" || module.kind === "transactions" || module.kind === "journals") values.date = dateString(today);
+  if (module.kind === "journals") {
+    values.reference = `JRN-${String(records.filter((record) => record.kind === "journals").length + 1).padStart(4, "0")}`;
+  }
   if (module.kind === "expenses") values.expenseDate = dateString(today);
   if (module.kind === "transactions") {
     values.matched = "false";
@@ -114,7 +119,7 @@ function formatCurrency(value: number, currency: string) {
   }
 }
 
-export default function ModuleWorkspace({ module, records: initialRecords, customers, vendors }: ModuleWorkspaceProps) {
+export default function ModuleWorkspace({ module, records: initialRecords, customers, vendors, accounts }: ModuleWorkspaceProps) {
   const router = useRouter();
   const [records, setRecords] = useState(initialRecords);
   const [search, setSearch] = useState("");
@@ -332,17 +337,29 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
         </div>
       </section>
 
-      <RecordEditor
-        key={`${module.kind}-${editingRecord?.id ?? "new"}`}
-        module={module}
-        record={editingRecord}
-        customers={customers}
-        vendors={vendors}
-        defaults={defaults}
-        open={editorOpen}
-        onOpenChange={setEditorOpen}
-        onSaved={handleSaved}
-      />
+      {module.kind === "journals" ? (
+        <JournalEntryEditor
+          key={`journals-${editingRecord?.id ?? "new"}`}
+          accounts={accounts}
+          record={editingRecord}
+          defaults={defaults}
+          open={editorOpen}
+          onOpenChange={setEditorOpen}
+          onSaved={handleSaved}
+        />
+      ) : (
+        <RecordEditor
+          key={`${module.kind}-${editingRecord?.id ?? "new"}`}
+          module={module}
+          record={editingRecord}
+          customers={customers}
+          vendors={vendors}
+          defaults={defaults}
+          open={editorOpen}
+          onOpenChange={setEditorOpen}
+          onSaved={handleSaved}
+        />
+      )}
 
       <Dialog open={Boolean(paymentRecord)} onOpenChange={(open) => { if (!open) setPaymentRecord(null); }}>
         <DialogContent className="sm:max-w-md">

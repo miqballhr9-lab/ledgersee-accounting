@@ -33,6 +33,25 @@ function rowAmount(record: BookkeepingRecord, key = "amount") {
   return Number.isFinite(amount) ? amount : 0;
 }
 
+function journalEntries(value: string | undefined) {
+  if (!value) return [];
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.flatMap((entry) => {
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) return [];
+      const line = entry as Record<string, unknown>;
+      const account = typeof line.account === "string" ? line.account : "";
+      const debit = Number(line.debit ?? 0);
+      const credit = Number(line.credit ?? 0);
+      if (!account || !Number.isFinite(debit) || !Number.isFinite(credit)) return [];
+      return [{ account, debit, credit }];
+    });
+  } catch {
+    return [];
+  }
+}
+
 function recordDate(record: BookkeepingRecord) {
   return record.data.issueDate || record.data.date || record.data.expenseDate || record.data.billDate || record.data.paymentDate || record.createdAt.slice(0, 10);
 }
@@ -122,6 +141,16 @@ function buildReport(key: ReportKey, records: BookkeepingRecord[], asOfDate: str
       });
     });
     records.filter((record) => record.kind === "journals").forEach((journal) => {
+      const entries = journalEntries(journal.data.lines);
+      if (entries.length) {
+        entries.forEach((entry) => {
+          const account = balances.get(entry.account) ?? { type: "Journal", debit: 0, credit: 0 };
+          account.debit += entry.debit;
+          account.credit += entry.credit;
+          balances.set(entry.account, account);
+        });
+        return;
+      }
       const amount = rowAmount(journal);
       const debitName = journal.data.debitAccount || "Unassigned debit";
       const creditName = journal.data.creditAccount || "Unassigned credit";

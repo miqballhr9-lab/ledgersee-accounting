@@ -26,6 +26,7 @@ Founders, freelancers, and small operators who need practical finance workflows 
 - Company settings provide a searchable choice of active global currencies; new invoices and bank accounts inherit the selected default.
 - Invoice, estimate, sales order, credit note, and recurring invoice forms let owners choose from their saved customers, showing company or email details while keeping the customer name on the record.
 - Bill and purchase-order forms let owners choose from saved vendors, showing company or email details while keeping the vendor name on the record.
+- Manual journals support multiple debit and credit lines, account choices from Chart of Accounts, balanced totals, and CSV line import; the Trial Balance includes these entries and remains compatible with older journals.
 
 ## Constraints / must-nots
 This is a working demo, not a substitute for professional accounting or tax advice. Team roles and approval settings are saved in the account’s team directory; they do not invite separate users or enforce different sign-in permissions. Financial summaries reflect the records entered by the account owner.
