@@ -67,6 +67,12 @@ function accountIdForLabel(accounts: BookkeepingRecord[], label: string) {
   })?.id ?? "";
 }
 
+function accountLabel(account: BookkeepingRecord) {
+  const code = account.data.code?.trim();
+  const name = account.data.name?.trim();
+  return code && name ? `${code} ${name}` : name || code || "Account";
+}
+
 function parseCsv(text: string) {
   const rows: string[][] = [];
   let row: string[] = [];
@@ -362,18 +368,20 @@ export default function JournalEntryEditor({ accounts, record, defaults, open, o
                   <TableRow key={line.id}>
                     <TableCell className="border-r border-dotted border-border text-center text-xs text-muted-foreground">{index + 1}</TableCell>
                     <TableCell className="border-r border-dotted border-border">
+                      {(() => {
+                        const selectedAccount = accountOptions.find((account) => account.id === line.accountId);
+                        const selectedLabel = selectedAccount ? accountLabel(selectedAccount) : line.accountId ? "Account unavailable" : undefined;
+                        return (
                       <Select value={line.accountId || undefined} onValueChange={(value) => updateLine(line.id, "accountId", value ?? "")}>
                         <SelectTrigger className="w-full" aria-label={`Account for line ${index + 1}`}>
-                          <SelectValue placeholder={accountOptions.length ? "Choose account" : "Add a chart account first"} />
+                          <SelectValue placeholder={accountOptions.length ? "Choose account" : "Add a chart account first"}>{selectedLabel}</SelectValue>
                         </SelectTrigger>
                         <SelectContent>
-                          {accountOptions.map((account) => {
-                            const code = account.data.code?.trim();
-                            const name = account.data.name?.trim();
-                            return <SelectItem key={account.id} value={account.id}>{code && name ? `${code} ${name}` : name || code || "Account"}</SelectItem>;
-                          })}
+                          {accountOptions.map((account) => <SelectItem key={account.id} value={account.id}>{accountLabel(account)}</SelectItem>)}
                         </SelectContent>
                       </Select>
+                        );
+                      })()}
                     </TableCell>
                     <TableCell className="border-r border-dotted border-border">
                       <Input aria-label={`Debit for line ${index + 1}`} type="number" min="0" step="0.01" value={line.debit} onChange={(event) => updateLine(line.id, "debit", event.target.value)} className="text-right tabular-nums" />
