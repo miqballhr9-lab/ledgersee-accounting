@@ -364,15 +364,18 @@ export default function JournalEntryEditor({ accounts, record, defaults, open, o
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {lines.map((line, index) => (
+                {lines.map((line, index) => {
+                  const selectedAccount = accountOptions.find((account) => account.id === line.accountId);
+                  const selectedLabel = selectedAccount ? accountLabel(selectedAccount) : line.accountId ? "Account unavailable" : undefined;
+                  return (
                   <TableRow key={line.id}>
                     <TableCell className="border-r border-dotted border-border text-center text-xs text-muted-foreground">{index + 1}</TableCell>
                     <TableCell className="border-r border-dotted border-border">
-                      {(() => {
-                        const selectedAccount = accountOptions.find((account) => account.id === line.accountId);
-                        const selectedLabel = selectedAccount ? accountLabel(selectedAccount) : line.accountId ? "Account unavailable" : undefined;
-                        return (
-                      <Select value={line.accountId || undefined} onValueChange={(value) => updateLine(line.id, "accountId", value ?? "")}>
+                      <Select
+                        value={line.accountId || undefined}
+                        items={accountOptions.map((account) => ({ value: account.id, label: accountLabel(account) }))}
+                        onValueChange={(value) => updateLine(line.id, "accountId", value ?? "")}
+                      >
                         <SelectTrigger className="w-full" aria-label={`Account for line ${index + 1}`}>
                           <SelectValue placeholder={accountOptions.length ? "Choose account" : "Add a chart account first"}>{selectedLabel}</SelectValue>
                         </SelectTrigger>
@@ -380,8 +383,6 @@ export default function JournalEntryEditor({ accounts, record, defaults, open, o
                           {accountOptions.map((account) => <SelectItem key={account.id} value={account.id}>{accountLabel(account)}</SelectItem>)}
                         </SelectContent>
                       </Select>
-                        );
-                      })()}
                     </TableCell>
                     <TableCell className="border-r border-dotted border-border">
                       <Input aria-label={`Debit for line ${index + 1}`} type="number" min="0" step="0.01" value={line.debit} onChange={(event) => updateLine(line.id, "debit", event.target.value)} className="text-right tabular-nums" />
@@ -401,7 +402,8 @@ export default function JournalEntryEditor({ accounts, record, defaults, open, o
                       </Button>
                     </TableCell>
                   </TableRow>
-                ))}
+                  );
+                })}
               </TableBody>
               <TableFooter>
                 <TableRow>
