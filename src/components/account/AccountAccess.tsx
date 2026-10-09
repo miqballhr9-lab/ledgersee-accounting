@@ -3,9 +3,10 @@
 import { useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowRight, BriefcaseBusiness, LockKeyhole } from "lucide-react";
+import { ArrowRight, LockKeyhole } from "lucide-react";
 
 import LedgerPreview from "@/components/account/LedgerPreview";
+import BrandWordmark from "@/components/brand/BrandWordmark";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -47,11 +48,8 @@ export default function AccountAccess() {
   return (
     <main className="grid min-h-dvh bg-background lg:grid-cols-[minmax(0,1.1fr)_minmax(440px,0.9fr)]">
       <section className="relative hidden overflow-hidden bg-sidebar px-12 py-10 text-sidebar-foreground lg:flex lg:flex-col lg:justify-between xl:px-20">
-        <div className="brand-lockup flex items-center gap-3">
-          <span className="brand-mark grid size-10 place-items-center rounded-xl bg-sidebar-primary text-sidebar-primary-foreground">
-            <BriefcaseBusiness size={19} strokeWidth={1.8} />
-          </span>
-          <span className="text-[17px] font-semibold tracking-tight">MIKLEDGER</span>
+        <div className="brand-lockup group flex items-center">
+          <BrandWordmark />
         </div>
         <div className="relative z-10 max-w-xl pb-10">
           <p className="mb-5 text-xs font-semibold uppercase tracking-[0.18em] text-sidebar-primary">Business, in balance</p>
@@ -73,11 +71,8 @@ export default function AccountAccess() {
 
       <section className="flex min-h-dvh items-center justify-center px-5 py-10 sm:px-8">
         <div className="w-full max-w-[420px]">
-          <div className="brand-lockup mb-10 flex items-center gap-3 lg:hidden">
-            <span className="brand-mark grid size-10 place-items-center rounded-xl bg-primary text-primary-foreground">
-              <BriefcaseBusiness size={19} strokeWidth={1.8} />
-            </span>
-            <span className="text-[17px] font-semibold tracking-tight">MIKLEDGER</span>
+          <div className="brand-lockup group mb-10 flex items-center lg:hidden">
+            <BrandWordmark />
           </div>
           <p className="text-sm font-medium text-primary">Your business workspace</p>
           <h2 className="mt-2 text-3xl font-semibold tracking-tight">

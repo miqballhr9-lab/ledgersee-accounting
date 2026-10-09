@@ -7,7 +7,6 @@ import {
   ArrowLeftRight,
   BarChart3,
   BookOpenCheck,
-  BriefcaseBusiness,
   ChevronDown,
   ClipboardList,
   ContactRound,
@@ -33,6 +32,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
+import BrandWordmark from "@/components/brand/BrandWordmark";
 import { Button } from "@/components/ui/button";
 import { navigationGroups } from "@/lib/bookkeeping-config";
 import { signOut } from "@/lib/auth-client";
@@ -98,11 +98,8 @@ export default function AppFrame({ userName, userEmail, children }: AppFrameProp
       {menuOpen ? <button type="button" aria-label="Close navigation" className="fixed inset-0 z-30 bg-foreground/30 md:hidden" onClick={() => setMenuOpen(false)} /> : null}
       <aside className={`fixed inset-y-0 left-0 z-40 flex w-[276px] shrink-0 flex-col bg-sidebar text-sidebar-foreground transition-transform duration-200 ease-out md:static md:translate-x-0 ${menuOpen ? "translate-x-0" : "-translate-x-full"}`}>
         <div className="flex h-[68px] items-center justify-between border-b border-sidebar-border px-5">
-          <Link href="/app" className="brand-lockup flex min-w-0 items-center gap-3" onClick={() => setMenuOpen(false)}>
-            <span className="brand-mark grid size-9 shrink-0 place-items-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground">
-              <BriefcaseBusiness size={18} strokeWidth={1.8} />
-            </span>
-            <span className="truncate text-[16px] font-semibold tracking-tight">MIK LEDGER</span>
+          <Link href="/app" className="brand-lockup group flex min-w-0 items-center" onClick={() => setMenuOpen(false)}>
+            <BrandWordmark />
           </Link>
           <Button variant="ghost" size="icon" className="text-sidebar-foreground hover:bg-sidebar-accent md:hidden" onClick={() => setMenuOpen(false)} aria-label="Close menu">
             <X size={18} />

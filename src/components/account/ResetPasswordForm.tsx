@@ -3,8 +3,9 @@
 import { useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, ArrowRight, BriefcaseBusiness, KeyRound } from "lucide-react";
+import { ArrowLeft, ArrowRight, KeyRound } from "lucide-react";
 
+import BrandWordmark from "@/components/brand/BrandWordmark";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -48,9 +49,8 @@ export default function ResetPasswordForm({ token, invalid }: { token: string; i
   return (
     <main className="flex min-h-dvh items-center justify-center bg-background px-5 py-10">
       <section className="w-full max-w-[420px]">
-        <Link href="/" className="brand-lockup mb-10 inline-flex items-center gap-3">
-          <span className="brand-mark grid size-10 place-items-center rounded-xl bg-sidebar text-sidebar-primary"><BriefcaseBusiness size={19} strokeWidth={1.8} /></span>
-          <span className="text-[17px] font-semibold tracking-tight">MIKLEDGER</span>
+        <Link href="/" className="brand-lockup group mb-10 inline-flex items-center">
+          <BrandWordmark />
         </Link>
 
         <div className="mt-4 rounded-xl border border-border bg-card p-6 shadow-sm sm:p-8">

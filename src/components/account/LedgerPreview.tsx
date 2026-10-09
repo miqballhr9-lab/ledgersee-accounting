@@ -6,7 +6,6 @@ import {
   ArrowRight,
   ArrowUpRight,
   Banknote,
-  BriefcaseBusiness,
   CalendarDays,
   ChartNoAxesCombined,
   ChevronDown,
@@ -20,6 +19,7 @@ import {
   Wallet,
 } from "lucide-react";
 
+import BrandWordmark from "@/components/brand/BrandWordmark";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -29,7 +29,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 
- type PreviewSection = "dashboard" | "invoices" | "expenses";
+type PreviewSection = "dashboard" | "invoices" | "expenses";
 
 const navigation: { id: PreviewSection; label: string; icon: typeof LayoutDashboard }[] = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -83,11 +83,11 @@ export default function LedgerPreview({ onCreateAccount }: { onCreateAccount: ()
         className="flex h-[min(900px,calc(100dvh-1rem))] max-h-[calc(100dvh-1rem)] w-[calc(100%-1rem)] max-w-6xl flex-col gap-0 overflow-hidden rounded-xl border border-border bg-background p-0 shadow-2xl sm:h-[min(900px,calc(100dvh-3rem))] sm:max-h-[calc(100dvh-3rem)] sm:w-[calc(100%-3rem)]"
       >
         <header className="flex shrink-0 items-center justify-between gap-4 border-b border-border bg-card px-4 py-3 sm:px-6">
-          <div className="brand-lockup flex min-w-0 items-center gap-3">
-            <span className="brand-mark grid size-9 shrink-0 place-items-center rounded-lg bg-sidebar text-sidebar-primary"><BriefcaseBusiness size={17} /></span>
+          <div className="brand-lockup group flex min-w-0 items-center gap-3">
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                <DialogTitle className="text-sm font-semibold tracking-tight">MIKLEDGER</DialogTitle>
+                <BrandWordmark size="compact" />
+                <DialogTitle className="sr-only">MIK LEDGER sample workspace</DialogTitle>
                 <span className="rounded-full border border-accent bg-accent/60 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-accent-foreground">Sample preview</span>
               </div>
               <DialogDescription className="mt-1 hidden text-xs sm:block">Browse a read-only example workspace. Nothing here is saved.</DialogDescription>
