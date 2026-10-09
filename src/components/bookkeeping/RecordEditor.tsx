@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
-import { LoaderCircle, UploadCloud } from "lucide-react";
+import { LoaderCircle, Plus, Trash2, UploadCloud } from "lucide-react";
 
 import { getAttachmentUploadTarget, saveBookkeepingRecord } from "@/app/actions";
 import { Button } from "@/components/ui/button";
@@ -20,10 +20,19 @@ interface RecordEditorProps {
   record: BookkeepingRecord | null;
   customers: BookkeepingRecord[];
   vendors: BookkeepingRecord[];
+  items: BookkeepingRecord[];
   defaults: Record<string, string>;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSaved: (record: BookkeepingRecord) => void;
+}
+
+interface InvoiceLine {
+  id: string;
+  itemId: string;
+  description: string;
+  quantity: string;
+  rate: string;
 }
 
 function getInitialValues(module: ModuleDefinition, record: BookkeepingRecord | null, defaults: Record<string, string>) {
@@ -45,6 +54,33 @@ function calculateLineTotal(lines: string, taxRate: string, discount: string) {
   return Math.max(0, subtotal + tax - Math.max(0, Number(discount) || 0));
 }
 
+function readInvoiceLines(lines: string, items: BookkeepingRecord[]): InvoiceLine[] {
+  const parsedLines = lines
+    .split("\n")
+    .map((line) => line.split("|"))
+    .filter((parts) => parts.some((part) => part.trim()))
+    .map((parts, index) => {
+      const description = parts[0]?.trim() ?? "";
+      const item = items.find((option) => option.data.name?.trim().toLowerCase() === description.toLowerCase());
+      return {
+        id: `saved-line-${index}`,
+        itemId: item?.id ?? "",
+        description,
+        quantity: parts[1]?.trim() ?? "",
+        rate: parts[2]?.trim() ?? "",
+      };
+    });
+
+  return parsedLines.length ? parsedLines : [{ id: "new-line", itemId: "", description: "", quantity: "", rate: "" }];
+}
+
+function serializeInvoiceLines(lines: InvoiceLine[]): string {
+  return lines
+    .filter((line) => line.itemId || line.description.trim() || line.quantity.trim() || line.rate.trim())
+    .map((line) => `${line.description.trim().replace(/[|\r\n]+/g, " ")} | ${line.quantity.trim()} | ${line.rate.trim()}`)
+    .join("\n");
+}
+
 function formatCurrency(value: number, currency: string) {
   try {
     return new Intl.NumberFormat(undefined, { style: "currency", currency }).format(value);
@@ -53,16 +89,18 @@ function formatCurrency(value: number, currency: string) {
   }
 }
 
-export default function RecordEditor({ module, record, customers, vendors, defaults, open, onOpenChange, onSaved }: RecordEditorProps) {
+export default function RecordEditor({ module, record, customers, vendors, items, defaults, open, onOpenChange, onSaved }: RecordEditorProps) {
   const [values, setValues] = useState<Record<string, string>>(() => getInitialValues(module, record, defaults));
+  const [invoiceLines, setInvoiceLines] = useState<InvoiceLine[]>(() => readInvoiceLines(record?.data.lineItems ?? "", items));
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
   const [uploading, setUploading] = useState<string | null>(null);
 
   useEffect(() => {
     setValues(getInitialValues(module, record, defaults));
+    setInvoiceLines(readInvoiceLines(record?.data.lineItems ?? "", items));
     setError("");
-  }, [defaults, module, record]);
+  }, [defaults, items, module, record]);
 
   function changeValue(key: string, value: string) {
     setValues((current) => ({ ...current, [key]: value }));
@@ -90,6 +128,23 @@ export default function RecordEditor({ module, record, customers, vendors, defau
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const serializedInvoiceLines = serializeInvoiceLines(invoiceLines);
+    if (module.kind === "invoices") {
+      const enteredLines = invoiceLines.filter((line) => line.itemId || line.description.trim() || line.quantity.trim() || line.rate.trim());
+      if (!enteredLines.length) {
+        setError("Add at least one item or service to this invoice.");
+        return;
+      }
+      const invalidLine = enteredLines.findIndex((line) => {
+        const quantity = Number(line.quantity);
+        const rate = Number(line.rate);
+        return !line.description.trim() || !Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(rate) || rate < 0;
+      });
+      if (invalidLine !== -1) {
+        setError(`Check line ${invalidLine + 1}: choose an item or service and enter a quantity and rate.`);
+        return;
+      }
+    }
     const missingCustomer = module.fields.find((field) => field.key === "customer" && field.required && !values.customer?.trim());
     if (missingCustomer) {
       setError(`Choose a saved ${missingCustomer.label.toLowerCase()} before saving.`);
@@ -108,7 +163,8 @@ export default function RecordEditor({ module, record, customers, vendors, defau
     setPending(true);
     setError("");
     try {
-      const saved = await saveBookkeepingRecord(module.kind, record ? { ...record.data, ...values } : values, record?.id);
+      const recordValues = module.kind === "invoices" ? { ...values, lineItems: serializedInvoiceLines } : values;
+      const saved = await saveBookkeepingRecord(module.kind, record ? { ...record.data, ...recordValues } : recordValues, record?.id);
       onSaved(saved);
       onOpenChange(false);
     } catch (saveError) {
@@ -118,7 +174,8 @@ export default function RecordEditor({ module, record, customers, vendors, defau
     }
   }
 
-  const lineTotal = values.lineItems ? calculateLineTotal(values.lineItems, values.taxRate ?? "", values.discount ?? "") : null;
+  const linesValue = module.kind === "invoices" ? serializeInvoiceLines(invoiceLines) : values.lineItems;
+  const lineTotal = linesValue ? calculateLineTotal(linesValue, values.taxRate ?? "", values.discount ?? "") : null;
   const customerOptions = customers.filter((customer) => customer.data.name?.trim());
   const vendorOptions = vendors.filter((vendor) => vendor.data.name?.trim());
 
@@ -147,10 +204,15 @@ export default function RecordEditor({ module, record, customers, vendors, defau
                       <Label htmlFor={`field-${field.key}`} className="cursor-pointer font-normal">{field.label}</Label>
                     </div>
                   ) : (
-                    <Label htmlFor={`field-${field.key}`}>{field.label}{field.required ? <span className="ml-1 text-destructive">*</span> : null}</Label>
+                    <Label
+                      id={module.kind === "invoices" && field.key === "lineItems" ? "invoice-line-items-label" : undefined}
+                      htmlFor={`field-${field.key}`}
+                    >
+                      {field.label}{field.required ? <span className="ml-1 text-destructive">*</span> : null}
+                    </Label>
                   )}
 
-                  {field.type === "textarea" ? (
+                  {field.type === "textarea" && !(module.kind === "invoices" && field.key === "lineItems") ? (
                     <Textarea
                       id={`field-${field.key}`}
                       value={value}
@@ -159,6 +221,107 @@ export default function RecordEditor({ module, record, customers, vendors, defau
                       required={field.required}
                       rows={field.key === "lineItems" ? 4 : 3}
                     />
+                  ) : null}
+
+                  {module.kind === "invoices" && field.key === "lineItems" ? (
+                    <div className="space-y-3" role="group" aria-labelledby="invoice-line-items-label">
+                      {invoiceLines.map((line, index) => (
+                        <div key={line.id} className="grid min-w-0 grid-cols-2 items-end gap-3 rounded-lg border border-border bg-card p-3 sm:grid-cols-[minmax(0,1fr)_5rem_7rem_2.75rem]">
+                          <div className="col-span-2 min-w-0 space-y-1.5 sm:col-span-1">
+                            <Label htmlFor={`invoice-item-${line.id}`} className="text-xs text-muted-foreground">Item or service</Label>
+                            <Select
+                              value={line.itemId || undefined}
+                              onValueChange={(itemId) => {
+                                const item = items.find((option) => option.id === itemId);
+                                if (!item) return;
+                                setInvoiceLines((current) => current.map((currentLine) => currentLine.id === line.id
+                                  ? {
+                                      ...currentLine,
+                                      itemId: item.id,
+                                      description: item.data.name?.trim() ?? "",
+                                      quantity: currentLine.quantity || "1",
+                                      rate: item.data.rate ?? "0",
+                                    }
+                                  : currentLine));
+                              }}
+                            >
+                              <SelectTrigger id={`invoice-item-${line.id}`} className="w-full" disabled={!items.length}>
+                                <SelectValue placeholder={items.length ? "Choose item or service" : "Add an item or service first"} />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {items.filter((item) => item.data.name?.trim()).map((item) => {
+                                  const itemName = item.data.name.trim();
+                                  const itemType = item.data.itemType || "Item";
+                                  const rate = Number(item.data.rate) || 0;
+                                  const unit = item.data.unit?.trim();
+                                  return (
+                                    <SelectItem value={item.id} key={item.id}>
+                                      {itemName} · {itemType} · {formatCurrency(rate, values.currency || "USD")}{unit ? ` / ${unit}` : ""}
+                                    </SelectItem>
+                                  );
+                                })}
+                              </SelectContent>
+                            </Select>
+                            {line.description && !line.itemId ? (
+                              <p className="truncate text-xs text-muted-foreground">Saved description: {line.description}</p>
+                            ) : null}
+                          </div>
+                          <div className="min-w-0 space-y-1.5">
+                            <Label htmlFor={`invoice-quantity-${line.id}`} className="text-xs text-muted-foreground">Quantity</Label>
+                            <Input
+                              id={`invoice-quantity-${line.id}`}
+                              type="number"
+                              min="0.01"
+                              step="any"
+                              inputMode="decimal"
+                              value={line.quantity}
+                              onChange={(event) => setInvoiceLines((current) => current.map((currentLine) => currentLine.id === line.id ? { ...currentLine, quantity: event.target.value } : currentLine))}
+                              placeholder="1"
+                            />
+                          </div>
+                          <div className="min-w-0 space-y-1.5">
+                            <Label htmlFor={`invoice-rate-${line.id}`} className="text-xs text-muted-foreground">Rate</Label>
+                            <Input
+                              id={`invoice-rate-${line.id}`}
+                              type="number"
+                              min="0"
+                              step="any"
+                              inputMode="decimal"
+                              value={line.rate}
+                              onChange={(event) => setInvoiceLines((current) => current.map((currentLine) => currentLine.id === line.id ? { ...currentLine, rate: event.target.value } : currentLine))}
+                              placeholder="0.00"
+                            />
+                          </div>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            aria-label={`Remove line ${index + 1}`}
+                            onClick={() => setInvoiceLines((current) => current.filter((currentLine) => currentLine.id !== line.id))}
+                            className="col-span-2 size-11 justify-self-end text-muted-foreground hover:text-destructive sm:col-span-1"
+                          >
+                            <Trash2 size={16} strokeWidth={1.75} />
+                          </Button>
+                        </div>
+                      ))}
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setInvoiceLines((current) => [...current, {
+                          id: crypto.randomUUID(),
+                          itemId: "",
+                          description: "",
+                          quantity: "",
+                          rate: "",
+                        }])}
+                        className="min-h-11 gap-2"
+                      >
+                        <Plus size={16} strokeWidth={1.75} />
+                        Add line
+                      </Button>
+                      {!items.length ? <p className="text-xs leading-5 text-muted-foreground">Create an item or service in Items & services, then select it here.</p> : null}
+                    </div>
                   ) : null}
 
                   {field.key === "customer" ? (
@@ -259,7 +422,7 @@ export default function RecordEditor({ module, record, customers, vendors, defau
                     />
                   ) : null}
 
-                  {field.help && field.type !== "file" && field.type !== "checkbox" ? <p className="text-xs leading-5 text-muted-foreground">{field.help}</p> : null}
+                  {field.help && field.type !== "file" && field.type !== "checkbox" && !(module.kind === "invoices" && field.key === "lineItems") ? <p className="text-xs leading-5 text-muted-foreground">{field.help}</p> : null}
                   {field.key === "lineItems" && lineTotal !== null ? (
                     <p className="flex justify-between rounded-md bg-accent/60 px-3 py-2 text-xs text-accent-foreground">
                       <span>Calculated total</span>

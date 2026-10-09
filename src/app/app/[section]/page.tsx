@@ -34,7 +34,7 @@ export default async function SectionPage({ params }: SectionPageProps) {
     return <ChartOfAccountsWorkspace accounts={accounts} currency={settings[0]?.data.currency || "USD"} />;
   }
 
-  const [records, customers, vendors, accounts] = await Promise.all([
+  const [records, customers, vendors, accounts, items] = await Promise.all([
     listBookkeepingRecords(module.kind),
     module.fields.some((field) => field.key === "customer")
       ? listBookkeepingRecords("customers")
@@ -43,6 +43,7 @@ export default async function SectionPage({ params }: SectionPageProps) {
       ? listBookkeepingRecords("vendors")
       : Promise.resolve([]),
     module.kind === "journals" ? listBookkeepingRecords("accounts") : Promise.resolve([]),
+    module.kind === "invoices" ? listBookkeepingRecords("items") : Promise.resolve([]),
   ]);
-  return <ModuleWorkspace module={module} records={records} customers={customers} vendors={vendors} accounts={accounts} />;
+  return <ModuleWorkspace module={module} records={records} customers={customers} vendors={vendors} accounts={accounts} items={items} />;
 }

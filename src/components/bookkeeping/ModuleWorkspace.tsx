@@ -32,6 +32,7 @@ interface ModuleWorkspaceProps {
   customers: BookkeepingRecord[];
   vendors: BookkeepingRecord[];
   accounts: BookkeepingRecord[];
+  items: BookkeepingRecord[];
 }
 
 const pageSize = 10;
@@ -119,7 +120,7 @@ function formatCurrency(value: number, currency: string) {
   }
 }
 
-export default function ModuleWorkspace({ module, records: initialRecords, customers, vendors, accounts }: ModuleWorkspaceProps) {
+export default function ModuleWorkspace({ module, records: initialRecords, customers, vendors, accounts, items }: ModuleWorkspaceProps) {
   const router = useRouter();
   const [records, setRecords] = useState(initialRecords);
   const [search, setSearch] = useState("");
@@ -354,6 +355,7 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
           record={editingRecord}
           customers={customers}
           vendors={vendors}
+          items={items}
           defaults={defaults}
           open={editorOpen}
           onOpenChange={setEditorOpen}
