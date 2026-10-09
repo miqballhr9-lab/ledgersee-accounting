@@ -1,13 +1,14 @@
 "use client";
 
-import { useEffect, useRef, useState, type FormEvent, type MouseEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import Link from "next/link";
-import { LoaderCircle, Plus, Printer, Share2, Trash2, UploadCloud } from "lucide-react";
+import { ChevronDown, Copy, LoaderCircle, Mail, MessageCircle, MessageSquareText, Plus, Printer, Share2, Trash2, UploadCloud } from "lucide-react";
 
 import { createInvoiceShareLink, getAttachmentUploadTarget, saveBookkeepingRecord, sendInvoiceRecord } from "@/app/actions";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -27,6 +28,7 @@ interface RecordEditorProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSaved: (record: BookkeepingRecord) => void;
+  onSaveComplete: (record: BookkeepingRecord, intent: "save-and-new" | "save-and-copy") => Promise<void>;
 }
 
 interface InvoiceLine {
@@ -76,7 +78,7 @@ function serializeInvoiceLines(lines: InvoiceLine[]): string {
     .map((line) => ({ ...line, name: line.name.trim(), description: line.description.trim() })));
 }
 
-export default function RecordEditor({ module, record, customers, vendors, items, defaults, open, onOpenChange, onSaved }: RecordEditorProps) {
+export default function RecordEditor({ module, record, customers, vendors, items, defaults, open, onOpenChange, onSaved, onSaveComplete }: RecordEditorProps) {
   const [values, setValues] = useState<Record<string, string>>(() => getInitialValues(module, record, defaults));
   const [invoiceLines, setInvoiceLines] = useState<InvoiceLine[]>(() => readInvoiceLines(record?.data.lineItems ?? "", items));
   const [savedRecordId, setSavedRecordId] = useState<string | null>(record?.id ?? null);
@@ -86,7 +88,11 @@ export default function RecordEditor({ module, record, customers, vendors, items
   const [pending, setPending] = useState(false);
   const [uploading, setUploading] = useState<string | null>(null);
   const [sharing, setSharing] = useState(false);
-  const [sendMethod, setSendMethod] = useState("email");
+  const formRef = useRef<HTMLFormElement>(null);
+  const sendSubmitRef = useRef<HTMLButtonElement>(null);
+  const saveNewSubmitRef = useRef<HTMLButtonElement>(null);
+  const saveCopySubmitRef = useRef<HTMLButtonElement>(null);
+  const sendMethod = useRef("email");
   const sendWindow = useRef<Window | null>(null);
 
   useEffect(() => {
@@ -96,7 +102,7 @@ export default function RecordEditor({ module, record, customers, vendors, items
     setError("");
     setNotice("");
     setShareLink("");
-    setSendMethod("email");
+    sendMethod.current = "email";
     sendWindow.current = null;
   }, [defaults, items, module, record]);
 
@@ -151,16 +157,23 @@ export default function RecordEditor({ module, record, customers, vendors, items
     }
   }
 
-  function prepareExternalSend(event: MouseEvent<HTMLButtonElement>) {
-    if (sendMethod === "email") return;
-    const openedWindow = window.open("about:blank", "_blank");
-    if (!openedWindow) {
-      event.preventDefault();
-      setError("Allow pop-ups to open the message app, then try again.");
-      return;
+  function submitWithIntent(button: HTMLButtonElement | null) {
+    if (button) formRef.current?.requestSubmit(button);
+  }
+
+  function startInvoiceSend(method: "email" | "whatsapp" | "sms") {
+    sendMethod.current = method;
+    setError("");
+    if (method !== "email") {
+      const openedWindow = window.open("about:blank", "_blank");
+      if (!openedWindow) {
+        setError("Allow pop-ups to open the message app, then try again.");
+        return;
+      }
+      openedWindow.opener = null;
+      sendWindow.current = openedWindow;
     }
-    openedWindow.opener = null;
-    sendWindow.current = openedWindow;
+    submitWithIntent(sendSubmitRef.current);
   }
 
   function closePreparedMessage() {
@@ -171,7 +184,8 @@ export default function RecordEditor({ module, record, customers, vendors, items
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const submitter = (event.nativeEvent as SubmitEvent).submitter;
-    const shouldSend = module.kind === "invoices" && submitter instanceof HTMLButtonElement && submitter.value === "save-and-send";
+    const intent = submitter instanceof HTMLButtonElement ? submitter.value : "save-and-close";
+    const shouldSend = module.kind === "invoices" && intent === "save-and-send";
     const serializedInvoiceLines = serializeInvoiceLines(invoiceLines);
     if (module.kind === "invoices") {
       const enteredLines = invoiceLines.filter((line) => line.itemId || line.name.trim() || line.description.trim() || line.quantity.trim() || line.rate.trim());
@@ -209,7 +223,7 @@ export default function RecordEditor({ module, record, customers, vendors, items
       setError(`${missingCurrency.label} is required.`);
       return;
     }
-    if (shouldSend && sendMethod !== "email") {
+    if (shouldSend && sendMethod.current !== "email") {
       const recipient = customerOptions.find((customer) => customer.id === values.customerId || customer.id === values.customer)
         ?? customerOptions.find((customer) => customer.data.name?.trim().toLowerCase() === values.customer?.trim().toLowerCase());
       const phoneDigits = recipient?.data.phone?.replace(/\D/g, "") ?? "";
@@ -240,7 +254,7 @@ export default function RecordEditor({ module, record, customers, vendors, items
       onSaved(saved);
       if (shouldSend) {
         try {
-          if (sendMethod === "email") {
+          if (sendMethod.current === "email") {
             const shareToken = await sendInvoiceRecord(saved.id);
             onSaved({ ...saved, data: { ...saved.data, shareToken, status: "Sent" } });
             setNotice("Invoice emailed to the customer.");
@@ -251,7 +265,7 @@ export default function RecordEditor({ module, record, customers, vendors, items
             const phoneDigits = phone.replace(/\D/g, "");
             const invoiceLink = await createInvoiceShareLink(saved.id);
             const message = `Hello ${recipient?.data.name || "there"}, invoice ${saved.data.invoiceNumber || ""} for ${saved.data.amount || "0"} ${saved.data.currency || ""} is ready: ${invoiceLink}`;
-            const destination = sendMethod === "whatsapp"
+            const destination = sendMethod.current === "whatsapp"
               ? `https://wa.me/${phoneDigits}?text=${encodeURIComponent(message)}`
               : `sms:${phone.replace(/[^\d+]/g, "")}?body=${encodeURIComponent(message)}`;
             const openedWindow = sendWindow.current;
@@ -259,7 +273,7 @@ export default function RecordEditor({ module, record, customers, vendors, items
             openedWindow.location.href = destination;
             sendWindow.current = null;
             setShareLink(invoiceLink);
-            setNotice(`${sendMethod === "whatsapp" ? "WhatsApp" : "SMS"} opened with the invoice message ready. Send it from that app to finish.`);
+            setNotice(`${sendMethod.current === "whatsapp" ? "WhatsApp" : "SMS"} opened with the invoice message ready. Send it from that app to finish.`);
             onSaved({ ...saved, data: { ...saved.data, shareToken: invoiceLink.split("/").at(-1) || "" } });
             return;
           }
@@ -270,7 +284,11 @@ export default function RecordEditor({ module, record, customers, vendors, items
           return;
         }
       }
-      onOpenChange(false);
+      if (intent === "save-and-new" || intent === "save-and-copy") {
+        await onSaveComplete(saved, intent);
+      } else {
+        onOpenChange(false);
+      }
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : "We couldn’t save this record. Please try again.");
     } finally {
@@ -296,7 +314,14 @@ export default function RecordEditor({ module, record, customers, vendors, items
           <DialogDescription>{module.description}</DialogDescription>
         </DialogHeader>
 
-        <form id="record-editor-form" onSubmit={submit} className="space-y-5">
+        <form ref={formRef} id="record-editor-form" onSubmit={submit} className="space-y-5">
+          {module.kind === "invoices" ? (
+            <>
+              <button ref={sendSubmitRef} type="submit" name="intent" value="save-and-send" className="hidden" tabIndex={-1} aria-hidden="true" />
+              <button ref={saveNewSubmitRef} type="submit" name="intent" value="save-and-new" className="hidden" tabIndex={-1} aria-hidden="true" />
+              <button ref={saveCopySubmitRef} type="submit" name="intent" value="save-and-copy" className="hidden" tabIndex={-1} aria-hidden="true" />
+            </>
+          ) : null}
           <div className="grid gap-x-5 gap-y-4 sm:grid-cols-2">
             {module.fields.map((field) => {
               const value = values[field.key] ?? "";
@@ -471,7 +496,9 @@ export default function RecordEditor({ module, record, customers, vendors, items
                         }}
                       >
                         <SelectTrigger id={`field-${field.key}`} className="w-full" aria-required={field.required}>
-                          <SelectValue placeholder={customerOptions.length ? "Choose a customer" : "Add a customer first"} />
+                          <SelectValue placeholder={customerOptions.length ? "Choose a customer" : "Add a customer first"}>
+                            {selectedCustomer?.data.name?.trim() || undefined}
+                          </SelectValue>
                         </SelectTrigger>
                         <SelectContent>
                           {customerOptions.map((customer) => {
@@ -583,27 +610,39 @@ export default function RecordEditor({ module, record, customers, vendors, items
               <Button type="button" nativeButton={false} variant="outline" render={<Link href={`/app/invoices/${savedRecordId}/print`} target="_blank" rel="noreferrer" />}><Printer size={15} />Print / PDF</Button>
             </>
           ) : null}
-          <Button type="submit" form="record-editor-form" disabled={pending || Boolean(uploading)}>
-            {pending ? "Saving…" : record ? "Save changes" : `Save ${module.label.toLowerCase()}`}
-          </Button>
           {module.kind === "invoices" ? (
-            <div className="flex min-w-0 items-end gap-2">
-              <div className="grid min-w-[132px] gap-1">
-                <Label htmlFor="invoice-send-method" className="text-[11px] text-muted-foreground">Send via</Label>
-                <Select value={sendMethod} onValueChange={(value) => setSendMethod(value ?? "email")}>
-                  <SelectTrigger id="invoice-send-method" className="w-32"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="email">Email</SelectItem>
-                    <SelectItem value="whatsapp">WhatsApp</SelectItem>
-                    <SelectItem value="sms">SMS</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <Button type="submit" name="intent" value="save-and-send" form="record-editor-form" disabled={pending || Boolean(uploading)} onClick={prepareExternalSend}>
-                {pending ? "Saving…" : "Save and send"}
-              </Button>
-            </div>
-          ) : null}
+            <>
+              {savedRecordId ? (
+                <Button type="button" variant="outline" disabled={pending || Boolean(uploading)} onClick={() => submitWithIntent(saveCopySubmitRef.current)}>
+                  <Copy size={15} />Copy invoice
+                </Button>
+              ) : null}
+              <DropdownMenu>
+                <DropdownMenuTrigger render={<Button type="button" variant="outline" disabled={pending || Boolean(uploading)} /> }>
+                  {pending ? "Saving…" : "Save invoice"}<ChevronDown size={15} />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={() => submitWithIntent(saveNewSubmitRef.current)}>Save and new</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => formRef.current?.requestSubmit()}>Save and close</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => submitWithIntent(saveCopySubmitRef.current)}>Save and copy</DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+              <DropdownMenu>
+                <DropdownMenuTrigger render={<Button type="button" disabled={pending || Boolean(uploading)} /> }>
+                  <Share2 size={15} />{pending ? "Saving…" : "Save and send"}<ChevronDown size={15} />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={() => startInvoiceSend("email")}><Mail size={15} />Email</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => startInvoiceSend("whatsapp")}><MessageCircle size={15} />WhatsApp</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => startInvoiceSend("sms")}><MessageSquareText size={15} />SMS</DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </>
+          ) : (
+            <Button type="submit" form="record-editor-form" disabled={pending || Boolean(uploading)}>
+              {pending ? "Saving…" : record ? "Save changes" : `Save ${module.label.toLowerCase()}`}
+            </Button>
+          )}
           {module.kind === "invoices" ? <p className="w-full text-right text-xs text-muted-foreground">Email sends directly; WhatsApp and SMS open a message for you to send.</p> : null}
         </DialogFooter>
       </DialogContent>

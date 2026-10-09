@@ -194,6 +194,24 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
     router.refresh();
   }
 
+  async function handleInvoiceSaveComplete(record: BookkeepingRecord, intent: "save-and-new" | "save-and-copy") {
+    if (intent === "save-and-new") {
+      const nextRecords = [record, ...records.filter((item) => item.id !== record.id)];
+      setEditingRecord(null);
+      setDefaults(createDefaults(module, nextRecords));
+      setActionMessage("");
+      setEditorOpen(true);
+      return;
+    }
+
+    const copy = await duplicateInvoiceRecord(record.id);
+    handleSaved(copy);
+    setEditingRecord(copy);
+    setDefaults({});
+    setActionMessage("Invoice copied as a draft with a new invoice number.");
+    setEditorOpen(true);
+  }
+
   async function handleDelete(record: BookkeepingRecord) {
     const title = record.data[module.titleKey] || module.label.toLowerCase();
     if (!window.confirm(`Delete “${title}”? This can’t be undone.`)) return;
@@ -389,6 +407,7 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
           open={editorOpen}
           onOpenChange={setEditorOpen}
           onSaved={handleSaved}
+          onSaveComplete={handleInvoiceSaveComplete}
         />
       )}
 
