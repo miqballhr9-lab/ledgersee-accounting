@@ -3,7 +3,7 @@
 import { useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowRight, LockKeyhole } from "lucide-react";
+import { ArrowRight, Eye, EyeOff, LockKeyhole } from "lucide-react";
 
 import LedgerPreview from "@/components/account/LedgerPreview";
 import BrandWordmark from "@/components/brand/BrandWordmark";
@@ -19,6 +19,7 @@ export default function AccountAccess() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [message, setMessage] = useState("");
   const [isPending, setIsPending] = useState(false);
 
@@ -119,15 +120,30 @@ export default function AccountAccess() {
                   <Link href="/auth/forgot-password" className="text-xs font-medium text-primary hover:underline">Forgot password?</Link>
                 ) : null}
               </div>
-              <Input
-                id="password"
-                type="password"
-                autoComplete={mode === "sign-in" ? "current-password" : "new-password"}
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                minLength={8}
-                required
-              />
+              <div className="relative">
+                <Input
+                  id="password"
+                  type={showPassword ? "text" : "password"}
+                  autoComplete={mode === "sign-in" ? "current-password" : "new-password"}
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  minLength={8}
+                  required
+                  className="h-11 pr-12"
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                  aria-pressed={showPassword}
+                  aria-controls="password"
+                  onClick={() => setShowPassword((visible) => !visible)}
+                  className="absolute right-0 top-0 size-11 text-muted-foreground hover:text-foreground"
+                >
+                  {showPassword ? <EyeOff size={18} strokeWidth={1.75} /> : <Eye size={18} strokeWidth={1.75} />}
+                </Button>
+              </div>
             </div>
             {message ? <p role="alert" className="rounded-md border border-destructive/20 bg-destructive/5 px-3 py-2.5 text-sm text-destructive">{message}</p> : null}
             <Button type="submit" className="h-10 w-full gap-2" disabled={isPending}>
