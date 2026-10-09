@@ -87,6 +87,19 @@ function serializeInvoiceLines(lines: InvoiceLine[]): string {
     .map((line) => ({ ...line, name: line.name.trim(), description: line.description.trim() })));
 }
 
+function catalogItemLabel(item: BookkeepingRecord, currency: string): string {
+  const itemName = item.data.name?.trim() ?? "";
+  const itemType = item.data.itemType || "Item";
+  const rate = Number(item.data.rate) || 0;
+  const unit = item.data.unit?.trim();
+  return `${itemName} · ${itemType} · ${currencyAmount(rate, currency)}${unit ? ` / ${unit}` : ""}`;
+}
+
+function selectedCatalogItemLabel(items: BookkeepingRecord[], itemId: string, currency: string, fallbackName: string): string | undefined {
+  const item = items.find((option) => option.id === itemId);
+  return item ? catalogItemLabel(item, currency) : fallbackName || undefined;
+}
+
 export default function RecordEditor({ module, record, customers, vendors, items, defaults, open, onOpenChange, onSaved, onSaveComplete }: RecordEditorProps) {
   const [values, setValues] = useState<Record<string, string>>(() => getInitialValues(module, record, defaults));
   const [invoiceLines, setInvoiceLines] = useState<InvoiceLine[]>(() => readInvoiceLines(record?.data.lineItems ?? "", items));
@@ -405,17 +418,15 @@ export default function RecordEditor({ module, record, customers, vendors, items
                               }}
                             >
                               <SelectTrigger id={`invoice-item-${line.id}`} className="w-full" disabled={!availableItems.length}>
-                                <SelectValue placeholder={availableItems.length ? "Choose item or service" : "Add an item or service first"} />
+                                <SelectValue placeholder={availableItems.length ? "Choose item or service" : "Add an item or service first"}>
+                                  {selectedCatalogItemLabel(availableItems, line.itemId, values.currency || "USD", line.name)}
+                                </SelectValue>
                               </SelectTrigger>
                               <SelectContent>
                                 {availableItems.map((item) => {
-                                  const itemName = item.data.name.trim();
-                                  const itemType = item.data.itemType || "Item";
-                                  const rate = Number(item.data.rate) || 0;
-                                  const unit = item.data.unit?.trim();
                                   return (
                                     <SelectItem value={item.id} key={item.id}>
-                                      {itemName} · {itemType} · {currencyAmount(rate, values.currency || "USD")}{unit ? ` / ${unit}` : ""}
+                                      {catalogItemLabel(item, values.currency || "USD")}
                                     </SelectItem>
                                   );
                                 })}
