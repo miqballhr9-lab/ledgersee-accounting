@@ -26,7 +26,7 @@ Founders, freelancers, and small operators who need practical finance workflows 
 - Company settings provide a searchable choice of active global currencies; new invoices and bank accounts inherit the selected default.
 - Invoice, estimate, sales order, credit note, and recurring invoice forms let owners choose from their saved customers, showing company or email details while keeping the customer name on the record.
 - Invoice forms let owners choose saved items and services, add or remove line rows, adjust quantities and rates, and preview calculated totals.
-- Invoices support per-line descriptions, subtotal/tax/discount/total breakdowns, due-on-receipt or 15/30/60-day terms, duplicate drafts, email sharing links, and print/PDF views.
+- Invoices support per-line descriptions, subtotal/tax/discount/total breakdowns, due-on-receipt or 15/30/60-day terms, duplicate drafts, email sharing links, print/PDF views, and delivery by email or a prepared WhatsApp/SMS message.
 - Bill and purchase-order forms let owners choose from saved vendors, showing company or email details while keeping the vendor name on the record.
 - Manual journals support multiple debit and credit lines, account choices from Chart of Accounts, balanced totals, and CSV line import; the Trial Balance includes these entries and remains compatible with older journals.
 - Chart of Accounts has searchable and type-filtered account rows, opening-balance visibility, and a dedicated side panel for account details, sub-accounts, and locking; accounts used by journal entries cannot be deleted.
