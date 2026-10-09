@@ -106,6 +106,7 @@ export const modules: readonly ModuleDefinition[] = [
       { key: "taxRate", label: "Tax rate (%)", type: "number" },
       { key: "discount", label: "Discount amount", type: "number" },
       { key: "status", label: "Status", type: "select", options: ["Draft", "Sent", "Accepted", "Declined", "Converted"] },
+      { key: "attachment", label: "Attachment", type: "file", help: "Attach a PDF, image, or CSV up to 10 MB." },
     ],
   },
   {
@@ -120,6 +121,7 @@ export const modules: readonly ModuleDefinition[] = [
       lineItemsField,
       { key: "taxRate", label: "Tax rate (%)", type: "number" },
       { key: "status", label: "Status", type: "select", options: ["Draft", "Confirmed", "Fulfilled", "Converted", "Cancelled"] },
+      { key: "attachment", label: "Attachment", type: "file", help: "Attach a PDF, image, or CSV up to 10 MB." },
     ],
   },
   {
@@ -134,6 +136,7 @@ export const modules: readonly ModuleDefinition[] = [
       { key: "amount", label: "Credit amount", type: "number", required: true },
       { key: "reason", label: "Reason", type: "textarea" },
       { key: "status", label: "Status", type: "select", options: ["Draft", "Applied", "Refunded"] },
+      { key: "attachment", label: "Attachment", type: "file", help: "Attach a PDF, image, or CSV up to 10 MB." },
     ],
   },
   {
