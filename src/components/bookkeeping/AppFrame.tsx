@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
+  ArrowLeft,
   ArrowLeftRight,
   BarChart3,
   BookOpenCheck,
@@ -93,6 +94,14 @@ export default function AppFrame({ userName, userEmail, children }: AppFrameProp
     }
   }
 
+  function handleBack() {
+    if (window.history.length > 1) {
+      router.back();
+    } else {
+      router.push(pathname === "/app" ? "/" : "/app");
+    }
+  }
+
   return (
     <div className="flex h-dvh min-h-[560px] overflow-hidden bg-background text-foreground">
       {menuOpen ? <button type="button" aria-label="Close navigation" className="fixed inset-0 z-30 bg-foreground/30 md:hidden" onClick={() => setMenuOpen(false)} /> : null}
@@ -160,6 +169,9 @@ export default function AppFrame({ userName, userEmail, children }: AppFrameProp
           <div className="flex min-w-0 items-center gap-3">
             <Button variant="ghost" size="icon" className="-ml-2 md:hidden" onClick={() => setMenuOpen(true)} aria-label="Open navigation">
               <Menu size={19} />
+            </Button>
+            <Button variant="ghost" size="icon" className="shrink-0 text-muted-foreground hover:text-foreground" onClick={handleBack} aria-label="Go back" title="Go back">
+              <ArrowLeft size={19} strokeWidth={1.75} />
             </Button>
             <div className="min-w-0">
               <p className="truncate text-[11px] font-medium text-muted-foreground">MIK LEDGER / {activeLabel}</p>
