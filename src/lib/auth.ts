@@ -15,6 +15,7 @@ import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { genericOAuth, magicLink } from "better-auth/plugins";
 import { headers } from "next/headers";
+import { cache } from "react";
 
 import { db } from "@/db";
 import * as schema from "@/db/schema";
@@ -269,10 +270,10 @@ export const auth = betterAuth({
 });
 
 /** The signed-in user, or null. Safe in server components and server actions. */
-export async function getUser() {
+export const getUser = cache(async function getUser() {
   const result = await auth.api.getSession({ headers: await headers() });
   return result?.user ?? null;
-}
+});
 
 /**
  * The signed-in user, or throw.
