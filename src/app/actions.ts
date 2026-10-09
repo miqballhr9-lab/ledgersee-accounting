@@ -791,6 +791,126 @@ export async function createInvoiceShareLink(id: string): Promise<string> {
   return `${await siteUrl()}/invoice/${shareToken}`;
 }
 
+type CustomerDocumentKind = Extract<RecordKind, "estimates" | "sales-orders" | "credit-notes">;
+
+const customerDocumentDetails: Record<CustomerDocumentKind, { label: string; numberKey: string }> = {
+  estimates: { label: "Estimate", numberKey: "estimateNumber" },
+  "sales-orders": { label: "Sales order", numberKey: "orderNumber" },
+  "credit-notes": { label: "Credit note", numberKey: "creditNumber" },
+};
+
+export async function createCustomerDocumentShareLink(id: string, kind: CustomerDocumentKind): Promise<string> {
+  const me = await requireUser();
+  const [document] = await db
+    .select()
+    .from(bookkeepingRecord)
+    .where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, kind), eq(bookkeepingRecord.id, id)))
+    .limit(1);
+  if (!document) throw new Error(`We couldn’t find that ${customerDocumentDetails[kind].label.toLowerCase()}. Refresh and try again.`);
+
+  const shareToken = document.data.shareToken || randomBytes(32).toString("hex");
+  if (shareToken !== document.data.shareToken) {
+    await db
+      .update(bookkeepingRecord)
+      .set({ data: { ...document.data, shareToken }, updatedAt: new Date() })
+      .where(and(eq(bookkeepingRecord.id, document.id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, kind)));
+  }
+  revalidatePath("/app", "layout");
+  return `${await siteUrl()}/invoice/${shareToken}`;
+}
+
+export async function sendCustomerDocumentRecord(id: string, kind: CustomerDocumentKind): Promise<string> {
+  const me = await requireUser();
+  const [document] = await db
+    .select()
+    .from(bookkeepingRecord)
+    .where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, kind), eq(bookkeepingRecord.id, id)))
+    .limit(1);
+  if (!document) throw new Error(`We couldn’t find that ${customerDocumentDetails[kind].label.toLowerCase()}. Refresh and try again.`);
+
+  const customers = await db
+    .select()
+    .from(bookkeepingRecord)
+    .where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "customers")));
+  const customer = customers.find((row) => row.id === document.data.customerId || row.id === document.data.customer)
+    ?? customers.find((row) => row.data.name?.trim().toLowerCase() === document.data.customer?.trim().toLowerCase());
+  if (!customer?.data.email) throw new Error("Add an email address to this customer before sending.");
+
+  const details = customerDocumentDetails[kind];
+  const [settings] = await db
+    .select()
+    .from(bookkeepingRecord)
+    .where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "settings")))
+    .orderBy(desc(bookkeepingRecord.updatedAt))
+    .limit(1);
+  const company = settings?.data.companyName || me.name;
+  const shareToken = document.data.shareToken || randomBytes(32).toString("hex");
+  const documentLink = `${await siteUrl()}/invoice/${shareToken}`;
+  const number = document.data[details.numberKey] || "";
+  const customerName = customer.data.name || "there";
+  const escapeHtml = (value: string) => value.replace(/[&<>"']/g, (character) => {
+    const entities: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
+    return entities[character] ?? character;
+  });
+
+  await sendEmailOrThrow({
+    to: customer.data.email,
+    subject: `${details.label} ${number} from ${company}`,
+    html: `<p>Hello ${escapeHtml(customerName)}, your ${details.label.toLowerCase()} ${escapeHtml(number)} for ${escapeHtml(document.data.amount || "0")} ${escapeHtml(document.data.currency || "USD")} is ready.</p><p><a href="${escapeHtml(documentLink)}">View ${details.label.toLowerCase()} ${escapeHtml(number)}</a></p>`,
+    fromName: company,
+  });
+
+  const updatedData: Record<string, string> = { ...document.data, shareToken, sentAt: new Date().toISOString() };
+  if (kind === "estimates") updatedData.status = "Sent";
+  await db
+    .update(bookkeepingRecord)
+    .set({ data: updatedData, updatedAt: new Date() })
+    .where(and(eq(bookkeepingRecord.id, document.id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, kind)));
+  revalidatePath("/app", "layout");
+  return shareToken;
+}
+
+export async function duplicateCustomerDocumentRecord(id: string, kind: CustomerDocumentKind): Promise<BookkeepingRecord> {
+  const me = await requireUser();
+  const [document] = await db
+    .select()
+    .from(bookkeepingRecord)
+    .where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, kind), eq(bookkeepingRecord.id, id)))
+    .limit(1);
+  if (!document) throw new Error(`We couldn’t find that ${customerDocumentDetails[kind].label.toLowerCase()}. Refresh and try again.`);
+
+  const existing = await db
+    .select()
+    .from(bookkeepingRecord)
+    .where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, kind)));
+  const details = customerDocumentDetails[kind];
+  const prefix = kind === "estimates" ? "EST" : kind === "sales-orders" ? "SO" : "CN";
+  const sequence = existing.reduce((highest, row) => {
+    const suffix = Number(row.data[details.numberKey]?.replace(`${prefix}-`, ""));
+    return Number.isFinite(suffix) ? Math.max(highest, suffix) : highest;
+  }, 0) + 1;
+  const nextNumber = `${prefix}-${String(sequence).padStart(4, "0")}`;
+  const today = new Date().toISOString().slice(0, 10);
+  const duplicateData: Record<string, string> = {
+    ...document.data,
+    [details.numberKey]: nextNumber,
+    date: today,
+    status: "Draft",
+  };
+  delete duplicateData.shareToken;
+  delete duplicateData.sentAt;
+  if (kind === "estimates") duplicateData.expiryDate = "";
+  if (kind === "sales-orders") duplicateData.deliveryDate = "";
+  if (kind === "credit-notes") duplicateData.invoiceNumber = "";
+
+  const [created] = await db
+    .insert(bookkeepingRecord)
+    .values({ userId: me.id, kind, data: amountFromLineItems(duplicateData) })
+    .returning();
+  revalidatePath("/app", "layout");
+  return serializeRow(created);
+}
+
 export async function duplicateInvoiceRecord(id: string): Promise<BookkeepingRecord> {
   const me = await requireUser();
   const [invoice] = await db

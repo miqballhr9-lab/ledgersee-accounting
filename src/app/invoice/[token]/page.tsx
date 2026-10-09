@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { notFound } from "next/navigation";
 
 import { db } from "@/db";
@@ -22,7 +22,7 @@ export default async function SharedInvoicePage({ params }: SharedInvoicePagePro
     .select()
     .from(bookkeepingRecord)
     .where(and(
-      eq(bookkeepingRecord.kind, "invoices"),
+      inArray(bookkeepingRecord.kind, ["invoices", "estimates", "sales-orders", "credit-notes"]),
       sql`${bookkeepingRecord.data}->>'shareToken' = ${token}`,
     ))
     .limit(1);
@@ -40,7 +40,11 @@ export default async function SharedInvoicePage({ params }: SharedInvoicePagePro
       <div className="mx-auto mb-4 flex max-w-4xl justify-end print:hidden">
         <InvoicePrintButton />
       </div>
-      <InvoiceDocument invoice={invoice.data} companyName={settings?.data.companyName || "Business"} />
+      <InvoiceDocument
+        invoice={invoice.data}
+        companyName={settings?.data.companyName || "Business"}
+        documentKind={invoice.kind as "invoices" | "estimates" | "sales-orders" | "credit-notes"}
+      />
     </main>
   );
 }

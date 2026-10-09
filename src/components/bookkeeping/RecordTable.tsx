@@ -115,6 +115,7 @@ function rowActions(module: ModuleDefinition, record: BookkeepingRecord, onActio
   const actions: { kind: RecordActionKind; label: string; icon: typeof ArrowRightLeft }[] = [];
   if (["estimates", "sales-orders", "purchase-orders"].includes(module.kind)) actions.push({ kind: "convert", label: "Convert", icon: ArrowRightLeft });
   if (module.kind === "invoices") actions.push({ kind: "payment", label: "Record payment", icon: CircleDollarSign }, { kind: "send", label: "Send invoice", icon: Mail });
+  if (["estimates", "sales-orders", "credit-notes"].includes(module.kind)) actions.push({ kind: "send", label: `Send ${module.label.toLowerCase()}`, icon: Mail });
   if (module.kind === "bills") actions.push({ kind: "mark-paid", label: "Mark paid", icon: Check });
   if (module.kind === "credit-notes") actions.push({ kind: "apply-credit", label: "Apply credit", icon: BadgeCheck });
   if (module.kind === "recurring-invoices") actions.push({ kind: "generate", label: "Generate invoice", icon: Play });
@@ -127,11 +128,11 @@ function rowActions(module: ModuleDefinition, record: BookkeepingRecord, onActio
           <Icon size={13} />{label}
         </Button>
       ))}
-      {module.kind === "invoices" ? (
+      {["invoices", "estimates", "sales-orders", "credit-notes"].includes(module.kind) ? (
         <DropdownMenu>
-          <DropdownMenuTrigger render={<Button type="button" variant="outline" size="icon-sm" aria-label="More invoice actions"><Ellipsis size={15} /></Button>} />
+          <DropdownMenuTrigger render={<Button type="button" variant="outline" size="icon-sm" aria-label={`More ${module.label.toLowerCase()} actions`}><Ellipsis size={15} /></Button>} />
           <DropdownMenuContent align="end">
-            <DropdownMenuItem onClick={() => onAction("duplicate", record)}><Copy size={14} />Copy invoice</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => onAction("duplicate", record)}><Copy size={14} />Copy {module.label.toLowerCase()}</DropdownMenuItem>
             <DropdownMenuItem onClick={() => onAction("share", record)}><Link2 size={14} />Copy share link</DropdownMenuItem>
             <DropdownMenuItem onClick={() => onAction("print", record)}><Printer size={14} />Print or save PDF</DropdownMenuItem>
           </DropdownMenuContent>

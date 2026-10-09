@@ -7,13 +7,16 @@ import { ArrowDownToLine, Plus, Search } from "lucide-react";
 
 import {
   convertBookkeepingRecord,
+  createCustomerDocumentShareLink,
   createInvoiceShareLink,
   deleteBookkeepingRecord,
+  duplicateCustomerDocumentRecord,
   duplicateInvoiceRecord,
   applyCreditNote,
   generateRecurringInvoice,
   markRecordPaid,
   recordInvoicePayment,
+  sendCustomerDocumentRecord,
   sendInvoiceRecord,
   toggleTransactionMatch,
 } from "@/app/actions";
@@ -35,6 +38,7 @@ interface ModuleWorkspaceProps {
   vendors: BookkeepingRecord[];
   accounts: BookkeepingRecord[];
   items: BookkeepingRecord[];
+  defaultCurrency: string;
 }
 
 const pageSize = 10;
@@ -43,7 +47,7 @@ function dateString(date: Date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
-function createDefaults(module: ModuleDefinition, records: BookkeepingRecord[]) {
+function createDefaults(module: ModuleDefinition, records: BookkeepingRecord[], defaultCurrency: string) {
   const values = Object.fromEntries(module.fields.map((field) => [field.key, field.type === "checkbox" ? "false" : ""]));
   const today = new Date();
   const dueDate = new Date(today);
@@ -57,7 +61,7 @@ function createDefaults(module: ModuleDefinition, records: BookkeepingRecord[]) 
     values.issueDate = dateString(today);
     values.dueDate = dateString(dueDate);
     values.paymentTerms = "30 days";
-    values.currency = settings?.currency || "USD";
+    values.currency = defaultCurrency;
     values.exchangeRate = "1";
     values.paidAmount = "0";
     values.status = "Draft";
@@ -65,11 +69,15 @@ function createDefaults(module: ModuleDefinition, records: BookkeepingRecord[]) 
   if (module.kind === "estimates") {
     values.estimateNumber = `EST-${String(records.filter((record) => record.kind === "estimates").length + 1).padStart(4, "0")}`;
     values.date = dateString(today);
+    values.currency = defaultCurrency;
+    values.exchangeRate = "1";
     values.status = "Draft";
   }
   if (module.kind === "sales-orders") {
     values.orderNumber = `SO-${String(records.filter((record) => record.kind === "sales-orders").length + 1).padStart(4, "0")}`;
     values.date = dateString(today);
+    values.currency = defaultCurrency;
+    values.exchangeRate = "1";
     values.status = "Draft";
   }
   if (module.kind === "purchase-orders") {
@@ -80,6 +88,8 @@ function createDefaults(module: ModuleDefinition, records: BookkeepingRecord[]) 
   if (module.kind === "credit-notes") {
     values.creditNumber = `CN-${String(records.filter((record) => record.kind === "credit-notes").length + 1).padStart(4, "0")}`;
     values.date = dateString(today);
+    values.currency = defaultCurrency;
+    values.exchangeRate = "1";
     values.status = "Draft";
   }
   if (module.kind === "bills") {
@@ -123,7 +133,7 @@ function formatCurrency(value: number, currency: string) {
   }
 }
 
-export default function ModuleWorkspace({ module, records: initialRecords, customers, vendors, accounts, items }: ModuleWorkspaceProps) {
+export default function ModuleWorkspace({ module, records: initialRecords, customers, vendors, accounts, items, defaultCurrency }: ModuleWorkspaceProps) {
   const router = useRouter();
   const [records, setRecords] = useState(initialRecords);
   const [search, setSearch] = useState("");
@@ -158,7 +168,7 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
 
   const pageCount = Math.max(1, Math.ceil(filteredRecords.length / pageSize));
   const visibleRecords = filteredRecords.slice((page - 1) * pageSize, page * pageSize);
-  const tableRecords = module.kind === "invoices"
+  const tableRecords = ["invoices", "estimates", "sales-orders", "credit-notes"].includes(module.kind)
     ? visibleRecords.map((record) => {
         const customer = customers.find((item) => item.id === record.data.customerId || item.id === record.data.customer)
           ?? customers.find((item) => item.data.name?.trim().toLowerCase() === record.data.customer?.trim().toLowerCase());
@@ -177,7 +187,7 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
       return;
     }
     setEditingRecord(null);
-    setDefaults(createDefaults(module, records));
+    setDefaults(createDefaults(module, records, defaultCurrency));
     setActionMessage("");
     setEditorOpen(true);
   }
@@ -198,17 +208,19 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
     if (intent === "save-and-new") {
       const nextRecords = [record, ...records.filter((item) => item.id !== record.id)];
       setEditingRecord(null);
-      setDefaults(createDefaults(module, nextRecords));
+      setDefaults(createDefaults(module, nextRecords, defaultCurrency));
       setActionMessage("");
       setEditorOpen(true);
       return;
     }
 
-    const copy = await duplicateInvoiceRecord(record.id);
+    const copy = module.kind === "invoices"
+      ? await duplicateInvoiceRecord(record.id)
+      : await duplicateCustomerDocumentRecord(record.id, module.kind as "estimates" | "sales-orders" | "credit-notes");
     handleSaved(copy);
     setEditingRecord(copy);
     setDefaults({});
-    setActionMessage("Invoice copied as a draft with a new invoice number.");
+    setActionMessage(`${module.label} copied as a draft with a new number.`);
     setEditorOpen(true);
   }
 
@@ -242,27 +254,35 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
         await convertBookkeepingRecord(record.id);
         setActionMessage(`Converted to ${module.kind === "purchase-orders" ? "a bill" : "an invoice"}.`);
       } else if (kind === "send") {
-        await sendInvoiceRecord(record.id);
-        setActionMessage("Invoice emailed to the customer and marked as sent.");
+        if (module.kind === "invoices") await sendInvoiceRecord(record.id);
+        else await sendCustomerDocumentRecord(record.id, module.kind as "estimates" | "sales-orders" | "credit-notes");
+        setActionMessage(`${module.label} emailed to the customer.`);
       } else if (kind === "duplicate") {
-        const duplicate = await duplicateInvoiceRecord(record.id);
+        const duplicate = module.kind === "invoices"
+          ? await duplicateInvoiceRecord(record.id)
+          : await duplicateCustomerDocumentRecord(record.id, module.kind as "estimates" | "sales-orders" | "credit-notes");
         handleSaved(duplicate);
         setEditingRecord(duplicate);
         setDefaults({});
         setEditorOpen(true);
-        setActionMessage("Invoice copy created as a draft.");
+        setActionMessage(`${module.label} copy created as a draft.`);
       } else if (kind === "share") {
-        const link = await createInvoiceShareLink(record.id);
+        const link = module.kind === "invoices"
+          ? await createInvoiceShareLink(record.id)
+          : await createCustomerDocumentShareLink(record.id, module.kind as "estimates" | "sales-orders" | "credit-notes");
         try {
           await navigator.clipboard.writeText(link);
-          setActionMessage("Invoice link copied. Anyone with the link can view this invoice.");
+          setActionMessage(`${module.label} link copied. Anyone with the link can view this document.`);
         } catch {
-          setActionMessage(`Copy this invoice link to share: ${link}`);
+          setActionMessage(`Copy this ${module.label.toLowerCase()} link to share: ${link}`);
         }
       } else if (kind === "print") {
-        const printWindow = window.open(`/app/invoices/${record.id}/print`, "_blank");
+        const printPath = module.kind === "invoices"
+          ? `/app/invoices/${record.id}/print`
+          : `/app/documents/${module.kind}/${record.id}/print`;
+        const printWindow = window.open(printPath, "_blank");
         if (printWindow) printWindow.opener = null;
-        else setActionMessage("Allow pop-ups to open this invoice for printing.");
+        else setActionMessage(`Allow pop-ups to open this ${module.label.toLowerCase()} for printing.`);
       } else if (kind === "apply-credit") {
         await applyCreditNote(record.id);
         setActionMessage("Credit applied to the matching invoice balance.");

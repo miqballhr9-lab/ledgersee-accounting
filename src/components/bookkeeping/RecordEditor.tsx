@@ -4,7 +4,14 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { ChevronDown, Copy, LoaderCircle, Mail, MessageCircle, MessageSquareText, Plus, Printer, Share2, Trash2, UploadCloud } from "lucide-react";
 
-import { createInvoiceShareLink, getAttachmentUploadTarget, saveBookkeepingRecord, sendInvoiceRecord } from "@/app/actions";
+import {
+  createCustomerDocumentShareLink,
+  createInvoiceShareLink,
+  getAttachmentUploadTarget,
+  saveBookkeepingRecord,
+  sendCustomerDocumentRecord,
+  sendInvoiceRecord,
+} from "@/app/actions";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -41,6 +48,7 @@ interface InvoiceLine {
 }
 
 const structuredLineKinds = new Set(["invoices", "estimates", "sales-orders", "credit-notes"]);
+const shareableDocumentKinds = new Set(["invoices", "estimates", "sales-orders", "credit-notes"]);
 function getInitialValues(module: ModuleDefinition, record: BookkeepingRecord | null, defaults: Record<string, string>) {
   const values: Record<string, string> = {
     ...Object.fromEntries(module.fields.map((field) => [
@@ -117,22 +125,24 @@ export default function RecordEditor({ module, record, customers, vendors, items
     });
   }
 
-  async function shareInvoice() {
+  async function shareDocument() {
     if (!savedRecordId) return;
     setSharing(true);
     setError("");
     setNotice("");
     try {
-      const link = await createInvoiceShareLink(savedRecordId);
+      const link = module.kind === "invoices"
+        ? await createInvoiceShareLink(savedRecordId)
+        : await createCustomerDocumentShareLink(savedRecordId, module.kind as "estimates" | "sales-orders" | "credit-notes");
       setShareLink(link);
       try {
         await navigator.clipboard.writeText(link);
-        setNotice("Invoice link copied. Anyone with the link can view this invoice.");
+        setNotice(`${module.label} link copied. Anyone with the link can view this document.`);
       } catch {
-        setNotice("Your invoice link is ready below to copy and share.");
+        setNotice(`Your ${module.label.toLowerCase()} link is ready below to copy and share.`);
       }
     } catch (shareError) {
-      setError(shareError instanceof Error ? shareError.message : "We couldn’t create the invoice link.");
+      setError(shareError instanceof Error ? shareError.message : `We couldn’t create the ${module.label.toLowerCase()} link.`);
     } finally {
       setSharing(false);
     }
@@ -186,7 +196,7 @@ export default function RecordEditor({ module, record, customers, vendors, items
     event.preventDefault();
     const submitter = (event.nativeEvent as SubmitEvent).submitter;
     const intent = submitter instanceof HTMLButtonElement ? submitter.value : "save-and-close";
-    const shouldSend = module.kind === "invoices" && intent === "save-and-send";
+    const shouldSend = shareableDocumentKinds.has(module.kind) && intent === "save-and-send";
     const serializedDocumentLines = serializeInvoiceLines(invoiceLines);
     if (structuredLineKinds.has(module.kind)) {
       const enteredLines = invoiceLines.filter((line) => line.itemId || line.name.trim() || line.description.trim() || line.quantity.trim() || line.rate.trim());
@@ -242,7 +252,7 @@ export default function RecordEditor({ module, record, customers, vendors, items
     setError("");
     setNotice("");
     try {
-      const selectedCustomer = module.kind === "invoices"
+      const selectedCustomer = shareableDocumentKinds.has(module.kind)
         ? customerOptions.find((customer) => customer.id === values.customerId || customer.id === values.customer)
           ?? customerOptions.find((customer) => customer.data.name?.trim().toLowerCase() === values.customer?.trim().toLowerCase())
         : undefined;
@@ -256,16 +266,22 @@ export default function RecordEditor({ module, record, customers, vendors, items
       if (shouldSend) {
         try {
           if (sendMethod.current === "email") {
-            const shareToken = await sendInvoiceRecord(saved.id);
-            onSaved({ ...saved, data: { ...saved.data, shareToken, status: "Sent" } });
-            setNotice("Invoice emailed to the customer.");
+            const shareToken = module.kind === "invoices"
+              ? await sendInvoiceRecord(saved.id)
+              : await sendCustomerDocumentRecord(saved.id, module.kind as "estimates" | "sales-orders" | "credit-notes");
+            const status = module.kind === "invoices" || module.kind === "estimates" ? "Sent" : saved.data.status;
+            onSaved({ ...saved, data: { ...saved.data, shareToken, status } });
+            setNotice(`${module.label} emailed to the customer.`);
           } else {
             const recipient = customerOptions.find((customer) => customer.id === saved.data.customerId || customer.id === saved.data.customer)
               ?? customerOptions.find((customer) => customer.data.name?.trim().toLowerCase() === saved.data.customer?.trim().toLowerCase());
             const phone = recipient?.data.phone?.trim() ?? "";
             const phoneDigits = phone.replace(/\D/g, "");
-            const invoiceLink = await createInvoiceShareLink(saved.id);
-            const message = `Hello ${recipient?.data.name || "there"}, invoice ${saved.data.invoiceNumber || ""} for ${saved.data.amount || "0"} ${saved.data.currency || ""} is ready: ${invoiceLink}`;
+            const documentLink = module.kind === "invoices"
+              ? await createInvoiceShareLink(saved.id)
+              : await createCustomerDocumentShareLink(saved.id, module.kind as "estimates" | "sales-orders" | "credit-notes");
+            const numberKey = module.kind === "invoices" ? "invoiceNumber" : module.kind === "estimates" ? "estimateNumber" : module.kind === "sales-orders" ? "orderNumber" : "creditNumber";
+            const message = `Hello ${recipient?.data.name || "there"}, ${module.label.toLowerCase()} ${saved.data[numberKey] || ""} for ${saved.data.amount || "0"} ${saved.data.currency || ""} is ready: ${documentLink}`;
             const destination = sendMethod.current === "whatsapp"
               ? `https://wa.me/${phoneDigits}?text=${encodeURIComponent(message)}`
               : `sms:${phone.replace(/[^\d+]/g, "")}?body=${encodeURIComponent(message)}`;
@@ -273,15 +289,15 @@ export default function RecordEditor({ module, record, customers, vendors, items
             if (!openedWindow) throw new Error("Allow pop-ups to open the message app, then try again.");
             openedWindow.location.href = destination;
             sendWindow.current = null;
-            setShareLink(invoiceLink);
-            setNotice(`${sendMethod.current === "whatsapp" ? "WhatsApp" : "SMS"} opened with the invoice message ready. Send it from that app to finish.`);
-            onSaved({ ...saved, data: { ...saved.data, shareToken: invoiceLink.split("/").at(-1) || "" } });
+            setShareLink(documentLink);
+            setNotice(`${sendMethod.current === "whatsapp" ? "WhatsApp" : "SMS"} opened with the ${module.label.toLowerCase()} message ready. Send it from that app to finish.`);
+            onSaved({ ...saved, data: { ...saved.data, shareToken: documentLink.split("/").at(-1) || "" } });
             return;
           }
         } catch (sendError) {
           sendWindow.current?.close();
           sendWindow.current = null;
-          setError(`Invoice saved, but it couldn’t be sent: ${sendError instanceof Error ? sendError.message : "Please try again."}`);
+          setError(`${module.label} saved, but it couldn’t be sent: ${sendError instanceof Error ? sendError.message : "Please try again."}`);
           return;
         }
       }
@@ -317,7 +333,7 @@ export default function RecordEditor({ module, record, customers, vendors, items
         </DialogHeader>
 
         <form ref={formRef} id="record-editor-form" onSubmit={submit} className="space-y-5">
-          {module.kind === "invoices" ? (
+          {shareableDocumentKinds.has(module.kind) ? (
             <>
               <button ref={sendSubmitRef} type="submit" name="intent" value="save-and-send" className="hidden" tabIndex={-1} aria-hidden="true" />
               <button ref={saveNewSubmitRef} type="submit" name="intent" value="save-and-new" className="hidden" tabIndex={-1} aria-hidden="true" />
@@ -606,22 +622,22 @@ export default function RecordEditor({ module, record, customers, vendors, items
 
         <DialogFooter className="flex-wrap items-center">
           <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={pending || Boolean(uploading)}>Cancel</Button>
-          {module.kind === "invoices" && savedRecordId ? (
+          {shareableDocumentKinds.has(module.kind) && savedRecordId ? (
             <>
-              <Button type="button" variant="outline" onClick={() => void shareInvoice()} disabled={sharing || pending}><Share2 size={15} />{sharing ? "Copying…" : "Share link"}</Button>
-              <Button type="button" nativeButton={false} variant="outline" render={<Link href={`/app/invoices/${savedRecordId}/print`} target="_blank" rel="noreferrer" />}><Printer size={15} />Print / PDF</Button>
+              <Button type="button" variant="outline" onClick={() => void shareDocument()} disabled={sharing || pending}><Share2 size={15} />{sharing ? "Copying…" : "Share link"}</Button>
+              <Button type="button" nativeButton={false} variant="outline" render={<Link href={module.kind === "invoices" ? `/app/invoices/${savedRecordId}/print` : `/app/documents/${module.kind}/${savedRecordId}/print`} target="_blank" rel="noreferrer" />}><Printer size={15} />Print / PDF</Button>
             </>
           ) : null}
-          {module.kind === "invoices" ? (
+          {shareableDocumentKinds.has(module.kind) ? (
             <>
               {savedRecordId ? (
                 <Button type="button" variant="outline" disabled={pending || Boolean(uploading)} onClick={() => submitWithIntent(saveCopySubmitRef.current)}>
-                  <Copy size={15} />Copy invoice
+                  <Copy size={15} />Copy {module.label.toLowerCase()}
                 </Button>
               ) : null}
               <DropdownMenu>
                 <DropdownMenuTrigger render={<Button type="button" variant="outline" disabled={pending || Boolean(uploading)} /> }>
-                  {pending ? "Saving…" : "Save invoice"}<ChevronDown size={15} />
+                  {pending ? "Saving…" : `Save ${module.label.toLowerCase()}`}<ChevronDown size={15} />
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
                   <DropdownMenuItem onClick={() => submitWithIntent(saveNewSubmitRef.current)}>Save and new</DropdownMenuItem>
@@ -645,7 +661,7 @@ export default function RecordEditor({ module, record, customers, vendors, items
               {pending ? "Saving…" : record ? "Save changes" : `Save ${module.label.toLowerCase()}`}
             </Button>
           )}
-          {module.kind === "invoices" ? <p className="w-full text-right text-xs text-muted-foreground">Email sends directly; WhatsApp and SMS open a message for you to send.</p> : null}
+          {shareableDocumentKinds.has(module.kind) ? <p className="w-full text-right text-xs text-muted-foreground">Email sends directly; WhatsApp and SMS open a message for you to send.</p> : null}
         </DialogFooter>
       </DialogContent>
     </Dialog>

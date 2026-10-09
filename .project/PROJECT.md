@@ -1,7 +1,7 @@
 <!-- OWNER: Build (with the user) · READERS: every agent · READ THIS FIRST -->
 # MIKLEDGER
 
-**One-liner:** MIKLEDGER is a small-business bookkeeping workspace for customers, sales, purchases, banking, and financial reports.
+**One-liner:** MIKLEDGER is a small-business bookkeeping workspace for customers, sales documents, purchases, banking, and financial reports.
 
 ## Goal
 Give owners a clear, account-specific place to manage routine bookkeeping and follow outstanding money.
@@ -23,10 +23,10 @@ Founders, freelancers, and small operators who need practical finance workflows 
 - Invoice email delivery and payment tracking; estimates and sales orders convert to invoices; purchase orders convert to bills; recurring schedules generate invoices; credit notes apply to invoices.
 - Bank reconciliation by statement date and ending balance, with transaction clearing, balanced-close validation, and per-account history.
 - Search, category/status filters, pagination, receipt/logo uploads, date-filtered financial reports, and CSV export.
-- Company settings provide a searchable choice of active global currencies; new invoices and bank accounts inherit the selected default.
+- Company settings provide a searchable choice of active global currencies; new invoices, sales documents, and bank accounts inherit the selected default.
 - Invoice, estimate, sales order, credit note, and recurring invoice forms let owners choose from their saved customers, showing company or email details while keeping the customer name on the record.
 - Invoice, estimate, sales order, and credit note forms let owners choose saved items and services, add or remove rows, edit per-line descriptions, adjust quantities and rates, and preview currency-aware tax, discount, and total calculations.
-- Invoices, estimates, sales orders, and credit notes support PDF/image/CSV attachments. Invoices also support due-on-receipt or 15/30/60-day terms, duplicate drafts, email sharing links, print/PDF views, and delivery by email or a prepared WhatsApp/SMS message.
+- Invoices, estimates, sales orders, and credit notes support saved items and services, PDF/image/CSV attachments, draft copies, public share links, print/PDF views, and delivery by email or a prepared WhatsApp/SMS message. Invoices also support due-on-receipt or 15/30/60-day terms and payment tracking.
 - Bill and purchase-order forms let owners choose from saved vendors, showing company or email details while keeping the vendor name on the record.
 - Manual journals support multiple debit and credit lines, account choices from Chart of Accounts, balanced totals, and CSV line import; the Trial Balance includes these entries and remains compatible with older journals.
 - Chart of Accounts has searchable and type-filtered account rows, opening-balance visibility, and a dedicated side panel for account details, sub-accounts, and locking; accounts used by journal entries cannot be deleted.
