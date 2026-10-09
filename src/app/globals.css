@@ -201,3 +201,44 @@ textarea {
     @apply font-sans;
   }
 }
+
+.brand-lockup {
+  transform-origin: left center;
+  animation: brand-arrive 500ms var(--ease-out-expo) both;
+}
+
+.brand-mark {
+  transform-origin: center;
+  transition: transform 240ms var(--ease-out);
+}
+
+.brand-lockup:hover .brand-mark,
+.brand-lockup:focus-visible .brand-mark {
+  transform: translateY(-2px) rotate(-3deg) scale(1.04);
+}
+
+@keyframes brand-arrive {
+  from {
+    opacity: 0;
+    transform: translateY(5px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .brand-lockup {
+    animation: none;
+  }
+
+  .brand-mark {
+    transition: none;
+  }
+
+  .brand-lockup:hover .brand-mark,
+  .brand-lockup:focus-visible .brand-mark {
+    transform: none;
+  }
+}

@@ -47,8 +47,8 @@ export default function AccountAccess() {
   return (
     <main className="grid min-h-dvh bg-background lg:grid-cols-[minmax(0,1.1fr)_minmax(440px,0.9fr)]">
       <section className="relative hidden overflow-hidden bg-sidebar px-12 py-10 text-sidebar-foreground lg:flex lg:flex-col lg:justify-between xl:px-20">
-        <div className="flex items-center gap-3">
-          <span className="grid size-10 place-items-center rounded-xl bg-sidebar-primary text-sidebar-primary-foreground">
+        <div className="brand-lockup flex items-center gap-3">
+          <span className="brand-mark grid size-10 place-items-center rounded-xl bg-sidebar-primary text-sidebar-primary-foreground">
             <BriefcaseBusiness size={19} strokeWidth={1.8} />
           </span>
           <span className="text-[17px] font-semibold tracking-tight">MIKLEDGER</span>
@@ -73,8 +73,8 @@ export default function AccountAccess() {
 
       <section className="flex min-h-dvh items-center justify-center px-5 py-10 sm:px-8">
         <div className="w-full max-w-[420px]">
-          <div className="mb-10 flex items-center gap-3 lg:hidden">
-            <span className="grid size-10 place-items-center rounded-xl bg-primary text-primary-foreground">
+          <div className="brand-lockup mb-10 flex items-center gap-3 lg:hidden">
+            <span className="brand-mark grid size-10 place-items-center rounded-xl bg-primary text-primary-foreground">
               <BriefcaseBusiness size={19} strokeWidth={1.8} />
             </span>
             <span className="text-[17px] font-semibold tracking-tight">MIKLEDGER</span>

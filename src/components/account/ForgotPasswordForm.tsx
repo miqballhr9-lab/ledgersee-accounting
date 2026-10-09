@@ -40,8 +40,8 @@ export default function ForgotPasswordForm() {
   return (
     <main className="flex min-h-dvh items-center justify-center bg-background px-5 py-10">
       <section className="w-full max-w-[420px]">
-        <Link href="/" className="mb-10 inline-flex items-center gap-3">
-          <span className="grid size-10 place-items-center rounded-xl bg-sidebar text-sidebar-primary"><BriefcaseBusiness size={19} strokeWidth={1.8} /></span>
+        <Link href="/" className="brand-lockup mb-10 inline-flex items-center gap-3">
+          <span className="brand-mark grid size-10 place-items-center rounded-xl bg-sidebar text-sidebar-primary"><BriefcaseBusiness size={19} strokeWidth={1.8} /></span>
           <span className="text-[17px] font-semibold tracking-tight">MIKLEDGER</span>
         </Link>
 

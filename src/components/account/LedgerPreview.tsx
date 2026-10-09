@@ -83,8 +83,8 @@ export default function LedgerPreview({ onCreateAccount }: { onCreateAccount: ()
         className="flex h-[min(900px,calc(100dvh-1rem))] max-h-[calc(100dvh-1rem)] w-[calc(100%-1rem)] max-w-6xl flex-col gap-0 overflow-hidden rounded-xl border border-border bg-background p-0 shadow-2xl sm:h-[min(900px,calc(100dvh-3rem))] sm:max-h-[calc(100dvh-3rem)] sm:w-[calc(100%-3rem)]"
       >
         <header className="flex shrink-0 items-center justify-between gap-4 border-b border-border bg-card px-4 py-3 sm:px-6">
-          <div className="flex min-w-0 items-center gap-3">
-            <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-sidebar text-sidebar-primary"><BriefcaseBusiness size={17} /></span>
+          <div className="brand-lockup flex min-w-0 items-center gap-3">
+            <span className="brand-mark grid size-9 shrink-0 place-items-center rounded-lg bg-sidebar text-sidebar-primary"><BriefcaseBusiness size={17} /></span>
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                 <DialogTitle className="text-sm font-semibold tracking-tight">MIKLEDGER</DialogTitle>
