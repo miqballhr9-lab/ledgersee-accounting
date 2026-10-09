@@ -1,6 +1,6 @@
 "use server";
 
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { randomBytes } from "node:crypto";
 import { revalidatePath } from "next/cache";
 
@@ -102,6 +102,27 @@ export async function listBookkeepingRecords(kind: string): Promise<BookkeepingR
     .orderBy(desc(bookkeepingRecord.updatedAt));
 
   return rows.map(serializeRow);
+}
+
+export async function listBookkeepingRecordGroups(
+  kinds: string[],
+): Promise<Partial<Record<RecordKind, BookkeepingRecord[]>>> {
+  const uniqueKinds = [...new Set(kinds)];
+  if (uniqueKinds.some((kind) => !isRecordKind(kind))) throw new Error("That section isn’t available.");
+  if (!uniqueKinds.length) return {};
+
+  const me = await requireUser();
+  const rows = await db
+    .select()
+    .from(bookkeepingRecord)
+    .where(and(eq(bookkeepingRecord.userId, me.id), inArray(bookkeepingRecord.kind, uniqueKinds)))
+    .orderBy(desc(bookkeepingRecord.updatedAt));
+
+  return rows.reduce<Partial<Record<RecordKind, BookkeepingRecord[]>>>((groups, row) => {
+    const kind = row.kind as RecordKind;
+    (groups[kind] ??= []).push(serializeRow(row));
+    return groups;
+  }, {});
 }
 
 export async function listAllBookkeepingRecords(): Promise<BookkeepingRecord[]> {

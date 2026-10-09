@@ -1,11 +1,12 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 
-import { listAllBookkeepingRecords, listBookkeepingRecords } from "@/app/actions";
+import { listAllBookkeepingRecords, listBookkeepingRecordGroups } from "@/app/actions";
 import ChartOfAccountsWorkspace from "@/components/bookkeeping/ChartOfAccountsWorkspace";
 import ModuleWorkspace from "@/components/bookkeeping/ModuleWorkspace";
 import ReportsWorkspace from "@/components/bookkeeping/ReportsWorkspace";
 import { moduleBySlug } from "@/lib/bookkeeping-config";
+import type { RecordKind } from "@/lib/bookkeeping-types";
 
 interface SectionPageProps {
   params: Promise<{ section: string }>;
@@ -27,26 +28,23 @@ export default async function SectionPage({ params }: SectionPageProps) {
   const module = moduleBySlug(section);
   if (!module) notFound();
   if (module.kind === "accounts") {
-    const [accounts, settings] = await Promise.all([
-      listBookkeepingRecords("accounts"),
-      listBookkeepingRecords("settings"),
-    ]);
+    const groups = await listBookkeepingRecordGroups(["accounts", "settings"]);
+    const accounts = groups.accounts ?? [];
+    const settings = groups.settings ?? [];
     return <ChartOfAccountsWorkspace accounts={accounts} currency={settings[0]?.data.currency || "USD"} />;
   }
 
-  const [records, customers, vendors, accounts, items, settings] = await Promise.all([
-    listBookkeepingRecords(module.kind),
-    module.fields.some((field) => field.key === "customer")
-      ? listBookkeepingRecords("customers")
-      : Promise.resolve([]),
-    module.fields.some((field) => field.key === "vendor")
-      ? listBookkeepingRecords("vendors")
-      : Promise.resolve([]),
-    module.kind === "journals" ? listBookkeepingRecords("accounts") : Promise.resolve([]),
-    ["invoices", "estimates", "sales-orders", "credit-notes", "purchase-orders"].includes(module.kind)
-      ? listBookkeepingRecords("items")
-      : Promise.resolve([]),
-    listBookkeepingRecords("settings"),
-  ]);
+  const kinds = new Set<RecordKind>([module.kind, "settings"]);
+  if (module.fields.some((field) => field.key === "customer")) kinds.add("customers");
+  if (module.fields.some((field) => field.key === "vendor")) kinds.add("vendors");
+  if (module.kind === "journals") kinds.add("accounts");
+  if (module.fields.some((field) => field.key === "lineItems")) kinds.add("items");
+  const groups = await listBookkeepingRecordGroups([...kinds]);
+  const records = groups[module.kind] ?? [];
+  const customers = groups.customers ?? [];
+  const vendors = groups.vendors ?? [];
+  const accounts = groups.accounts ?? [];
+  const items = groups.items ?? [];
+  const settings = groups.settings ?? [];
   return <ModuleWorkspace module={module} records={records} customers={customers} vendors={vendors} accounts={accounts} items={items} defaultCurrency={settings[0]?.data.currency || "USD"} />;
 }
