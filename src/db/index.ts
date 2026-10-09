@@ -43,6 +43,7 @@ function normalizeConnectionUrl(connectionString: string): string {
 type Database = ReturnType<typeof drizzle<typeof schema>>;
 
 let instance: Database | null = null;
+const globalForDatabase = globalThis as typeof globalThis & { __mikledgerDatabase?: Database };
 
 /**
  * The app's connection string.
@@ -63,6 +64,10 @@ function connectionUrl(): string | undefined {
 
 function connect(): Database {
   if (instance) return instance;
+  if (process.env.NODE_ENV !== "production" && globalForDatabase.__mikledgerDatabase) {
+    instance = globalForDatabase.__mikledgerDatabase;
+    return instance;
+  }
   const connectionString = connectionUrl();
   if (!connectionString) {
     throw new Error(
@@ -82,6 +87,7 @@ function connect(): Database {
     }),
     { schema },
   );
+  if (process.env.NODE_ENV !== "production") globalForDatabase.__mikledgerDatabase = instance;
   return instance;
 }
 
