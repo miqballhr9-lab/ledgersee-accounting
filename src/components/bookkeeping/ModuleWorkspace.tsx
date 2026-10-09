@@ -64,6 +64,7 @@ function createDefaults(module: ModuleDefinition, records: BookkeepingRecord[], 
     values.currency = defaultCurrency;
     values.exchangeRate = "1";
     values.paidAmount = "0";
+    values.paymentMethod = "Credit";
     values.status = "Draft";
   }
   if (module.kind === "estimates") {
@@ -96,6 +97,7 @@ function createDefaults(module: ModuleDefinition, records: BookkeepingRecord[], 
     values.billNumber = `BILL-${String(records.filter((record) => record.kind === "bills").length + 1).padStart(4, "0")}`;
     values.billDate = dateString(today);
     values.paidAmount = "0";
+    values.paymentMethod = "Credit";
     values.status = "Open";
   }
   if (module.kind === "expenses" || module.kind === "transactions" || module.kind === "journals") values.date = dateString(today);

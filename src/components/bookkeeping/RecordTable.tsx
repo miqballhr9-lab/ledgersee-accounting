@@ -35,6 +35,7 @@ const columnLabels: Record<string, string> = {
   dueDate: "Due date",
   amount: "Amount",
   paidAmount: "Paid",
+  paymentMethod: "Payment method",
   status: "Status",
   estimateNumber: "Estimate",
   date: "Date",

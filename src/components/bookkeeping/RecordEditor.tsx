@@ -573,7 +573,7 @@ export default function RecordEditor({ module, record, customers, vendors, items
 
                   {field.type === "select" ? (
                     <Select value={value || undefined} onValueChange={(nextValue) => changeValue(field.key, nextValue ?? "")}>
-                      <SelectTrigger id={`field-${field.key}`} className="w-full">
+                      <SelectTrigger id={`field-${field.key}`} className="w-full" disabled={field.key === "paymentMethod" && Boolean(record)}>
                         <SelectValue placeholder="Choose an option" />
                       </SelectTrigger>
                       <SelectContent>

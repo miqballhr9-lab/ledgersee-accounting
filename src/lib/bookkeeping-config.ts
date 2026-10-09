@@ -77,11 +77,12 @@ export const modules: readonly ModuleDefinition[] = [
   {
     slug: "invoices", kind: "invoices", label: "Invoice", plural: "Invoices",
     description: "Create invoices, email them, and record customer payments.", titleKey: "invoiceNumber",
-    columns: ["invoiceNumber", "customer", "issueDate", "dueDate", "amount", "paidAmount", "status"],
+    columns: ["invoiceNumber", "customer", "issueDate", "dueDate", "amount", "paidAmount", "paymentMethod", "status"],
     fields: [
       { key: "invoiceNumber", label: "Invoice number", required: true },
       { key: "customer", label: "Customer", required: true },
       { key: "paymentTerms", label: "Payment terms", type: "select", required: true, options: ["Due on receipt", "15 days", "30 days", "60 days"] },
+      { key: "paymentMethod", label: "Payment method", type: "select", options: ["Cash", "Bank", "Credit"], help: "Cash or Bank marks the invoice paid; Credit keeps it outstanding." },
       { key: "issueDate", label: "Issue date", type: "date" },
       { key: "dueDate", label: "Due date", type: "date" },
       { key: "currency", label: "Currency", type: "currency" },
@@ -166,10 +167,11 @@ export const modules: readonly ModuleDefinition[] = [
   {
     slug: "bills", kind: "bills", label: "Bill", plural: "Bills",
     description: "Record supplier bills and keep their payment status current.", titleKey: "billNumber",
-    columns: ["billNumber", "vendor", "billDate", "dueDate", "category", "amount", "status"],
+    columns: ["billNumber", "vendor", "billDate", "dueDate", "category", "amount", "paymentMethod", "status"],
     fields: [
       { key: "billNumber", label: "Bill number", required: true },
       { key: "vendor", label: "Vendor", required: true },
+      { key: "paymentMethod", label: "Payment method", type: "select", options: ["Cash", "Bank", "Credit"], help: "Cash or Bank marks the bill paid; Credit keeps it outstanding." },
       { key: "billDate", label: "Bill date", type: "date" },
       { key: "dueDate", label: "Due date", type: "date" },
       { key: "category", label: "Category" },

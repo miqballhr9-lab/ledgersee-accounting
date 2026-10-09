@@ -152,6 +152,16 @@ export async function saveBookkeepingRecord(
     if (!calculatedDueDate) throw new Error("Choose an issue date and valid payment terms.");
     data = { ...data, paymentTerms, dueDate: calculatedDueDate };
   }
+  if (!id && (kind === "invoices" || kind === "bills")) {
+    const paymentMethod = data.paymentMethod || "Credit";
+    if (!["Cash", "Bank", "Credit"].includes(paymentMethod)) throw new Error("Choose Cash, Bank, or Credit as the payment method.");
+    data = { ...data, paymentMethod };
+    if (paymentMethod !== "Credit") {
+      const amount = Number(data.amount);
+      if (!Number.isFinite(amount) || amount <= 0) throw new Error("Enter an amount greater than zero for a Cash or Bank transaction.");
+      data = { ...data, paidAmount: amount.toFixed(2), status: "Paid" };
+    }
+  }
   if (kind === "accounts") {
     const accountRows = await db
       .select()
@@ -332,6 +342,20 @@ export async function saveBookkeepingRecord(
     .insert(bookkeepingRecord)
     .values({ userId: me.id, kind, data })
     .returning();
+  if (kind === "invoices" && data.paymentMethod && data.paymentMethod !== "Credit") {
+    await db.insert(bookkeepingRecord).values({
+      userId: me.id,
+      kind: "payments",
+      data: {
+        invoiceId: created.id,
+        invoiceNumber: data.invoiceNumber ?? "Invoice",
+        customer: data.customer ?? "",
+        amount: data.amount ?? "0",
+        paymentDate: data.issueDate || new Date().toISOString().slice(0, 10),
+        method: data.paymentMethod,
+      },
+    });
+  }
   if (kind === "invoices" && data.invoiceNumber) {
     const [settings] = await db
       .select()
