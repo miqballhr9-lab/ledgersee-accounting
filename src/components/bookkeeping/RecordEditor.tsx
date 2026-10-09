@@ -226,7 +226,7 @@ export default function RecordEditor({ module, record, customers, vendors, items
                   {module.kind === "invoices" && field.key === "lineItems" ? (
                     <div className="space-y-3" role="group" aria-labelledby="invoice-line-items-label">
                       {invoiceLines.map((line, index) => (
-                        <div key={line.id} className="grid min-w-0 grid-cols-2 items-end gap-3 rounded-lg border border-border bg-card p-3 sm:grid-cols-[minmax(0,1fr)_5rem_7rem_2.75rem]">
+                        <div key={line.id} className="grid min-w-0 grid-cols-2 items-end gap-3 rounded-lg border border-border bg-card p-3 sm:grid-cols-[minmax(0,1fr)_5rem_7rem_7.5rem_2.75rem]">
                           <div className="col-span-2 min-w-0 space-y-1.5 sm:col-span-1">
                             <Label htmlFor={`invoice-item-${line.id}`} className="text-xs text-muted-foreground">Item or service</Label>
                             <Select
@@ -292,13 +292,19 @@ export default function RecordEditor({ module, record, customers, vendors, items
                               placeholder="0.00"
                             />
                           </div>
+                          <div className="min-w-0 space-y-1.5">
+                            <p className="text-xs text-muted-foreground">Total</p>
+                            <div className="flex h-8 min-w-0 items-center truncate rounded-lg bg-muted px-2.5 text-sm font-medium tabular-nums">
+                              {formatCurrency((Number(line.quantity) || 0) * (Number(line.rate) || 0), values.currency || "USD")}
+                            </div>
+                          </div>
                           <Button
                             type="button"
                             variant="ghost"
                             size="icon"
                             aria-label={`Remove line ${index + 1}`}
                             onClick={() => setInvoiceLines((current) => current.filter((currentLine) => currentLine.id !== line.id))}
-                            className="col-span-2 size-11 justify-self-end text-muted-foreground hover:text-destructive sm:col-span-1"
+                            className="size-11 justify-self-end text-muted-foreground hover:text-destructive"
                           >
                             <Trash2 size={16} strokeWidth={1.75} />
                           </Button>
@@ -328,6 +334,13 @@ export default function RecordEditor({ module, record, customers, vendors, items
                     <>
                       <Select
                         value={customerOptions.find((customer) => customer.data.name === value)?.id}
+                        itemToStringLabel={(customerId) => {
+                          const customer = customerOptions.find((option) => option.id === customerId);
+                          if (!customer) return "";
+                          const name = customer.data.name.trim();
+                          const detail = customer.data.company?.trim() || customer.data.email?.trim();
+                          return detail ? `${name} · ${detail}` : name;
+                        }}
                         onValueChange={(customerId) => {
                           const customer = customerOptions.find((option) => option.id === customerId);
                           if (customer?.data.name) changeValue(field.key, customer.data.name);
