@@ -29,6 +29,17 @@ import { drizzle } from "drizzle-orm/node-postgres";
 
 import * as schema from "./schema";
 
+function normalizeConnectionUrl(connectionString: string): string {
+  const url = new URL(connectionString);
+  const sslMode = url.searchParams.get("sslmode")?.toLowerCase();
+
+  if (["prefer", "require", "verify-ca"].includes(sslMode ?? "")) {
+    url.searchParams.set("sslmode", "verify-full");
+  }
+
+  return url.toString();
+}
+
 type Database = ReturnType<typeof drizzle<typeof schema>>;
 
 let instance: Database | null = null;
@@ -61,7 +72,7 @@ function connect(): Database {
   }
   instance = drizzle(
     new Pool({
-      connectionString,
+      connectionString: normalizeConnectionUrl(connectionString),
       // Small on purpose. The connection string points at a transaction pooler
       // that is already multiplexing for us, and a large per-instance pool just
       // holds server-side slots idle.
