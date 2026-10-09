@@ -40,6 +40,7 @@ interface InvoiceLine {
   rate: string;
 }
 
+const structuredLineKinds = new Set(["invoices", "estimates", "sales-orders", "credit-notes"]);
 function getInitialValues(module: ModuleDefinition, record: BookkeepingRecord | null, defaults: Record<string, string>) {
   const values: Record<string, string> = {
     ...Object.fromEntries(module.fields.map((field) => [
@@ -186,12 +187,12 @@ export default function RecordEditor({ module, record, customers, vendors, items
     const submitter = (event.nativeEvent as SubmitEvent).submitter;
     const intent = submitter instanceof HTMLButtonElement ? submitter.value : "save-and-close";
     const shouldSend = module.kind === "invoices" && intent === "save-and-send";
-    const serializedInvoiceLines = serializeInvoiceLines(invoiceLines);
-    if (module.kind === "invoices") {
+    const serializedDocumentLines = serializeInvoiceLines(invoiceLines);
+    if (structuredLineKinds.has(module.kind)) {
       const enteredLines = invoiceLines.filter((line) => line.itemId || line.name.trim() || line.description.trim() || line.quantity.trim() || line.rate.trim());
       if (!enteredLines.length) {
         closePreparedMessage();
-        setError("Add at least one item or service to this invoice.");
+        setError(`Add at least one item or service to this ${module.label.toLowerCase()}.`);
         return;
       }
       const invalidLine = enteredLines.findIndex((line) => {
@@ -248,7 +249,7 @@ export default function RecordEditor({ module, record, customers, vendors, items
       const normalizedValues = selectedCustomer?.data.name
         ? { ...values, customer: selectedCustomer.data.name, customerId: selectedCustomer.id }
         : values;
-      const recordValues = module.kind === "invoices" ? { ...normalizedValues, lineItems: serializedInvoiceLines } : normalizedValues;
+      const recordValues = structuredLineKinds.has(module.kind) ? { ...normalizedValues, lineItems: serializedDocumentLines, ...(module.kind === "credit-notes" ? { amount: invoiceTotal.toFixed(2) } : {}) } : normalizedValues;
       const saved = await saveBookkeepingRecord(module.kind, record ? { ...record.data, ...recordValues } : recordValues, savedRecordId ?? undefined);
       setSavedRecordId(saved.id);
       onSaved(saved);
@@ -300,6 +301,7 @@ export default function RecordEditor({ module, record, customers, vendors, items
   const taxAmount = subtotal * (Math.max(0, Number(values.taxRate) || 0) / 100);
   const discount = Math.max(0, Number(values.discount) || 0);
   const invoiceTotal = Math.max(0, subtotal + taxAmount - discount);
+  const hasStructuredLines = structuredLineKinds.has(module.kind);
   const customerOptions = customers.filter((customer) => customer.data.name?.trim());
   const selectedCustomer = customerOptions.find((customer) => customer.id === values.customerId)
     ?? customerOptions.find((customer) => customer.data.name?.trim().toLowerCase() === values.customer?.trim().toLowerCase())
@@ -339,14 +341,14 @@ export default function RecordEditor({ module, record, customers, vendors, items
                     </div>
                   ) : (
                     <Label
-                      id={module.kind === "invoices" && field.key === "lineItems" ? "invoice-line-items-label" : undefined}
+                      id={hasStructuredLines && field.key === "lineItems" ? `${module.kind}-line-items-label` : undefined}
                       htmlFor={`field-${field.key}`}
                     >
                       {field.label}{field.required ? <span className="ml-1 text-destructive">*</span> : null}
                     </Label>
                   )}
 
-                  {field.type === "textarea" && !(module.kind === "invoices" && field.key === "lineItems") ? (
+                  {field.type === "textarea" && !(hasStructuredLines && field.key === "lineItems") ? (
                     <Textarea
                       id={`field-${field.key}`}
                       value={value}
@@ -357,8 +359,8 @@ export default function RecordEditor({ module, record, customers, vendors, items
                     />
                   ) : null}
 
-                  {module.kind === "invoices" && field.key === "lineItems" ? (
-                    <div className="space-y-3" role="group" aria-labelledby="invoice-line-items-label">
+                  {hasStructuredLines && field.key === "lineItems" ? (
+                    <div className="space-y-3" role="group" aria-labelledby={`${module.kind}-line-items-label`}>
                       {invoiceLines.map((line, index) => (
                         <div key={line.id} className="grid min-w-0 grid-cols-2 items-end gap-3 rounded-lg border border-border bg-card p-3 sm:grid-cols-[minmax(0,1.4fr)_5rem_7rem_7.5rem_2.75rem]">
                           <div className="col-span-2 min-w-0 space-y-1.5 sm:col-span-1">
@@ -471,7 +473,7 @@ export default function RecordEditor({ module, record, customers, vendors, items
                         <div className="flex justify-between gap-4"><span className="text-muted-foreground">Subtotal</span><span className="tabular-nums">{currencyAmount(subtotal, values.currency || "USD")}</span></div>
                         <div className="flex justify-between gap-4"><span className="text-muted-foreground">Tax ({Math.max(0, Number(values.taxRate) || 0)}%)</span><span className="tabular-nums">{currencyAmount(taxAmount, values.currency || "USD")}</span></div>
                         <div className="flex justify-between gap-4"><span className="text-muted-foreground">Discount</span><span className="tabular-nums">−{currencyAmount(discount, values.currency || "USD")}</span></div>
-                        <div className="flex justify-between gap-4 border-t border-border pt-2 font-semibold"><span>Invoice total</span><span className="tabular-nums">{currencyAmount(invoiceTotal, values.currency || "USD")}</span></div>
+                        <div className="flex justify-between gap-4 border-t border-border pt-2 font-semibold"><span>{module.label} total</span><span className="tabular-nums">{currencyAmount(invoiceTotal, values.currency || "USD")}</span></div>
                       </div>
                     </div>
                   ) : null}
@@ -577,17 +579,17 @@ export default function RecordEditor({ module, record, customers, vendors, items
                     <Input
                       id={`field-${field.key}`}
                       type={field.type ?? "text"}
-                      value={value}
+                      value={module.kind === "credit-notes" && field.key === "amount" ? invoiceTotal.toFixed(2) : value}
                       onChange={(event) => changeValue(field.key, event.target.value)}
                       placeholder={field.placeholder}
                       required={field.required}
                       min={field.type === "number" ? "0" : undefined}
                       step={field.type === "number" ? "any" : undefined}
-                      readOnly={module.kind === "invoices" && field.key === "dueDate"}
+                      readOnly={(module.kind === "invoices" && field.key === "dueDate") || (module.kind === "credit-notes" && field.key === "amount")}
                     />
                   ) : null}
 
-                  {field.help && field.type !== "file" && field.type !== "checkbox" && !(module.kind === "invoices" && field.key === "lineItems") ? <p className="text-xs leading-5 text-muted-foreground">{field.help}</p> : null}
+                  {field.help && field.type !== "file" && field.type !== "checkbox" && !(hasStructuredLines && field.key === "lineItems") ? <p className="text-xs leading-5 text-muted-foreground">{field.help}</p> : null}
                 </div>
               );
             })}

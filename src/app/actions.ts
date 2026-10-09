@@ -166,7 +166,7 @@ export async function saveBookkeepingRecord(
       data.locked = data.locked === "true" ? "true" : "false";
     }
   }
-  if (["invoices", "estimates", "sales-orders", "recurring-invoices", "purchase-orders"].includes(kind) && !data.lineItems?.trim()) {
+  if (["invoices", "estimates", "sales-orders", "credit-notes", "recurring-invoices", "purchase-orders"].includes(kind) && !data.lineItems?.trim()) {
     throw new Error("Add at least one item or service before saving.");
   }
   if (kind === "journals" && data.lines) {
