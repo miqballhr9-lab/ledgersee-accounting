@@ -1,6 +1,7 @@
 "use server";
 
 import { and, desc, eq } from "drizzle-orm";
+import { randomBytes } from "node:crypto";
 import { revalidatePath } from "next/cache";
 
 import { db } from "@/db";
@@ -8,6 +9,8 @@ import { bookkeepingRecord } from "@/db/schema";
 import { requireUser } from "@/lib/auth";
 import { sendEmailOrThrow } from "@/lib/email";
 import { createUploadUrl } from "@/lib/storage";
+import { dueDateForTerms, parseInvoiceLines } from "@/lib/invoice-utils";
+import { siteUrl } from "@/lib/site";
 import { isRecordKind, type BookkeepingRecord, type RecordKind } from "@/lib/bookkeeping-types";
 
 const convertTargets: Partial<Record<RecordKind, RecordKind>> = {
@@ -56,7 +59,7 @@ function sanitizePayload(input: Record<string, string>): Record<string, string> 
       if (!/^[a-zA-Z][a-zA-Z0-9]*$/.test(key) || typeof value !== "string") {
         throw new Error("One of the values needs to be checked.");
       }
-      return [key, value.trim().slice(0, key === "emailTemplate" ? 12000 : key === "lines" ? 30000 : 4000)];
+      return [key, value.trim().slice(0, key === "emailTemplate" ? 12000 : key === "lines" || key === "lineItems" ? 30000 : 4000)];
     }),
   );
 }
@@ -64,24 +67,16 @@ function sanitizePayload(input: Record<string, string>): Record<string, string> 
 function amountFromLineItems(data: Record<string, string>): Record<string, string> {
   if (!data.lineItems?.trim()) return data;
 
-  const lines = data.lineItems
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line) => line.split("|"));
-  if (lines.length === 0 || lines.some((parts) => {
-    const quantity = Number(parts[1]?.trim());
-    const rate = Number(parts[2]?.trim());
-    return !parts[0]?.trim() || !Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(rate) || rate < 0;
+  const lines = parseInvoiceLines(data.lineItems);
+  if (lines.length === 0 || lines.some((line) => {
+    const quantity = Number(line.quantity);
+    const rate = Number(line.rate);
+    return !line.name.trim() || !Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(rate) || rate < 0;
   })) {
-    throw new Error("Enter each line item as description | quantity | rate.");
+    throw new Error("Check that each item has a name, quantity, and non-negative rate.");
   }
 
-  const subtotal = lines.reduce((total, parts) => {
-      const quantity = Number(parts[1]?.trim());
-      const rate = Number(parts[2]?.trim());
-      return total + quantity * rate;
-    }, 0);
+  const subtotal = lines.reduce((total, line) => total + Number(line.quantity) * Number(line.rate), 0);
   const taxRate = Math.max(0, Number(data.taxRate) || 0);
   const discount = Math.max(0, Number(data.discount) || 0);
   if (taxRate > 100) throw new Error("Tax rate can’t be greater than 100%.");
@@ -129,6 +124,13 @@ export async function saveBookkeepingRecord(
   if (!isRecordKind(kind)) throw new Error("That section isn’t available.");
   if (kind === "reconciliations") throw new Error("Completed reconciliations can only be created from the reconciliation screen.");
   let data = amountFromLineItems(sanitizePayload(input));
+  if (kind === "invoices") {
+    const paymentTerms = data.paymentTerms || "30 days";
+    if (!["Due on receipt", "15 days", "30 days", "60 days"].includes(paymentTerms)) throw new Error("Choose one of the available payment terms.");
+    const calculatedDueDate = dueDateForTerms(data.issueDate ?? "", paymentTerms);
+    if (!calculatedDueDate) throw new Error("Choose an issue date and valid payment terms.");
+    data = { ...data, paymentTerms, dueDate: calculatedDueDate };
+  }
   if (kind === "accounts") {
     const accountRows = await db
       .select()
@@ -165,7 +167,7 @@ export async function saveBookkeepingRecord(
     }
   }
   if (["invoices", "estimates", "sales-orders", "recurring-invoices", "purchase-orders"].includes(kind) && !data.lineItems?.trim()) {
-    throw new Error("Add at least one line item as description | quantity | rate.");
+    throw new Error("Add at least one item or service before saving.");
   }
   if (kind === "journals" && data.lines) {
     if (!data.date || !data.reference) throw new Error("Enter the journal date and number.");
@@ -284,9 +286,20 @@ export async function saveBookkeepingRecord(
   }
 
   if (id) {
+    let updatedData = data;
+    if (kind === "invoices") {
+      const [existing] = await db
+        .select()
+        .from(bookkeepingRecord)
+        .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "invoices")))
+        .limit(1);
+      if (!existing) throw new Error("We couldn’t find that invoice. Refresh and try again.");
+      updatedData = { ...existing.data, ...data };
+      if (!data.shareToken && existing.data.shareToken) updatedData.shareToken = existing.data.shareToken;
+    }
     const [updated] = await db
       .update(bookkeepingRecord)
-      .set({ data, updatedAt: new Date() })
+      .set({ data: updatedData, updatedAt: new Date() })
       .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, kind)))
       .returning();
     if (!updated) throw new Error("We couldn’t find that record. Refresh and try again.");
@@ -450,7 +463,8 @@ export async function convertBookkeepingRecord(id: string): Promise<void> {
       ? {
           invoiceNumber: `INV-${Date.now()}`,
           issueDate: today,
-          dueDate: sourceData.expiryDate ?? "",
+          paymentTerms: "30 days",
+          dueDate: dueDateForTerms(today, "30 days"),
           paidAmount: "0",
           status: "Draft",
         }
@@ -674,13 +688,12 @@ export async function generateRecurringInvoice(id: string): Promise<void> {
   const sequence = Math.max(1, Number(settings?.data.nextInvoiceNumber) || 1);
   const prefix = settings?.data.invoicePrefix || "INV-";
   const today = new Date().toISOString().slice(0, 10);
-  const dueDate = new Date(`${today}T12:00:00`);
-  dueDate.setDate(dueDate.getDate() + 30);
   const invoiceData = amountFromLineItems({
     ...schedule.data,
     invoiceNumber: `${prefix}${String(sequence).padStart(4, "0")}`,
     issueDate: today,
-    dueDate: dueDate.toISOString().slice(0, 10),
+    paymentTerms: "30 days",
+    dueDate: dueDateForTerms(today, "30 days"),
     currency: settings?.data.currency || "USD",
     exchangeRate: "1",
     paidAmount: "0",
@@ -707,20 +720,21 @@ export async function generateRecurringInvoice(id: string): Promise<void> {
   revalidatePath("/app", "layout");
 }
 
-export async function sendInvoiceRecord(id: string): Promise<void> {
+export async function sendInvoiceRecord(id: string): Promise<string> {
   const me = await requireUser();
-  const rows = await db
+  const [invoice] = await db
     .select()
     .from(bookkeepingRecord)
-    .where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "invoices")));
-  const invoice = rows.find((row) => row.id === id);
+    .where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "invoices"), eq(bookkeepingRecord.id, id)))
+    .limit(1);
   if (!invoice) throw new Error("We couldn’t find that invoice. Refresh and try again.");
-  const customerName = invoice.data.customer?.toLowerCase();
+  const customerName = invoice.data.customer?.trim().toLowerCase();
   const customers = await db
     .select()
     .from(bookkeepingRecord)
     .where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "customers")));
-  const customer = customers.find((row) => row.data.name?.toLowerCase() === customerName);
+  const customer = customers.find((row) => row.id === invoice.data.customerId || row.id === invoice.data.customer)
+    ?? customers.find((row) => row.data.name?.trim().toLowerCase() === customerName);
   if (!customer?.data.email) throw new Error("Add an email address to this customer before sending the invoice.");
 
   const escapeHtml = (value: string) => value.replace(/[&<>"']/g, (character) => {
@@ -734,6 +748,8 @@ export async function sendInvoiceRecord(id: string): Promise<void> {
     .orderBy(desc(bookkeepingRecord.updatedAt))
     .limit(1);
   const company = settings?.data.companyName || me.name;
+  const shareToken = invoice.data.shareToken || randomBytes(32).toString("hex");
+  const invoiceLink = `${await siteUrl()}/invoice/${shareToken}`;
   const template = settings?.data.emailTemplate?.trim();
   const body = template
     ? template
@@ -745,14 +761,74 @@ export async function sendInvoiceRecord(id: string): Promise<void> {
   await sendEmailOrThrow({
     to: customer.data.email,
     subject: `Invoice ${invoice.data.invoiceNumber ?? ""} from ${company}`,
-    html: `<p>${escapeHtml(body)}</p>`,
+    html: `<p>${escapeHtml(body)}</p><p><a href="${escapeHtml(invoiceLink)}">View invoice ${escapeHtml(invoice.data.invoiceNumber ?? "")}</a></p>`,
     fromName: company,
   });
   await db
     .update(bookkeepingRecord)
-    .set({ data: { ...invoice.data, status: "Sent" }, updatedAt: new Date() })
+    .set({ data: { ...invoice.data, shareToken, status: "Sent" }, updatedAt: new Date() })
     .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id)));
   revalidatePath("/app", "layout");
+  return shareToken;
+}
+
+export async function createInvoiceShareLink(id: string): Promise<string> {
+  const me = await requireUser();
+  const [invoice] = await db
+    .select()
+    .from(bookkeepingRecord)
+    .where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "invoices"), eq(bookkeepingRecord.id, id)))
+    .limit(1);
+  if (!invoice) throw new Error("We couldn’t find that invoice. Refresh and try again.");
+  const shareToken = invoice.data.shareToken || randomBytes(32).toString("hex");
+  if (shareToken !== invoice.data.shareToken) {
+    await db
+      .update(bookkeepingRecord)
+      .set({ data: { ...invoice.data, shareToken }, updatedAt: new Date() })
+      .where(and(eq(bookkeepingRecord.id, invoice.id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "invoices")));
+  }
+  revalidatePath("/app", "layout");
+  return `${await siteUrl()}/invoice/${shareToken}`;
+}
+
+export async function duplicateInvoiceRecord(id: string): Promise<BookkeepingRecord> {
+  const me = await requireUser();
+  const [invoice] = await db
+    .select()
+    .from(bookkeepingRecord)
+    .where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "invoices"), eq(bookkeepingRecord.id, id)))
+    .limit(1);
+  if (!invoice) throw new Error("We couldn’t find that invoice. Refresh and try again.");
+
+  const [settings] = await db
+    .select()
+    .from(bookkeepingRecord)
+    .where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "settings")))
+    .orderBy(desc(bookkeepingRecord.updatedAt))
+    .limit(1);
+  const invoices = settings ? [] : await db
+    .select()
+    .from(bookkeepingRecord)
+    .where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "invoices")));
+  const sequence = Math.max(1, Number(settings?.data.nextInvoiceNumber) || invoices.length + 1);
+  const prefix = settings?.data.invoicePrefix || "INV-";
+  const invoiceNumber = `${prefix}${String(sequence).padStart(4, "0")}`;
+  const issueDate = new Date().toISOString().slice(0, 10);
+  const paymentTerms = invoice.data.paymentTerms || "30 days";
+  const duplicateData: Record<string, string> = { ...invoice.data, invoiceNumber, issueDate, dueDate: dueDateForTerms(issueDate, paymentTerms), paymentTerms, status: "Draft", paidAmount: "0", creditApplied: "0" };
+  delete duplicateData.shareToken;
+  const [created] = await db
+    .insert(bookkeepingRecord)
+    .values({ userId: me.id, kind: "invoices", data: amountFromLineItems(duplicateData) })
+    .returning();
+  if (settings) {
+    await db
+      .update(bookkeepingRecord)
+      .set({ data: { ...settings.data, nextInvoiceNumber: String(sequence + 1) }, updatedAt: new Date() })
+      .where(and(eq(bookkeepingRecord.id, settings.id), eq(bookkeepingRecord.userId, me.id)));
+  }
+  revalidatePath("/app", "layout");
+  return serializeRow(created);
 }
 
 export async function getAttachmentUploadTarget(

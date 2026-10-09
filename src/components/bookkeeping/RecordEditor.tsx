@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
-import { LoaderCircle, Plus, Trash2, UploadCloud } from "lucide-react";
+import Link from "next/link";
+import { LoaderCircle, Plus, Printer, Share2, Trash2, UploadCloud } from "lucide-react";
 
-import { getAttachmentUploadTarget, saveBookkeepingRecord } from "@/app/actions";
+import { createInvoiceShareLink, getAttachmentUploadTarget, saveBookkeepingRecord, sendInvoiceRecord } from "@/app/actions";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -14,6 +15,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { CurrencyPicker } from "@/components/bookkeeping/CurrencyPicker";
 import type { ModuleDefinition } from "@/lib/bookkeeping-config";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
+import { currencyAmount, dueDateForTerms, invoiceSubtotal, parseInvoiceLines } from "@/lib/invoice-utils";
 
 interface RecordEditorProps {
   module: ModuleDefinition;
@@ -30,80 +32,99 @@ interface RecordEditorProps {
 interface InvoiceLine {
   id: string;
   itemId: string;
+  name: string;
   description: string;
   quantity: string;
   rate: string;
 }
 
 function getInitialValues(module: ModuleDefinition, record: BookkeepingRecord | null, defaults: Record<string, string>) {
-  return Object.fromEntries(module.fields.map((field) => [
-    field.key,
-    record?.data[field.key] ?? defaults[field.key] ?? (field.type === "checkbox" ? "false" : ""),
-  ]));
-}
-
-function calculateLineTotal(lines: string, taxRate: string, discount: string) {
-  const subtotal = lines.split("\n").reduce((sum, line) => {
-    const [description, quantityValue, rateValue] = line.split("|");
-    const quantity = Number(quantityValue?.trim());
-    const rate = Number(rateValue?.trim());
-    if (!description?.trim() || !Number.isFinite(quantity) || !Number.isFinite(rate)) return sum;
-    return sum + Math.max(0, quantity) * Math.max(0, rate);
-  }, 0);
-  const tax = subtotal * (Math.max(0, Number(taxRate) || 0) / 100);
-  return Math.max(0, subtotal + tax - Math.max(0, Number(discount) || 0));
+  const values: Record<string, string> = {
+    ...Object.fromEntries(module.fields.map((field) => [
+      field.key,
+      record?.data[field.key] ?? defaults[field.key] ?? (field.type === "checkbox" ? "false" : ""),
+    ])),
+    customerId: record?.data.customerId ?? "",
+  };
+  if (module.kind === "invoices") {
+    values.paymentTerms = record?.data.paymentTerms || "30 days";
+    values.dueDate = dueDateForTerms(values.issueDate, values.paymentTerms) || values.dueDate;
+  }
+  return values;
 }
 
 function readInvoiceLines(lines: string, items: BookkeepingRecord[]): InvoiceLine[] {
-  const parsedLines = lines
-    .split("\n")
-    .map((line) => line.split("|"))
-    .filter((parts) => parts.some((part) => part.trim()))
-    .map((parts, index) => {
-      const description = parts[0]?.trim() ?? "";
-      const item = items.find((option) => option.data.name?.trim().toLowerCase() === description.toLowerCase());
-      return {
-        id: `saved-line-${index}`,
-        itemId: item?.id ?? "",
-        description,
-        quantity: parts[1]?.trim() ?? "",
-        rate: parts[2]?.trim() ?? "",
-      };
-    });
+  const parsedLines = parseInvoiceLines(lines).map((line, index) => {
+    const item = items.find((option) => option.id === line.itemId)
+      ?? items.find((option) => option.data.name?.trim().toLowerCase() === line.name.trim().toLowerCase());
+    return {
+      id: `saved-line-${index}`,
+      itemId: item?.id ?? "",
+      name: line.name,
+      description: line.description,
+      quantity: line.quantity,
+      rate: line.rate,
+    };
+  });
 
-  return parsedLines.length ? parsedLines : [{ id: "new-line", itemId: "", description: "", quantity: "", rate: "" }];
+  return parsedLines.length ? parsedLines : [{ id: "new-line", itemId: "", name: "", description: "", quantity: "", rate: "" }];
 }
 
 function serializeInvoiceLines(lines: InvoiceLine[]): string {
-  return lines
-    .filter((line) => line.itemId || line.description.trim() || line.quantity.trim() || line.rate.trim())
-    .map((line) => `${line.description.trim().replace(/[|\r\n]+/g, " ")} | ${line.quantity.trim()} | ${line.rate.trim()}`)
-    .join("\n");
-}
-
-function formatCurrency(value: number, currency: string) {
-  try {
-    return new Intl.NumberFormat(undefined, { style: "currency", currency }).format(value);
-  } catch {
-    return `${currency} ${value.toFixed(2)}`;
-  }
+  return JSON.stringify(lines
+    .filter((line) => line.itemId || line.name.trim() || line.description.trim() || line.quantity.trim() || line.rate.trim())
+    .map((line) => ({ ...line, name: line.name.trim(), description: line.description.trim() })));
 }
 
 export default function RecordEditor({ module, record, customers, vendors, items, defaults, open, onOpenChange, onSaved }: RecordEditorProps) {
   const [values, setValues] = useState<Record<string, string>>(() => getInitialValues(module, record, defaults));
   const [invoiceLines, setInvoiceLines] = useState<InvoiceLine[]>(() => readInvoiceLines(record?.data.lineItems ?? "", items));
+  const [savedRecordId, setSavedRecordId] = useState<string | null>(record?.id ?? null);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [shareLink, setShareLink] = useState("");
   const [pending, setPending] = useState(false);
   const [uploading, setUploading] = useState<string | null>(null);
+  const [sharing, setSharing] = useState(false);
 
   useEffect(() => {
     setValues(getInitialValues(module, record, defaults));
     setInvoiceLines(readInvoiceLines(record?.data.lineItems ?? "", items));
+    setSavedRecordId(record?.id ?? null);
     setError("");
+    setNotice("");
+    setShareLink("");
   }, [defaults, items, module, record]);
 
   function changeValue(key: string, value: string) {
-    setValues((current) => ({ ...current, [key]: value }));
+    setValues((current) => {
+      const next = { ...current, [key]: value };
+      if (module.kind === "invoices" && (key === "issueDate" || key === "paymentTerms")) {
+        next.dueDate = dueDateForTerms(next.issueDate ?? "", next.paymentTerms ?? "30 days");
+      }
+      return next;
+    });
+  }
+
+  async function shareInvoice() {
+    if (!savedRecordId) return;
+    setSharing(true);
+    setError("");
+    setNotice("");
+    try {
+      const link = await createInvoiceShareLink(savedRecordId);
+      setShareLink(link);
+      try {
+        await navigator.clipboard.writeText(link);
+        setNotice("Invoice link copied. Anyone with the link can view this invoice.");
+      } catch {
+        setNotice("Your invoice link is ready below to copy and share.");
+      }
+    } catch (shareError) {
+      setError(shareError instanceof Error ? shareError.message : "We couldn’t create the invoice link.");
+    } finally {
+      setSharing(false);
+    }
   }
 
   async function uploadFile(key: string, file: File | undefined) {
@@ -130,7 +151,7 @@ export default function RecordEditor({ module, record, customers, vendors, items
     event.preventDefault();
     const serializedInvoiceLines = serializeInvoiceLines(invoiceLines);
     if (module.kind === "invoices") {
-      const enteredLines = invoiceLines.filter((line) => line.itemId || line.description.trim() || line.quantity.trim() || line.rate.trim());
+      const enteredLines = invoiceLines.filter((line) => line.itemId || line.name.trim() || line.description.trim() || line.quantity.trim() || line.rate.trim());
       if (!enteredLines.length) {
         setError("Add at least one item or service to this invoice.");
         return;
@@ -138,7 +159,7 @@ export default function RecordEditor({ module, record, customers, vendors, items
       const invalidLine = enteredLines.findIndex((line) => {
         const quantity = Number(line.quantity);
         const rate = Number(line.rate);
-        return !line.description.trim() || !Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(rate) || rate < 0;
+        return !line.name.trim() || !Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(rate) || rate < 0;
       });
       if (invalidLine !== -1) {
         setError(`Check line ${invalidLine + 1}: choose an item or service and enter a quantity and rate.`);
@@ -162,10 +183,30 @@ export default function RecordEditor({ module, record, customers, vendors, items
     }
     setPending(true);
     setError("");
+    setNotice("");
     try {
-      const recordValues = module.kind === "invoices" ? { ...values, lineItems: serializedInvoiceLines } : values;
-      const saved = await saveBookkeepingRecord(module.kind, record ? { ...record.data, ...recordValues } : recordValues, record?.id);
+      const selectedCustomer = module.kind === "invoices"
+        ? customerOptions.find((customer) => customer.id === values.customerId || customer.id === values.customer)
+          ?? customerOptions.find((customer) => customer.data.name?.trim().toLowerCase() === values.customer?.trim().toLowerCase())
+        : undefined;
+      const normalizedValues = selectedCustomer?.data.name
+        ? { ...values, customer: selectedCustomer.data.name, customerId: selectedCustomer.id }
+        : values;
+      const recordValues = module.kind === "invoices" ? { ...normalizedValues, lineItems: serializedInvoiceLines } : normalizedValues;
+      const saved = await saveBookkeepingRecord(module.kind, record ? { ...record.data, ...recordValues } : recordValues, savedRecordId ?? undefined);
+      setSavedRecordId(saved.id);
       onSaved(saved);
+      const submitter = (event.nativeEvent as SubmitEvent).submitter;
+      const shouldSend = module.kind === "invoices" && submitter instanceof HTMLButtonElement && submitter.value === "save-and-send";
+      if (shouldSend) {
+        try {
+          const shareToken = await sendInvoiceRecord(saved.id);
+          onSaved({ ...saved, data: { ...saved.data, shareToken, status: "Sent" } });
+        } catch (sendError) {
+          setError(`Invoice saved, but it couldn’t be sent: ${sendError instanceof Error ? sendError.message : "Please try again."}`);
+          return;
+        }
+      }
       onOpenChange(false);
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : "We couldn’t save this record. Please try again.");
@@ -174,9 +215,14 @@ export default function RecordEditor({ module, record, customers, vendors, items
     }
   }
 
-  const linesValue = module.kind === "invoices" ? serializeInvoiceLines(invoiceLines) : values.lineItems;
-  const lineTotal = linesValue ? calculateLineTotal(linesValue, values.taxRate ?? "", values.discount ?? "") : null;
+  const subtotal = invoiceSubtotal(invoiceLines);
+  const taxAmount = subtotal * (Math.max(0, Number(values.taxRate) || 0) / 100);
+  const discount = Math.max(0, Number(values.discount) || 0);
+  const invoiceTotal = Math.max(0, subtotal + taxAmount - discount);
   const customerOptions = customers.filter((customer) => customer.data.name?.trim());
+  const selectedCustomer = customerOptions.find((customer) => customer.id === values.customerId)
+    ?? customerOptions.find((customer) => customer.data.name?.trim().toLowerCase() === values.customer?.trim().toLowerCase())
+    ?? customerOptions.find((customer) => customer.id === values.customer);
   const vendorOptions = vendors.filter((vendor) => vendor.data.name?.trim());
 
   return (
@@ -226,7 +272,7 @@ export default function RecordEditor({ module, record, customers, vendors, items
                   {module.kind === "invoices" && field.key === "lineItems" ? (
                     <div className="space-y-3" role="group" aria-labelledby="invoice-line-items-label">
                       {invoiceLines.map((line, index) => (
-                        <div key={line.id} className="grid min-w-0 grid-cols-2 items-end gap-3 rounded-lg border border-border bg-card p-3 sm:grid-cols-[minmax(0,1fr)_5rem_7rem_7.5rem_2.75rem]">
+                        <div key={line.id} className="grid min-w-0 grid-cols-2 items-end gap-3 rounded-lg border border-border bg-card p-3 sm:grid-cols-[minmax(0,1.4fr)_5rem_7rem_7.5rem_2.75rem]">
                           <div className="col-span-2 min-w-0 space-y-1.5 sm:col-span-1">
                             <Label htmlFor={`invoice-item-${line.id}`} className="text-xs text-muted-foreground">Item or service</Label>
                             <Select
@@ -238,7 +284,8 @@ export default function RecordEditor({ module, record, customers, vendors, items
                                   ? {
                                       ...currentLine,
                                       itemId: item.id,
-                                      description: item.data.name?.trim() ?? "",
+                                      name: item.data.name?.trim() ?? "",
+                                      description: currentLine.description || item.data.description?.trim() || "",
                                       quantity: currentLine.quantity || "1",
                                       rate: item.data.rate ?? "0",
                                     }
@@ -256,15 +303,19 @@ export default function RecordEditor({ module, record, customers, vendors, items
                                   const unit = item.data.unit?.trim();
                                   return (
                                     <SelectItem value={item.id} key={item.id}>
-                                      {itemName} · {itemType} · {formatCurrency(rate, values.currency || "USD")}{unit ? ` / ${unit}` : ""}
+                                      {itemName} · {itemType} · {currencyAmount(rate, values.currency || "USD")}{unit ? ` / ${unit}` : ""}
                                     </SelectItem>
                                   );
                                 })}
                               </SelectContent>
                             </Select>
-                            {line.description && !line.itemId ? (
-                              <p className="truncate text-xs text-muted-foreground">Saved description: {line.description}</p>
-                            ) : null}
+                            <Label htmlFor={`invoice-description-${line.id}`} className="text-xs text-muted-foreground">Description</Label>
+                            <Input
+                              id={`invoice-description-${line.id}`}
+                              value={line.description}
+                              onChange={(event) => setInvoiceLines((current) => current.map((currentLine) => currentLine.id === line.id ? { ...currentLine, description: event.target.value } : currentLine))}
+                              placeholder="Optional details for this item or service"
+                            />
                           </div>
                           <div className="min-w-0 space-y-1.5">
                             <Label htmlFor={`invoice-quantity-${line.id}`} className="text-xs text-muted-foreground">Quantity</Label>
@@ -295,7 +346,7 @@ export default function RecordEditor({ module, record, customers, vendors, items
                           <div className="min-w-0 space-y-1.5">
                             <p className="text-xs text-muted-foreground">Total</p>
                             <div className="flex h-8 min-w-0 items-center truncate rounded-lg bg-muted px-2.5 text-sm font-medium tabular-nums">
-                              {formatCurrency((Number(line.quantity) || 0) * (Number(line.rate) || 0), values.currency || "USD")}
+                              {currencyAmount((Number(line.quantity) || 0) * (Number(line.rate) || 0), values.currency || "USD")}
                             </div>
                           </div>
                           <Button
@@ -317,6 +368,7 @@ export default function RecordEditor({ module, record, customers, vendors, items
                         onClick={() => setInvoiceLines((current) => [...current, {
                           id: crypto.randomUUID(),
                           itemId: "",
+                          name: "",
                           description: "",
                           quantity: "",
                           rate: "",
@@ -327,13 +379,19 @@ export default function RecordEditor({ module, record, customers, vendors, items
                         Add line
                       </Button>
                       {!items.length ? <p className="text-xs leading-5 text-muted-foreground">Create an item or service in Items & services, then select it here.</p> : null}
+                      <div className="space-y-2 rounded-lg border border-border bg-muted/30 p-3 text-sm">
+                        <div className="flex justify-between gap-4"><span className="text-muted-foreground">Subtotal</span><span className="tabular-nums">{currencyAmount(subtotal, values.currency || "USD")}</span></div>
+                        <div className="flex justify-between gap-4"><span className="text-muted-foreground">Tax ({Math.max(0, Number(values.taxRate) || 0)}%)</span><span className="tabular-nums">{currencyAmount(taxAmount, values.currency || "USD")}</span></div>
+                        <div className="flex justify-between gap-4"><span className="text-muted-foreground">Discount</span><span className="tabular-nums">−{currencyAmount(discount, values.currency || "USD")}</span></div>
+                        <div className="flex justify-between gap-4 border-t border-border pt-2 font-semibold"><span>Invoice total</span><span className="tabular-nums">{currencyAmount(invoiceTotal, values.currency || "USD")}</span></div>
+                      </div>
                     </div>
                   ) : null}
 
                   {field.key === "customer" ? (
                     <>
                       <Select
-                        value={customerOptions.find((customer) => customer.data.name === value)?.id}
+                        value={selectedCustomer?.id}
                         itemToStringLabel={(customerId) => {
                           const customer = customerOptions.find((option) => option.id === customerId);
                           if (!customer) return "";
@@ -343,7 +401,10 @@ export default function RecordEditor({ module, record, customers, vendors, items
                         }}
                         onValueChange={(customerId) => {
                           const customer = customerOptions.find((option) => option.id === customerId);
-                          if (customer?.data.name) changeValue(field.key, customer.data.name);
+                          if (customer?.data.name) {
+                            changeValue(field.key, customer.data.name);
+                            setValues((current) => ({ ...current, customer: customer.data.name, customerId: customer.id }));
+                          }
                         }}
                       >
                         <SelectTrigger id={`field-${field.key}`} className="w-full" aria-required={field.required}>
@@ -432,29 +493,37 @@ export default function RecordEditor({ module, record, customers, vendors, items
                       required={field.required}
                       min={field.type === "number" ? "0" : undefined}
                       step={field.type === "number" ? "any" : undefined}
+                      readOnly={module.kind === "invoices" && field.key === "dueDate"}
                     />
                   ) : null}
 
                   {field.help && field.type !== "file" && field.type !== "checkbox" && !(module.kind === "invoices" && field.key === "lineItems") ? <p className="text-xs leading-5 text-muted-foreground">{field.help}</p> : null}
-                  {field.key === "lineItems" && lineTotal !== null ? (
-                    <p className="flex justify-between rounded-md bg-accent/60 px-3 py-2 text-xs text-accent-foreground">
-                      <span>Calculated total</span>
-                      <span className="font-semibold tabular-nums">{formatCurrency(lineTotal, values.currency || "USD")}</span>
-                    </p>
-                  ) : null}
                 </div>
               );
             })}
           </div>
 
           {error ? <p role="alert" className="rounded-md border border-destructive/20 bg-destructive/5 px-3 py-2.5 text-sm text-destructive">{error}</p> : null}
+          {notice ? (
+            <div role="status" className="rounded-md border border-primary/20 bg-primary/5 px-3 py-2.5 text-sm text-primary">
+              <p>{notice}</p>
+              {shareLink ? <a href={shareLink} target="_blank" rel="noreferrer" className="mt-1 block break-all underline underline-offset-2">{shareLink}</a> : null}
+            </div>
+          ) : null}
         </form>
 
         <DialogFooter>
           <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={pending || Boolean(uploading)}>Cancel</Button>
+          {module.kind === "invoices" && savedRecordId ? (
+            <>
+              <Button type="button" variant="outline" onClick={() => void shareInvoice()} disabled={sharing || pending}><Share2 size={15} />{sharing ? "Copying…" : "Share link"}</Button>
+              <Button type="button" nativeButton={false} variant="outline" render={<Link href={`/app/invoices/${savedRecordId}/print`} target="_blank" rel="noreferrer" />}><Printer size={15} />Print / PDF</Button>
+            </>
+          ) : null}
           <Button type="submit" form="record-editor-form" disabled={pending || Boolean(uploading)}>
             {pending ? "Saving…" : record ? "Save changes" : `Save ${module.label.toLowerCase()}`}
           </Button>
+          {module.kind === "invoices" ? <Button type="submit" name="intent" value="save-and-send" form="record-editor-form" disabled={pending || Boolean(uploading)}>{pending ? "Saving…" : "Save and send"}</Button> : null}
         </DialogFooter>
       </DialogContent>
     </Dialog>

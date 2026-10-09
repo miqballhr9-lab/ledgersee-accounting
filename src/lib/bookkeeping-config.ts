@@ -81,6 +81,7 @@ export const modules: readonly ModuleDefinition[] = [
     fields: [
       { key: "invoiceNumber", label: "Invoice number", required: true },
       { key: "customer", label: "Customer", required: true },
+      { key: "paymentTerms", label: "Payment terms", type: "select", required: true, options: ["Due on receipt", "15 days", "30 days", "60 days"] },
       { key: "issueDate", label: "Issue date", type: "date" },
       { key: "dueDate", label: "Due date", type: "date" },
       { key: "currency", label: "Currency", type: "currency" },

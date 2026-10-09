@@ -1,13 +1,14 @@
 "use client";
 
-import { ArrowRightLeft, BadgeCheck, Check, CircleDollarSign, Mail, Pencil, Play, Trash2 } from "lucide-react";
+import { ArrowRightLeft, BadgeCheck, Check, CircleDollarSign, Copy, Ellipsis, Link2, Mail, Pencil, Play, Printer, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import type { ModuleDefinition } from "@/lib/bookkeeping-config";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
 
-export type RecordActionKind = "convert" | "payment" | "send" | "mark-paid" | "match" | "apply-credit" | "generate";
+export type RecordActionKind = "convert" | "payment" | "send" | "mark-paid" | "match" | "apply-credit" | "generate" | "duplicate" | "share" | "print";
 
 interface RecordTableProps {
   module: ModuleDefinition;
@@ -119,11 +120,25 @@ function rowActions(module: ModuleDefinition, record: BookkeepingRecord, onActio
   if (module.kind === "recurring-invoices") actions.push({ kind: "generate", label: "Generate invoice", icon: Play });
   if (module.kind === "transactions") actions.push({ kind: "match", label: record.data.matched === "true" ? "Mark unmatched" : "Match transaction", icon: Check });
 
-  return actions.map(({ kind, label, icon: Icon }) => (
-    <Button key={kind} type="button" variant="outline" size="sm" className="h-7 gap-1.5 px-2 text-[11px]" onClick={() => onAction(kind, record)}>
-      <Icon size={13} />{label}
-    </Button>
-  ));
+  return (
+    <>
+      {actions.map(({ kind, label, icon: Icon }) => (
+        <Button key={kind} type="button" variant="outline" size="sm" className="h-7 gap-1.5 px-2 text-[11px]" onClick={() => onAction(kind, record)}>
+          <Icon size={13} />{label}
+        </Button>
+      ))}
+      {module.kind === "invoices" ? (
+        <DropdownMenu>
+          <DropdownMenuTrigger render={<Button type="button" variant="outline" size="icon-sm" aria-label="More invoice actions"><Ellipsis size={15} /></Button>} />
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onClick={() => onAction("duplicate", record)}><Copy size={14} />Copy invoice</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => onAction("share", record)}><Link2 size={14} />Copy share link</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => onAction("print", record)}><Printer size={14} />Print or save PDF</DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      ) : null}
+    </>
+  );
 }
 
 export default function RecordTable({ module, records, onEdit, onDelete, onAction }: RecordTableProps) {

@@ -7,7 +7,9 @@ import { ArrowDownToLine, Plus, Search } from "lucide-react";
 
 import {
   convertBookkeepingRecord,
+  createInvoiceShareLink,
   deleteBookkeepingRecord,
+  duplicateInvoiceRecord,
   applyCreditNote,
   generateRecurringInvoice,
   markRecordPaid,
@@ -54,6 +56,7 @@ function createDefaults(module: ModuleDefinition, records: BookkeepingRecord[]) 
     values.invoiceNumber = `${prefix}${String(sequence).padStart(4, "0")}`;
     values.issueDate = dateString(today);
     values.dueDate = dateString(dueDate);
+    values.paymentTerms = "30 days";
     values.currency = settings?.currency || "USD";
     values.exchangeRate = "1";
     values.paidAmount = "0";
@@ -155,6 +158,13 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
 
   const pageCount = Math.max(1, Math.ceil(filteredRecords.length / pageSize));
   const visibleRecords = filteredRecords.slice((page - 1) * pageSize, page * pageSize);
+  const tableRecords = module.kind === "invoices"
+    ? visibleRecords.map((record) => {
+        const customer = customers.find((item) => item.id === record.data.customerId || item.id === record.data.customer)
+          ?? customers.find((item) => item.data.name?.trim().toLowerCase() === record.data.customer?.trim().toLowerCase());
+        return customer?.data.name ? { ...record, data: { ...record.data, customer: customer.data.name } } : record;
+      })
+    : visibleRecords;
   const canExport = module.kind !== "settings";
   const currency = records.find((record) => record.data.currency)?.data.currency || "USD";
 
@@ -216,6 +226,25 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
       } else if (kind === "send") {
         await sendInvoiceRecord(record.id);
         setActionMessage("Invoice emailed to the customer and marked as sent.");
+      } else if (kind === "duplicate") {
+        const duplicate = await duplicateInvoiceRecord(record.id);
+        handleSaved(duplicate);
+        setEditingRecord(duplicate);
+        setDefaults({});
+        setEditorOpen(true);
+        setActionMessage("Invoice copy created as a draft.");
+      } else if (kind === "share") {
+        const link = await createInvoiceShareLink(record.id);
+        try {
+          await navigator.clipboard.writeText(link);
+          setActionMessage("Invoice link copied. Anyone with the link can view this invoice.");
+        } catch {
+          setActionMessage(`Copy this invoice link to share: ${link}`);
+        }
+      } else if (kind === "print") {
+        const printWindow = window.open(`/app/invoices/${record.id}/print`, "_blank");
+        if (printWindow) printWindow.opener = null;
+        else setActionMessage("Allow pop-ups to open this invoice for printing.");
       } else if (kind === "apply-credit") {
         await applyCreditNote(record.id);
         setActionMessage("Credit applied to the matching invoice balance.");
@@ -322,7 +351,7 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
 
         <RecordTable
           module={module}
-          records={visibleRecords}
+          records={tableRecords}
           onEdit={openEditRecord}
           onDelete={(record) => void handleDelete(record)}
           onAction={(kind, record) => void handleAction(kind, record)}
