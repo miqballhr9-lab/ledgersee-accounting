@@ -90,6 +90,7 @@ function serializeInvoiceLines(lines: InvoiceLine[]): string {
 export default function RecordEditor({ module, record, customers, vendors, items, defaults, open, onOpenChange, onSaved, onSaveComplete }: RecordEditorProps) {
   const [values, setValues] = useState<Record<string, string>>(() => getInitialValues(module, record, defaults));
   const [invoiceLines, setInvoiceLines] = useState<InvoiceLine[]>(() => readInvoiceLines(record?.data.lineItems ?? "", items));
+  const [availableItems, setAvailableItems] = useState(() => items.filter((item) => item.data.name?.trim()));
   const [savedRecordId, setSavedRecordId] = useState<string | null>(record?.id ?? null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -97,6 +98,14 @@ export default function RecordEditor({ module, record, customers, vendors, items
   const [pending, setPending] = useState(false);
   const [uploading, setUploading] = useState<string | null>(null);
   const [sharing, setSharing] = useState(false);
+  const [itemCreationLineId, setItemCreationLineId] = useState<string | null>(null);
+  const [newItemName, setNewItemName] = useState("");
+  const [newItemType, setNewItemType] = useState("Service");
+  const [newItemRate, setNewItemRate] = useState("");
+  const [newItemUnit, setNewItemUnit] = useState("");
+  const [creatingItem, setCreatingItem] = useState(false);
+  const [itemCreateError, setItemCreateError] = useState("");
+  const itemsRef = useRef(items);
   const formRef = useRef<HTMLFormElement>(null);
   const sendSubmitRef = useRef<HTMLButtonElement>(null);
   const saveNewSubmitRef = useRef<HTMLButtonElement>(null);
@@ -106,14 +115,25 @@ export default function RecordEditor({ module, record, customers, vendors, items
 
   useEffect(() => {
     setValues(getInitialValues(module, record, defaults));
-    setInvoiceLines(readInvoiceLines(record?.data.lineItems ?? "", items));
+    setInvoiceLines(readInvoiceLines(record?.data.lineItems ?? "", itemsRef.current));
     setSavedRecordId(record?.id ?? null);
     setError("");
     setNotice("");
     setShareLink("");
     sendMethod.current = "email";
     sendWindow.current = null;
-  }, [defaults, items, module, record]);
+    setItemCreationLineId(null);
+    setNewItemName("");
+    setNewItemType("Service");
+    setNewItemRate("");
+    setNewItemUnit("");
+    setItemCreateError("");
+  }, [defaults, module, record]);
+
+  useEffect(() => {
+    itemsRef.current = items;
+    setAvailableItems(items.filter((item) => item.data.name?.trim()));
+  }, [items]);
 
   function changeValue(key: string, value: string) {
     setValues((current) => {
@@ -145,6 +165,42 @@ export default function RecordEditor({ module, record, customers, vendors, items
       setError(shareError instanceof Error ? shareError.message : `We couldn’t create the ${module.label.toLowerCase()} link.`);
     } finally {
       setSharing(false);
+    }
+  }
+
+  async function createItemForLine(lineId: string) {
+    const rate = Number(newItemRate);
+    if (!newItemName.trim()) {
+      setItemCreateError("Enter an item or service name.");
+      return;
+    }
+    if (!newItemRate.trim() || !Number.isFinite(rate) || rate < 0) {
+      setItemCreateError("Enter a valid rate of zero or more.");
+      return;
+    }
+
+    setCreatingItem(true);
+    setItemCreateError("");
+    try {
+      const created = await saveBookkeepingRecord("items", {
+        name: newItemName.trim(),
+        itemType: newItemType,
+        rate: rate.toString(),
+        unit: newItemUnit.trim(),
+      });
+      setAvailableItems((current) => [created, ...current]);
+      setInvoiceLines((current) => current.map((line) => line.id === lineId
+        ? { ...line, itemId: created.id, name: created.data.name, quantity: line.quantity || "1", rate: created.data.rate }
+        : line));
+      setItemCreationLineId(null);
+      setNewItemName("");
+      setNewItemRate("");
+      setNewItemUnit("");
+      setNotice(`${created.data.name} added to Items & services and selected for this ${module.label.toLowerCase()}.`);
+    } catch (createError) {
+      setItemCreateError(createError instanceof Error ? createError.message : "We couldn’t add this item. Please try again.");
+    } finally {
+      setCreatingItem(false);
     }
   }
 
@@ -384,7 +440,7 @@ export default function RecordEditor({ module, record, customers, vendors, items
                             <Select
                               value={line.itemId || undefined}
                               onValueChange={(itemId) => {
-                                const item = items.find((option) => option.id === itemId);
+                                const item = availableItems.find((option) => option.id === itemId);
                                 if (!item) return;
                                 setInvoiceLines((current) => current.map((currentLine) => currentLine.id === line.id
                                   ? {
@@ -398,11 +454,11 @@ export default function RecordEditor({ module, record, customers, vendors, items
                                   : currentLine));
                               }}
                             >
-                              <SelectTrigger id={`invoice-item-${line.id}`} className="w-full" disabled={!items.length}>
-                                <SelectValue placeholder={items.length ? "Choose item or service" : "Add an item or service first"} />
+                              <SelectTrigger id={`invoice-item-${line.id}`} className="w-full" disabled={!availableItems.length}>
+                                <SelectValue placeholder={availableItems.length ? "Choose item or service" : "Add an item or service first"} />
                               </SelectTrigger>
                               <SelectContent>
-                                {items.filter((item) => item.data.name?.trim()).map((item) => {
+                                {availableItems.map((item) => {
                                   const itemName = item.data.name.trim();
                                   const itemType = item.data.itemType || "Item";
                                   const rate = Number(item.data.rate) || 0;
@@ -415,6 +471,38 @@ export default function RecordEditor({ module, record, customers, vendors, items
                                 })}
                               </SelectContent>
                             </Select>
+                            {itemCreationLineId === line.id ? (
+                              <div className="space-y-2 rounded-md border border-border bg-muted/30 p-2.5">
+                                <p className="text-xs font-medium">Add to Items & services</p>
+                                <Input aria-label="New item or service name" value={newItemName} onChange={(event) => setNewItemName(event.target.value)} placeholder="Name" autoFocus />
+                                <div className="grid grid-cols-2 gap-2">
+                                  <Select value={newItemType} onValueChange={(nextValue) => setNewItemType(nextValue ?? "Service")}>
+                                    <SelectTrigger aria-label="Item type"><SelectValue /></SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="Product">Product</SelectItem>
+                                      <SelectItem value="Service">Service</SelectItem>
+                                    </SelectContent>
+                                  </Select>
+                                  <Input aria-label="Rate" type="number" min="0" step="any" value={newItemRate} onChange={(event) => setNewItemRate(event.target.value)} placeholder="Rate" />
+                                </div>
+                                <Input aria-label="Unit" value={newItemUnit} onChange={(event) => setNewItemUnit(event.target.value)} placeholder="Unit (optional)" />
+                                {itemCreateError ? <p role="alert" className="text-xs text-destructive">{itemCreateError}</p> : null}
+                                <div className="flex justify-end gap-2">
+                                  <Button type="button" variant="ghost" size="sm" onClick={() => { setItemCreationLineId(null); setItemCreateError(""); }}>Cancel</Button>
+                                  <Button type="button" size="sm" disabled={creatingItem} onClick={() => void createItemForLine(line.id)}>{creatingItem ? "Adding…" : "Add and select"}</Button>
+                                </div>
+                              </div>
+                            ) : (
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                className="h-auto min-h-8 px-1.5 text-xs"
+                                onClick={() => { setItemCreationLineId(line.id); setItemCreateError(""); }}
+                              >
+                                <Plus size={14} />{availableItems.length ? "Add new item or service" : "Create item or service"}
+                              </Button>
+                            )}
                             <Label htmlFor={`invoice-description-${line.id}`} className="text-xs text-muted-foreground">Description</Label>
                             <Input
                               id={`invoice-description-${line.id}`}
@@ -484,7 +572,7 @@ export default function RecordEditor({ module, record, customers, vendors, items
                         <Plus size={16} strokeWidth={1.75} />
                         Add line
                       </Button>
-                      {!items.length ? <p className="text-xs leading-5 text-muted-foreground">Create an item or service in Items & services, then select it here.</p> : null}
+                      {!availableItems.length ? <p className="text-xs leading-5 text-muted-foreground">Add the name and rate with “Create item or service” above; it will be saved and selected here.</p> : null}
                       <div className="space-y-2 rounded-lg border border-border bg-muted/30 p-3 text-sm">
                         <div className="flex justify-between gap-4"><span className="text-muted-foreground">Subtotal</span><span className="tabular-nums">{currencyAmount(subtotal, values.currency || "USD")}</span></div>
                         <div className="flex justify-between gap-4"><span className="text-muted-foreground">Tax ({Math.max(0, Number(values.taxRate) || 0)}%)</span><span className="tabular-nums">{currencyAmount(taxAmount, values.currency || "USD")}</span></div>
