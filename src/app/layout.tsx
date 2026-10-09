@@ -8,12 +8,12 @@ import "./globals.css";
 // globals.css, or self-host a .woff2 via next/font/local.
 export const metadata: Metadata = {
   title: {
-    default: "Hisaavora — simple business accounting",
-    template: "%s · Hisaavora",
+    default: "MIKLEDGER — simple business accounting",
+    template: "%s · MIKLEDGER",
   },
   description: "Manage customers, invoices, expenses, banking and reports in one clear workspace.",
   openGraph: {
-    title: "Hisaavora — simple business accounting",
+    title: "MIKLEDGER — simple business accounting",
     description: "A clear place to manage your business finances.",
     type: "website",
   },

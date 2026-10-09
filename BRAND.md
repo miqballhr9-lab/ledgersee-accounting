@@ -1,7 +1,7 @@
 ---
-name: "Hisaavora"
-slug: "hisaavora"
-one_liner: "A small-business bookkeeping workspace for customers, sales, purchases, banking, and financial reports."
+name: "MIKLEDGER"
+slug: "mikledger"
+one_liner: "MIKLEDGER is a small-business bookkeeping workspace for customers, sales, purchases, banking, and financial reports."
 audience: "Founders, freelancers, and small operators who need practical finance workflows without a complex setup."
 value_props:
   - "Email and password sign-up/sign-in with records isolated to the signed-in account"
@@ -47,7 +47,7 @@ proposed:
 
 ## What this is
 
-The brand facts Hisaavora itself settled: what it is called, what it says it does, who the brain says it is for, the tokens the shipped code was checked against, and the call-to-action text on its own landing page. The values above are normative and readable without a model.
+The brand facts MIKLEDGER itself settled: what it is called, what it says it does, who the brain says it is for, the tokens the shipped code was checked against, and the call-to-action text on its own landing page. The values above are normative and readable without a model.
 
 `proposed:` is the exception — it is read off the committed visual direction and offered as a starting point, not recorded as a decision.
 

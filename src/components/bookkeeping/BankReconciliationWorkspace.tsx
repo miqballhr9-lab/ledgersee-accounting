@@ -162,7 +162,7 @@ export default function BankReconciliationWorkspace({ accounts, transactions: in
         <div className="mb-6">
           <p className="text-xs font-semibold uppercase tracking-[0.14em] text-primary">Banking / Reconciliation</p>
           <h1 className="mt-2 text-3xl font-semibold tracking-tight">Reconciliation</h1>
-          <p className="mt-2 max-w-2xl text-sm text-muted-foreground">Compare a bank statement with the transactions recorded in Hisaavora.</p>
+          <p className="mt-2 max-w-2xl text-sm text-muted-foreground">Compare a bank statement with the transactions recorded in MIKLEDGER.</p>
         </div>
         <Card className="flex flex-col items-start gap-4 border-border p-6 sm:p-8">
           <span className="grid size-11 place-items-center rounded-lg bg-accent text-accent-foreground"><Landmark size={20} /></span>
@@ -300,7 +300,7 @@ export default function BankReconciliationWorkspace({ accounts, transactions: in
           )}
 
           <div className="flex flex-col gap-3 border-t border-border bg-muted/30 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
-            <p className="max-w-2xl text-xs leading-5 text-muted-foreground">This matches transactions you’ve entered against a statement. Hisaavora doesn’t connect directly to your bank.</p>
+            <p className="max-w-2xl text-xs leading-5 text-muted-foreground">This matches transactions you’ve entered against a statement. MIKLEDGER doesn’t connect directly to your bank.</p>
             <Button type="submit" disabled={!canComplete} className="shrink-0">
               {pending ? "Saving reconciliation…" : "Complete reconciliation"}<MoveRight size={15} />
             </Button>

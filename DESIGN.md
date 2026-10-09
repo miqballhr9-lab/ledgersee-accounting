@@ -1,6 +1,6 @@
 ---
-name: "Hisaavora"
-description: "A small-business bookkeeping workspace for customers, sales, purchases, banking, and financial reports."
+name: "MIKLEDGER"
+description: "MIKLEDGER is a small-business bookkeeping workspace for customers, sales, purchases, banking, and financial reports."
 colors:
   background: "oklch(0.975 0.008 244)"
   foreground: "oklch(0.25 0.035 251)"

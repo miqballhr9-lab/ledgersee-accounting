@@ -1,7 +1,7 @@
 <!-- OWNER: Build (with the user) · READERS: every agent · READ THIS FIRST -->
-# Hisaavora
+# MIKLEDGER
 
-**One-liner:** A small-business bookkeeping workspace for customers, sales, purchases, banking, and financial reports.
+**One-liner:** MIKLEDGER is a small-business bookkeeping workspace for customers, sales, purchases, banking, and financial reports.
 
 ## Goal
 Give owners a clear, account-specific place to manage routine bookkeeping and follow outstanding money.

@@ -1,12 +1,12 @@
 <!-- Generated from .project/PROJECT.md by the engine — do not run `impeccable init`, which would interview a user who isn't here. Edit .project/PROJECT.md; this file is regenerated from it. -->
-# Hisaavora
+# MIKLEDGER
 
 **Platform:** Responsive web — Next.js, React, Tailwind. shadcn/ui and lucide are installed and available; the direction decides whether they fit or whether this surface needs its own vocabulary.
 **Task mode:** Operate (pass as `--mode operate` to any script)
 
 ## What this is
 
-A small-business bookkeeping workspace for customers, sales, purchases, banking, and financial reports.
+MIKLEDGER is a small-business bookkeeping workspace for customers, sales, purchases, banking, and financial reports.
 
 ## What it enables
 
@@ -35,7 +35,7 @@ This is a working demo, not a substitute for professional accounting or tax advi
 
 ## Positioning
 
-A small-business bookkeeping workspace for customers, sales, purchases, banking, and financial reports.
+MIKLEDGER is a small-business bookkeeping workspace for customers, sales, purchases, banking, and financial reports.
 
 ## Operating Context
 

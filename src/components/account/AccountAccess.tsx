@@ -51,7 +51,7 @@ export default function AccountAccess() {
           <span className="grid size-10 place-items-center rounded-xl bg-sidebar-primary text-sidebar-primary-foreground">
             <BriefcaseBusiness size={19} strokeWidth={1.8} />
           </span>
-          <span className="text-[17px] font-semibold tracking-tight">Hisaavora</span>
+          <span className="text-[17px] font-semibold tracking-tight">MIKLEDGER</span>
         </div>
         <div className="relative z-10 max-w-xl pb-10">
           <p className="mb-5 text-xs font-semibold uppercase tracking-[0.18em] text-sidebar-primary">Business, in balance</p>
@@ -77,7 +77,7 @@ export default function AccountAccess() {
             <span className="grid size-10 place-items-center rounded-xl bg-primary text-primary-foreground">
               <BriefcaseBusiness size={19} strokeWidth={1.8} />
             </span>
-            <span className="text-[17px] font-semibold tracking-tight">Hisaavora</span>
+            <span className="text-[17px] font-semibold tracking-tight">MIKLEDGER</span>
           </div>
           <p className="text-sm font-medium text-primary">Your business workspace</p>
           <h2 className="mt-2 text-3xl font-semibold tracking-tight">

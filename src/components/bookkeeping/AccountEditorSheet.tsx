@@ -177,7 +177,7 @@ export default function AccountEditorSheet({ accounts, open, record, onOpenChang
             <div className="space-y-2">
               <Label htmlFor="account-opening-balance">Opening balance</Label>
               <Input id="account-opening-balance" type="number" inputMode="decimal" step="0.01" value={values.openingBalance} onChange={(event) => changeValue("openingBalance", event.target.value)} placeholder="0.00" disabled={fieldsDisabled || pending} />
-              <p className="text-xs text-muted-foreground">Enter the balance for this account when you start using Hisaavora.</p>
+              <p className="text-xs text-muted-foreground">Enter the balance for this account when you start using MIKLEDGER.</p>
             </div>
 
             <div className="space-y-2">
