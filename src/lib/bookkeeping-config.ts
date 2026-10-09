@@ -87,10 +87,10 @@ export const modules: readonly ModuleDefinition[] = [
       { key: "currency", label: "Currency", type: "currency" },
       { key: "exchangeRate", label: "Exchange rate", type: "number", placeholder: "1" },
       lineItemsField,
-      { key: "attachment", label: "Attachment", type: "file", help: "Attach a PDF, image, or CSV up to 10 MB." },
       { key: "taxRate", label: "Tax rate (%)", type: "number" },
       { key: "discount", label: "Discount amount", type: "number" },
       { key: "status", label: "Status", type: "select", options: statusOptions },
+      { key: "attachment", label: "Attachment", type: "file", help: "Attach a PDF, image, or CSV up to 10 MB." },
     ],
   },
   {
