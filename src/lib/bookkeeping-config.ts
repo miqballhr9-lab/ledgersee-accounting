@@ -33,6 +33,13 @@ const lineItemsField: FormField = {
   placeholder: "Description | quantity | rate\nMonthly bookkeeping | 1 | 250",
   help: "Enter one item per line, separated with a vertical bar. Totals calculate when saved.",
 };
+const expenseLineItemsField: FormField = {
+  key: "lineItems",
+  label: "Expense lines",
+  type: "textarea",
+  required: true,
+  help: "Add a category and amount for each line.",
+};
 
 export const modules: readonly ModuleDefinition[] = [
   {
@@ -205,12 +212,13 @@ export const modules: readonly ModuleDefinition[] = [
     description: "Capture spending by category and attach the receipt.", titleKey: "description",
     columns: ["expenseDate", "description", "payee", "category", "paymentAccount", "amount", "attachmentName"],
     fields: [
-      { key: "expenseDate", label: "Date", type: "date", required: true },
-      { key: "description", label: "Description", required: true },
-      { key: "payee", label: "Paid to" },
-      { key: "category", label: "Category", required: true },
-      { key: "paymentAccount", label: "Paid from" },
-      { key: "amount", label: "Amount", type: "number", required: true },
+      { key: "payee", label: "Payee" },
+      { key: "paymentAccount", label: "Payment account" },
+      { key: "expenseDate", label: "Payment date", type: "date", required: true },
+      { key: "paymentMethod", label: "Payment method", type: "select", options: ["Cash", "Check", "Credit card", "Bank transfer", "Other"] },
+      { key: "referenceNumber", label: "Ref. no." },
+      expenseLineItemsField,
+      { key: "memo", label: "Memo", type: "textarea" },
       { key: "attachment", label: "Receipt attachment", type: "file", help: "PDF, image, or CSV up to 10 MB." },
     ],
   },

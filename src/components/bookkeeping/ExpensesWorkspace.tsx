@@ -14,6 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { moduleBySlug, type ModuleDefinition } from "@/lib/bookkeeping-config";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
+import { expenseCategoryLabel, expenseLinesFromData } from "@/lib/expense-utils";
 import { paymentAccountLabel, paymentAccountType } from "@/lib/payment-accounts";
 
 interface ExpensesWorkspaceProps {
@@ -108,6 +109,9 @@ export default function ExpensesWorkspace({ expenses: initialExpenses, bills: in
   const pageSize = 10;
   const expenseCategories = accounts.filter((account) => account.kind === "accounts" && account.data.type === "Expense" && account.data.locked !== "true");
   const paymentAccounts = accounts.filter((account) => paymentAccountType(account));
+  const transactionCategories = [...new Set(records.flatMap((record) => record.kind === "expenses"
+    ? expenseLinesFromData(record.data).map((line) => line.category).filter(Boolean)
+    : record.data.category ? [record.data.category] : []))].sort((left, right) => left.localeCompare(right));
   const statuses = [...new Set(records.map((record) => record.data.status).filter((status): status is string => Boolean(status)))].sort();
   const cutoff = dateCutoff(datePreset, asOfDate);
 
@@ -122,7 +126,9 @@ export default function ExpensesWorkspace({ expenses: initialExpenses, bills: in
         const matchesDate = datePreset === "custom"
           ? (!customStart || date >= customStart) && (!customEnd || date <= customEnd)
           : !cutoff || date >= cutoff;
-        const matchesCategory = categoryFilter === "all" || record.data.category === categoryFilter;
+        const matchesCategory = categoryFilter === "all" || (record.kind === "expenses"
+          ? expenseLinesFromData(record.data).some((line) => line.category === categoryFilter)
+          : record.data.category === categoryFilter);
         const matchesStatus = statusFilter === "all" || record.data.status === statusFilter;
         const matchesSearch = !normalizedSearch || Object.values(record.data).some((value) => value.toLocaleLowerCase().includes(normalizedSearch));
         return matchesType && matchesDate && matchesCategory && matchesStatus && matchesSearch;
@@ -227,7 +233,7 @@ export default function ExpensesWorkspace({ expenses: initialExpenses, bills: in
       record.kind === "bills" ? "Bill" : "Expense",
       record.kind === "bills" ? record.data.billNumber || record.data.description || "" : record.data.description || "",
       record.kind === "bills" ? record.data.vendor || "" : record.data.payee || "",
-      record.data.category || "",
+      record.kind === "expenses" ? expenseCategoryLabel(record.data) : record.data.category || "",
       record.kind === "bills" ? record.data.paymentAccountName || record.data.paymentMethod || "" : record.data.paymentAccount || "",
       record.data.amount || "",
       record.data.status || "",
@@ -336,7 +342,7 @@ export default function ExpensesWorkspace({ expenses: initialExpenses, bills: in
                     <TableCell className="text-[13px]">{isBill ? "Bill" : "Expense"}</TableCell>
                     <TableCell className="max-w-[240px] text-[13px] font-medium"><span className="block truncate" title={title || ""}>{title || "—"}</span></TableCell>
                     <TableCell className="max-w-[180px] text-[13px]"><span className="block truncate" title={payee || ""}>{payee || "—"}</span></TableCell>
-                    <TableCell className="max-w-[200px] text-[13px]"><span className="block truncate" title={record.data.category || ""}>{record.data.category || "—"}</span></TableCell>
+                    <TableCell className="max-w-[200px] text-[13px]"><span className="block truncate" title={record.kind === "expenses" ? expenseCategoryLabel(record.data) : record.data.category || ""}>{(record.kind === "expenses" ? expenseCategoryLabel(record.data) : record.data.category) || "—"}</span></TableCell>
                     <TableCell className="max-w-[200px] text-[13px]"><span className="block truncate" title={payment || ""}>{payment || "—"}</span></TableCell>
                     <TableCell className="text-right text-[13px] font-medium tabular-nums">{formatMoney(record.data.amount || "", currency)}</TableCell>
                     <TableCell className="text-[13px]">
@@ -403,7 +409,7 @@ export default function ExpensesWorkspace({ expenses: initialExpenses, bills: in
                 <SelectTrigger id="expense-category-filter" className="w-full"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All categories</SelectItem>
-                  {[...new Set(records.map((record) => record.data.category).filter((category): category is string => Boolean(category)))].sort().map((category) => <SelectItem key={category} value={category}>{category}</SelectItem>)}
+                  {transactionCategories.map((category) => <SelectItem key={category} value={category}>{category}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
@@ -438,6 +444,7 @@ export default function ExpensesWorkspace({ expenses: initialExpenses, bills: in
           vendors={vendors}
           items={[]}
           accounts={accounts}
+          defaultCurrency={currency}
           defaults={editorDefaults}
           open={Boolean(editorModule)}
           onOpenChange={(open) => { if (!open) setEditorModule(null); }}

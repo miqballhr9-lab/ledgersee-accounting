@@ -94,19 +94,21 @@ function sanitizePayload(input: Record<string, string>): Record<string, string> 
   );
 }
 
-function amountFromLineItems(data: Record<string, string>): Record<string, string> {
+function amountFromLineItems(data: Record<string, string>, kind: string): Record<string, string> {
+  if (kind === "expenses" && !data.lineItems?.trim()) throw new Error("Add at least one expense line with a category and amount.");
   if (!data.lineItems?.trim()) return data;
 
   const lines = parseInvoiceLines(data.lineItems);
   if (lines.length === 0 || lines.some((line) => {
     const quantity = Number(line.quantity);
     const rate = Number(line.rate);
-    return !line.name.trim() || !Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(rate) || rate < 0;
+    return !line.name.trim() || !Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(rate) || rate < (kind === "expenses" ? Number.EPSILON : 0);
   })) {
-    throw new Error("Check that each item has a name, quantity, and non-negative rate.");
+    throw new Error(kind === "expenses" ? "Each expense line needs a category and an amount greater than zero." : "Check that each item has a name, quantity, and non-negative rate.");
   }
 
   const subtotal = lines.reduce((total, line) => total + Number(line.quantity) * Number(line.rate), 0);
+  if (kind === "expenses") return { ...data, subtotal: subtotal.toFixed(2), amount: subtotal.toFixed(2) };
   const taxRate = Math.max(0, Number(data.taxRate) || 0);
   const discount = Math.max(0, Number(data.discount) || 0);
   if (taxRate > 100) throw new Error("Tax rate can’t be greater than 100%.");
@@ -239,7 +241,7 @@ export async function saveBookkeepingRecord(
   const me = await requireUser();
   if (!isRecordKind(kind)) throw new Error("That section isn’t available.");
   if (kind === "reconciliations") throw new Error("Completed reconciliations can only be created from the reconciliation screen.");
-  let data = amountFromLineItems(sanitizePayload(input));
+  let data = amountFromLineItems(sanitizePayload(input), kind);
   if (kind === "payroll") {
     data = normalizePayrollData(data);
     if (data.paymentAccountId) {
@@ -904,7 +906,7 @@ export async function convertBookkeepingRecord(id: string): Promise<void> {
           paidAmount: "0",
           status: "Open",
         }),
-  });
+  }, targetKind);
   await db.insert(bookkeepingRecord).values({ userId: me.id, kind: targetKind, data: targetData });
   await db
     .update(bookkeepingRecord)
@@ -1127,7 +1129,7 @@ export async function generateRecurringInvoice(id: string): Promise<void> {
     exchangeRate: "1",
     paidAmount: "0",
     status: "Draft",
-  });
+  }, "invoices");
   await db.insert(bookkeepingRecord).values({ userId: me.id, kind: "invoices", data: invoiceData });
 
   const nextDate = new Date(`${schedule.data.nextDate || today}T12:00:00`);
@@ -1334,7 +1336,7 @@ export async function duplicateCustomerDocumentRecord(id: string, kind: Customer
 
   const [created] = await db
     .insert(bookkeepingRecord)
-    .values({ userId: me.id, kind, data: amountFromLineItems(duplicateData) })
+    .values({ userId: me.id, kind, data: amountFromLineItems(duplicateData, kind) })
     .returning();
   revalidatePath("/app", "layout");
   return serializeRow(created);
@@ -1368,7 +1370,7 @@ export async function duplicateInvoiceRecord(id: string): Promise<BookkeepingRec
   delete duplicateData.shareToken;
   const [created] = await db
     .insert(bookkeepingRecord)
-    .values({ userId: me.id, kind: "invoices", data: amountFromLineItems(duplicateData) })
+    .values({ userId: me.id, kind: "invoices", data: amountFromLineItems(duplicateData, "invoices") })
     .returning();
   if (settings) {
     await db

@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
+import { expenseLinesFromData } from "@/lib/expense-utils";
 
 interface ReportsWorkspaceProps {
   records: BookkeepingRecord[];
@@ -86,9 +87,13 @@ function csvCell(value: string | number) {
 function groupTotals(records: BookkeepingRecord[], groupKey: string) {
   const grouped = new Map<string, { count: number; amount: number }>();
   records.forEach((record) => {
-    const name = record.data[groupKey] || "Uncategorized";
-    const current = grouped.get(name) ?? { count: 0, amount: 0 };
-    grouped.set(name, { count: current.count + 1, amount: current.amount + rowAmount(record) });
+    const categories = groupKey === "category" && record.kind === "expenses"
+      ? expenseLinesFromData(record.data).map((line) => ({ name: line.category || "Uncategorized", amount: line.amount }))
+      : [{ name: record.data[groupKey] || "Uncategorized", amount: rowAmount(record) }];
+    categories.forEach(({ name, amount }) => {
+      const current = grouped.get(name) ?? { count: 0, amount: 0 };
+      grouped.set(name, { count: current.count + 1, amount: current.amount + amount });
+    });
   });
   return [...grouped.entries()].map(([name, values]) => ({ name, ...values })).sort((a, b) => b.amount - a.amount);
 }
@@ -101,12 +106,16 @@ function buildReport(key: ReportKey, records: BookkeepingRecord[], asOfDate: str
   if (key === "profit-loss") {
     const income = invoices.reduce((sum, invoice) => sum + Math.max(0, rowAmount(invoice) - rowAmount(invoice, "creditApplied")), 0);
     const expenseTotal = [...bills, ...expenses].reduce((sum, expense) => sum + rowAmount(expense), 0);
-    const costOfSales = [...bills, ...expenses]
+    const billCostOfSales = bills
       .filter((record) => {
         const category = record.data.category?.toLowerCase() ?? "";
         return category.includes("cost") || category.includes("direct");
       })
       .reduce((sum, record) => sum + rowAmount(record), 0);
+    const expenseCostOfSales = expenses.reduce((sum, record) => sum + expenseLinesFromData(record.data)
+      .filter((line) => line.category.toLowerCase().includes("cost") || line.category.toLowerCase().includes("direct"))
+      .reduce((lineSum, line) => lineSum + line.amount, 0), 0);
+    const costOfSales = billCostOfSales + expenseCostOfSales;
     const grossProfit = income - costOfSales;
     const operatingExpenses = expenseTotal - costOfSales;
     return {

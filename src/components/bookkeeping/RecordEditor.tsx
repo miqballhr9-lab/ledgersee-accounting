@@ -23,6 +23,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { CurrencyPicker } from "@/components/bookkeeping/CurrencyPicker";
 import type { ModuleDefinition } from "@/lib/bookkeeping-config";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
+import { expenseLinesFromData } from "@/lib/expense-utils";
 import { currencyAmount, dueDateForTerms, invoiceSubtotal, parseInvoiceLines } from "@/lib/invoice-utils";
 import { accountCategoryForType } from "@/lib/account-types";
 import { paymentAccountLabel, paymentAccountType } from "@/lib/payment-accounts";
@@ -34,6 +35,7 @@ interface RecordEditorProps {
   vendors: BookkeepingRecord[];
   items: BookkeepingRecord[];
   accounts: BookkeepingRecord[];
+  defaultCurrency?: string;
   defaults: Record<string, string>;
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -48,6 +50,13 @@ interface InvoiceLine {
   description: string;
   quantity: string;
   rate: string;
+}
+
+interface ExpenseEntryLine {
+  id: string;
+  category: string;
+  description: string;
+  amount: string;
 }
 
 const structuredLineKinds = new Set(["invoices", "estimates", "sales-orders", "credit-notes", "recurring-invoices", "purchase-orders"]);
@@ -93,6 +102,30 @@ function serializeInvoiceLines(lines: InvoiceLine[]): string {
     .map((line) => ({ ...line, name: line.name.trim(), description: line.description.trim() })));
 }
 
+function readExpenseEditorLines(record: BookkeepingRecord | null): ExpenseEntryLine[] {
+  const savedLines = record ? expenseLinesFromData(record.data) : [];
+  return savedLines.length
+    ? savedLines.map((line, index) => ({
+        id: `saved-expense-${index}`,
+        category: line.category,
+        description: line.description,
+        amount: line.amount ? String(line.amount) : "",
+      }))
+    : [{ id: "new-expense-line", category: "", description: "", amount: "" }];
+}
+
+function serializeExpenseEditorLines(lines: ExpenseEntryLine[]): string {
+  return JSON.stringify(lines
+    .filter((line) => line.category.trim() || line.description.trim() || line.amount.trim())
+    .map((line) => ({
+      itemId: "",
+      name: line.category.trim(),
+      description: line.description.trim(),
+      quantity: "1",
+      rate: line.amount.trim(),
+    })));
+}
+
 function catalogItemLabel(item: BookkeepingRecord, currency: string): string {
   const itemName = item.data.name?.trim() ?? "";
   const itemType = item.data.itemType || "Item";
@@ -106,9 +139,10 @@ function selectedCatalogItemLabel(items: BookkeepingRecord[], itemId: string, cu
   return item ? catalogItemLabel(item, currency) : fallbackName || undefined;
 }
 
-export default function RecordEditor({ module, record, customers, vendors, items, accounts, defaults, open, onOpenChange, onSaved, onSaveComplete }: RecordEditorProps) {
+export default function RecordEditor({ module, record, customers, vendors, items, accounts, defaultCurrency, defaults, open, onOpenChange, onSaved, onSaveComplete }: RecordEditorProps) {
   const [values, setValues] = useState<Record<string, string>>(() => getInitialValues(module, record, defaults));
   const [invoiceLines, setInvoiceLines] = useState<InvoiceLine[]>(() => readInvoiceLines(record?.data.lineItems ?? "", items));
+  const [expenseLines, setExpenseLines] = useState<ExpenseEntryLine[]>(() => readExpenseEditorLines(record));
   const availableItems = items.filter((item) => item.data.name?.trim());
   const paymentAccounts = accounts.filter((account) => paymentAccountType(account));
   const [savedRecordId, setSavedRecordId] = useState<string | null>(record?.id ?? null);
@@ -129,6 +163,7 @@ export default function RecordEditor({ module, record, customers, vendors, items
   useEffect(() => {
     setValues(getInitialValues(module, record, defaults));
     setInvoiceLines(readInvoiceLines(record?.data.lineItems ?? "", itemsRef.current));
+    setExpenseLines(readExpenseEditorLines(record));
     setSavedRecordId(record?.id ?? null);
     setError("");
     setNotice("");
@@ -224,6 +259,7 @@ export default function RecordEditor({ module, record, customers, vendors, items
     const intent = submitter instanceof HTMLButtonElement ? submitter.value : "save-and-close";
     const shouldSend = shareableDocumentKinds.has(module.kind) && intent === "save-and-send";
     const serializedDocumentLines = serializeInvoiceLines(invoiceLines);
+    const serializedExpenseLines = serializeExpenseEditorLines(expenseLines);
     if (structuredLineKinds.has(module.kind)) {
       const enteredLines = invoiceLines.filter((line) => line.itemId || line.name.trim() || line.description.trim() || line.quantity.trim() || line.rate.trim());
       if (!enteredLines.length) {
@@ -239,6 +275,15 @@ export default function RecordEditor({ module, record, customers, vendors, items
       if (invalidLine !== -1) {
         closePreparedMessage();
         setError(`Check line ${invalidLine + 1}: choose an item or service and enter a quantity and rate.`);
+        return;
+      }
+    }
+    if (module.kind === "expenses") {
+      const enteredLines = expenseLines.filter((line) => line.category.trim() || line.description.trim() || line.amount.trim());
+      const invalidLine = enteredLines.findIndex((line) => !line.category.trim() || !Number.isFinite(Number(line.amount)) || Number(line.amount) <= 0);
+      if (!enteredLines.length || invalidLine !== -1) {
+        closePreparedMessage();
+        setError(invalidLine !== -1 ? `Check line ${invalidLine + 1}: choose a category and enter an amount greater than zero.` : "Add at least one expense line with a category and amount.");
         return;
       }
     }
@@ -285,7 +330,18 @@ export default function RecordEditor({ module, record, customers, vendors, items
       const normalizedValues = selectedCustomer?.data.name
         ? { ...values, customer: selectedCustomer.data.name, customerId: selectedCustomer.id }
         : values;
-      const recordValues = structuredLineKinds.has(module.kind) ? { ...normalizedValues, lineItems: serializedDocumentLines, ...(module.kind === "credit-notes" ? { amount: invoiceTotal.toFixed(2) } : {}) } : normalizedValues;
+      const expenseCategories = [...new Set(expenseLines.map((line) => line.category.trim()).filter(Boolean))];
+      const expenseDescription = values.memo?.trim() || expenseLines.map((line) => line.description.trim()).filter(Boolean).join("; ") || expenseCategories.join(", ");
+      const recordValues = module.kind === "expenses"
+        ? {
+            ...normalizedValues,
+            category: expenseCategories.length > 1 ? "Multiple categories" : expenseCategories[0] ?? "",
+            description: expenseDescription,
+            lineItems: serializedExpenseLines,
+          }
+        : structuredLineKinds.has(module.kind)
+          ? { ...normalizedValues, lineItems: serializedDocumentLines, ...(module.kind === "credit-notes" ? { amount: invoiceTotal.toFixed(2) } : {}) }
+          : normalizedValues;
       const saved = await saveBookkeepingRecord(module.kind, record ? { ...record.data, ...recordValues } : recordValues, savedRecordId ?? undefined);
       setSavedRecordId(saved.id);
       onSaved(saved);
@@ -343,10 +399,14 @@ export default function RecordEditor({ module, record, customers, vendors, items
   const taxAmount = subtotal * (Math.max(0, Number(values.taxRate) || 0) / 100);
   const discount = Math.max(0, Number(values.discount) || 0);
   const invoiceTotal = Math.max(0, subtotal + taxAmount - discount);
+  const expenseTotal = expenseLines.reduce((sum, line) => sum + (Number(line.amount) || 0), 0);
   const hasStructuredLines = structuredLineKinds.has(module.kind);
   const customerOptions = customers.filter((customer) => customer.data.name?.trim());
   const expenseAccounts = accounts.filter((account) =>
     account.data.locked !== "true" && accountCategoryForType(account.data.accountType ?? "") === "Expense",
+  );
+  const expenseCategories = accounts.filter((account) =>
+    account.data.type === "Expense" && account.data.locked !== "true" && account.data.name?.trim(),
   );
   const selectedCustomer = customerOptions.find((customer) => customer.id === values.customerId)
     ?? customerOptions.find((customer) => customer.data.name?.trim().toLowerCase() === values.customer?.trim().toLowerCase())
@@ -389,14 +449,14 @@ export default function RecordEditor({ module, record, customers, vendors, items
                     </div>
                   ) : (
                     <Label
-                      id={hasStructuredLines && field.key === "lineItems" ? `${module.kind}-line-items-label` : undefined}
+                      id={(hasStructuredLines || module.kind === "expenses") && field.key === "lineItems" ? `${module.kind}-line-items-label` : undefined}
                       htmlFor={`field-${field.key}`}
                     >
                       {field.label}{field.required ? <span className="ml-1 text-destructive">*</span> : null}
                     </Label>
                   )}
 
-                  {field.type === "textarea" && !(hasStructuredLines && field.key === "lineItems") ? (
+                  {field.type === "textarea" && !(hasStructuredLines && field.key === "lineItems") && !(module.kind === "expenses" && field.key === "lineItems") ? (
                     <Textarea
                       id={`field-${field.key}`}
                       value={value}
@@ -603,6 +663,87 @@ export default function RecordEditor({ module, record, customers, vendors, items
                     </Select>
                   ) : null}
 
+                  {module.kind === "expenses" && field.key === "lineItems" ? (
+                    <div className="space-y-3" role="group" aria-labelledby="expenses-line-items-label">
+                      <div className="space-y-3">
+                        {expenseLines.map((line, index) => {
+                          const selectedAccount = expenseCategories.find((account) => account.data.name === line.category);
+                          const selectedValue = selectedAccount?.id ?? (line.category ? `saved-${line.id}` : "none");
+                          return (
+                            <div key={line.id} className="grid min-w-0 grid-cols-1 items-end gap-3 rounded-lg border border-border bg-card p-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)_7.5rem_2.75rem]">
+                              <div className="min-w-0 space-y-1.5">
+                                <Label htmlFor={`expense-category-${line.id}`} className="text-xs text-muted-foreground">Category</Label>
+                                <Select
+                                  value={selectedValue}
+                                  onValueChange={(nextValue) => {
+                                    const account = expenseCategories.find((option) => option.id === nextValue);
+                                    setExpenseLines((current) => current.map((entry) => entry.id === line.id ? { ...entry, category: account?.data.name?.trim() ?? "" } : entry));
+                                  }}
+                                >
+                                  <SelectTrigger id={`expense-category-${line.id}`} className="w-full">
+                                    <SelectValue placeholder="Choose category" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="none">Choose category</SelectItem>
+                                    {expenseCategories.map((account) => <SelectItem value={account.id} key={account.id}>{account.data.name}</SelectItem>)}
+                                    {line.category && !selectedAccount ? <SelectItem value={`saved-${line.id}`}>{line.category} · previously saved</SelectItem> : null}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                              <div className="min-w-0 space-y-1.5">
+                                <Label htmlFor={`expense-description-${line.id}`} className="text-xs text-muted-foreground">Description</Label>
+                                <Input
+                                  id={`expense-description-${line.id}`}
+                                  value={line.description}
+                                  onChange={(event) => setExpenseLines((current) => current.map((entry) => entry.id === line.id ? { ...entry, description: event.target.value } : entry))}
+                                  placeholder="What was this expense for?"
+                                />
+                              </div>
+                              <div className="min-w-0 space-y-1.5">
+                                <Label htmlFor={`expense-amount-${line.id}`} className="text-xs text-muted-foreground">Amount</Label>
+                                <Input
+                                  id={`expense-amount-${line.id}`}
+                                  type="number"
+                                  min="0.01"
+                                  step="any"
+                                  inputMode="decimal"
+                                  value={line.amount}
+                                  onChange={(event) => setExpenseLines((current) => current.map((entry) => entry.id === line.id ? { ...entry, amount: event.target.value } : entry))}
+                                  placeholder="0.00"
+                                />
+                              </div>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                aria-label={`Remove expense line ${index + 1}`}
+                                onClick={() => setExpenseLines((current) => current.filter((entry) => entry.id !== line.id))}
+                                className="size-11 justify-self-end text-muted-foreground hover:text-destructive"
+                              >
+                                <Trash2 size={16} strokeWidth={1.75} />
+                              </Button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setExpenseLines((current) => [...current, { id: `new-expense-${Date.now()}-${current.length}`, category: "", description: "", amount: "" }])}
+                        >
+                          <Plus size={15} />Add lines
+                        </Button>
+                        <div className="flex items-center gap-3 text-sm">
+                          <span className="text-muted-foreground">Total</span>
+                          <span className="font-semibold tabular-nums">{currencyAmount(expenseTotal, defaultCurrency || "USD")}</span>
+                        </div>
+                      </div>
+                      {!expenseCategories.length ? <p className="text-xs leading-5 text-muted-foreground">Add an Expense account in Chart of accounts before recording expense lines.</p> : null}
+                    </div>
+                  ) : null}
+
                   {field.type === "select" && field.key === "paymentMethod" && (module.kind === "invoices" || module.kind === "bills") ? (
                     <>
                       <Select value={value || "Credit"} onValueChange={(nextValue) => changeValue(field.key, nextValue ?? "Credit")}>
@@ -663,6 +804,7 @@ export default function RecordEditor({ module, record, customers, vendors, items
                       id={`field-${field.key}`}
                       type={field.type ?? "text"}
                       value={module.kind === "credit-notes" && field.key === "amount" ? invoiceTotal.toFixed(2) : value}
+                      list={module.kind === "expenses" && field.key === "payee" ? "expense-payees" : undefined}
                       onChange={(event) => changeValue(field.key, event.target.value)}
                       placeholder={field.placeholder}
                       required={field.required}
@@ -671,8 +813,9 @@ export default function RecordEditor({ module, record, customers, vendors, items
                       readOnly={(module.kind === "invoices" && field.key === "dueDate") || (module.kind === "credit-notes" && field.key === "amount")}
                     />
                   ) : null}
+                  {module.kind === "expenses" && field.key === "payee" ? <datalist id="expense-payees">{vendorOptions.map((vendor) => <option value={vendor.data.name} key={vendor.id} />)}</datalist> : null}
 
-                  {field.help && field.type !== "file" && field.type !== "checkbox" && !(hasStructuredLines && field.key === "lineItems") ? <p className="text-xs leading-5 text-muted-foreground">{field.help}</p> : null}
+                  {field.help && field.type !== "file" && field.type !== "checkbox" && !(hasStructuredLines && field.key === "lineItems") && !(module.kind === "expenses" && field.key === "lineItems") ? <p className="text-xs leading-5 text-muted-foreground">{field.help}</p> : null}
                 </div>
                 </Fragment>
               );
