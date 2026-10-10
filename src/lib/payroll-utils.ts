@@ -1,6 +1,7 @@
 export interface PayrollValues {
   employeeId: string;
   employeeName: string;
+  employeeEmail: string;
   cnic: string;
   designation: string;
   joiningDate: string;
@@ -31,6 +32,12 @@ export interface PayrollTotals {
   totalDeductions: number;
   payableSalary: number;
 }
+
+export const payrollCsvFields = [
+  "employeeId", "employeeName", "employeeEmail", "cnic", "designation", "joiningDate", "month", "baseSalary", "increment",
+  "workingDays", "workedDays", "incentive", "overtimeAllowance", "gymAllowance", "medicalAllowance", "otherAllowance",
+  "taxDeduction", "advanceDeduction", "loanDeduction", "fineDeduction", "adjustment", "description",
+] as const satisfies readonly (keyof PayrollValues)[];
 
 const pakistanSalarySlabs = [
   { limit: 600_000, base: 0, rate: 0 },
@@ -91,6 +98,7 @@ export function emptyPayrollValues(month: string): PayrollValues {
   return {
     employeeId: "",
     employeeName: "",
+    employeeEmail: "",
     cnic: "",
     designation: "",
     joiningDate: "",

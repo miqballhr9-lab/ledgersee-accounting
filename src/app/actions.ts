@@ -13,8 +13,8 @@ import { dueDateForTerms, parseInvoiceLines } from "@/lib/invoice-utils";
 import { siteUrl } from "@/lib/site";
 import { isRecordKind, type BookkeepingRecord, type RecordKind } from "@/lib/bookkeeping-types";
 import { paymentAccountType } from "@/lib/payment-accounts";
-import { budgetActual, budgetExpectedTotal, budgetVariance, parseBudgetLines, recordsWithinBudgetDates, type BudgetLine, type BudgetLineType, type BudgetPeriod } from "@/lib/budget-utils";
-import { calculatePayroll, serializePayroll, type PayrollValues } from "@/lib/payroll-utils";
+import { budgetActual, budgetExpectedTotal, budgetVariance, parseBudgetLines, parseCsv, recordsWithinBudgetDates, type BudgetLine, type BudgetLineType, type BudgetPeriod } from "@/lib/budget-utils";
+import { calculatePayroll, payrollCsvFields, serializePayroll, type PayrollValues } from "@/lib/payroll-utils";
 
 const convertTargets: Partial<Record<RecordKind, RecordKind>> = {
   estimates: "invoices",
@@ -132,6 +132,7 @@ function normalizePayrollData(data: Record<string, string>): Record<string, stri
   const values: PayrollValues = {
     employeeId: data.employeeId || "",
     employeeName: data.employeeName || "",
+    employeeEmail: data.employeeEmail || "",
     cnic: data.cnic || "",
     designation: data.designation || "",
     joiningDate: data.joiningDate || "",
@@ -157,6 +158,9 @@ function normalizePayrollData(data: Record<string, string>): Record<string, stri
     throw new Error("Enter the employee ID, name, CNIC, designation, and base salary.");
   }
   if (!/^\d{5}-?\d{7}-?\d$/.test(values.cnic)) throw new Error("Enter a valid 13-digit CNIC.");
+  if (values.employeeEmail && (values.employeeEmail.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(values.employeeEmail))) {
+    throw new Error("Enter a valid employee email address.");
+  }
   if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(values.month)) throw new Error("Choose a valid payroll month.");
   if (values.joiningDate) {
     const joiningDate = new Date(`${values.joiningDate}T00:00:00.000Z`);
@@ -544,6 +548,112 @@ export async function saveBudgetPlan(input: unknown, id?: string): Promise<Bookk
     description,
     lines: JSON.stringify(lines),
   }, id);
+}
+
+export async function importPayrollCsv(input: string): Promise<{ created: number; updated: number; records: BookkeepingRecord[] }> {
+  const me = await requireUser();
+  if (input.length > 2_000_000) throw new Error("The payroll CSV is too large. Keep it under 2 MB.");
+  const [rawHeaders, ...rows] = parseCsv(input);
+  if (!rawHeaders || !rows.length) throw new Error("The payroll CSV needs a header row and at least one employee.");
+  if (rows.length > 500) throw new Error("Import up to 500 payroll rows at a time.");
+
+  const headerIndexes = new Map(rawHeaders.map((header, index) => [header.replace(/^\uFEFF/, "").trim().toLowerCase().replace(/[^a-z0-9]/g, ""), index]));
+  const requiredFields: (keyof PayrollValues)[] = ["employeeId", "employeeName", "cnic", "designation", "month", "baseSalary", "workingDays", "workedDays"];
+  const missingFields = requiredFields.filter((fieldName) => !headerIndexes.has(fieldName.toLowerCase()));
+  if (missingFields.length) throw new Error(`The payroll CSV is missing these columns: ${missingFields.join(", ")}.`);
+
+  const imported = rows.map((row, index) => {
+    const payload: Record<string, string> = {};
+    for (const fieldName of payrollCsvFields) {
+      const columnIndex = headerIndexes.get(fieldName.toLowerCase());
+      if (columnIndex !== undefined) payload[fieldName] = row[columnIndex] ?? "";
+    }
+    try {
+      return normalizePayrollData(payload);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Check this row’s payroll details.";
+      throw new Error(`CSV row ${index + 2}: ${message}`);
+    }
+  });
+
+  const seenEmployees = new Set<string>();
+  for (const data of imported) {
+    const key = `${data.month}:${data.employeeId.toLowerCase()}`;
+    if (seenEmployees.has(key)) throw new Error(`The payroll CSV repeats employee ${data.employeeId} for ${data.month}.`);
+    seenEmployees.add(key);
+  }
+
+  const payrollRows = await db
+    .select()
+    .from(bookkeepingRecord)
+    .where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "payroll")));
+  let created = 0;
+  let updated = 0;
+
+  for (const data of imported) {
+    const existing = payrollRows.find((row) =>
+      row.data.month === data.month && row.data.employeeId?.toLowerCase() === data.employeeId.toLowerCase(),
+    );
+    if (existing) {
+      await db
+        .update(bookkeepingRecord)
+        .set({ data, updatedAt: new Date() })
+        .where(and(eq(bookkeepingRecord.id, existing.id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "payroll")));
+      existing.data = data;
+      updated += 1;
+    } else {
+      const [record] = await db
+        .insert(bookkeepingRecord)
+        .values({ userId: me.id, kind: "payroll", data })
+        .returning();
+      payrollRows.push(record);
+      created += 1;
+    }
+  }
+
+  revalidatePath("/app", "layout");
+  const savedRows = await db
+    .select()
+    .from(bookkeepingRecord)
+    .where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "payroll")))
+    .orderBy(desc(bookkeepingRecord.updatedAt));
+  return { created, updated, records: savedRows.map(serializeRow) };
+}
+
+export async function sendPayrollSlip(id: string): Promise<void> {
+  const me = await requireUser();
+  const [record] = await db
+    .select()
+    .from(bookkeepingRecord)
+    .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "payroll")))
+    .limit(1);
+  if (!record) throw new Error("We couldn’t find that payroll entry. Refresh and try again.");
+  const data = record.data;
+  const recipient = data.employeeEmail?.trim().toLowerCase();
+  if (!recipient || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipient)) {
+    throw new Error("Add a valid employee email in the payroll details before sending the salary slip.");
+  }
+
+  const escapeHtml = (value: string) => value.replace(/[&<>"']/g, (character) => {
+    const entities: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
+    return entities[character] ?? character;
+  });
+  const formatAmount = (value: string | undefined) => `PKR ${Number(value || 0).toLocaleString("en-PK", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const subject = `Salary slip · ${data.month || "Payroll"}`;
+  const salaryLines = [
+    ["Employee", data.employeeName || "Employee"],
+    ["Employee ID", data.employeeId || "—"],
+    ["Pay period", data.month || "—"],
+    ["Base salary", formatAmount(data.baseSalary)],
+    ["After increment", formatAmount(data.afterIncrement)],
+    ["Gross salary", formatAmount(data.grossSalary)],
+    ["Income tax", formatAmount(data.taxDeduction)],
+    ["Other deductions", formatAmount(String(Math.max(0, Number(data.totalDeductions || 0) - Number(data.taxDeduction || 0))))],
+    ["Final payable", formatAmount(data.payableSalary)],
+  ];
+  const tableRows = salaryLines.map(([label, value]) => `<tr><th align="left" style="padding:10px;border-bottom:1px solid #d8e2ea">${escapeHtml(label)}</th><td align="right" style="padding:10px;border-bottom:1px solid #d8e2ea">${escapeHtml(value)}</td></tr>`).join("");
+  const html = `<div style="font-family:Arial,sans-serif;color:#1d2c3b;max-width:640px;margin:0 auto"><h1>Salary slip</h1><p>${escapeHtml(data.designation || "")} · ${escapeHtml(data.month || "")}</p><table style="width:100%;border-collapse:collapse"><tbody>${tableRows}</tbody></table>${data.description ? `<p>Note: ${escapeHtml(data.description)}</p>` : ""}</div>`;
+  await sendEmailOrThrow({ to: recipient, subject, html, fromName: "MIKLEDGER" });
 }
 
 function escapeBudgetHtml(value: string) {
