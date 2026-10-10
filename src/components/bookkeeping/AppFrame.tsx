@@ -8,6 +8,7 @@ import {
   ArrowLeftRight,
   BarChart3,
   BookOpenCheck,
+  Building2,
   ChevronDown,
   ClipboardList,
   ContactRound,
@@ -15,9 +16,10 @@ import {
   FileText,
   Landmark,
   LayoutDashboard,
-  ListFilter,
   ListChecks,
+  ListFilter,
   ListTree,
+  LogOut,
   Menu,
   Package,
   Percent,
@@ -27,6 +29,7 @@ import {
   ShieldCheck,
   ShoppingCart,
   Undo2,
+  UserRound,
   Users,
   Wallet,
   X,
@@ -35,6 +38,14 @@ import {
 
 import BrandWordmark from "@/components/brand/BrandWordmark";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { navigationGroups } from "@/lib/bookkeeping-config";
 import { signOut } from "@/lib/auth-client";
 
@@ -69,6 +80,32 @@ const icons: Record<string, LucideIcon> = {
   Settings,
 };
 
+const gearGroups = [
+  {
+    label: "Company & lists",
+    items: [
+      { label: "Company settings", href: "/app/settings", icon: Building2 },
+      { label: "Customers", href: "/app/customers", icon: Users },
+      { label: "Vendors", href: "/app/vendors", icon: ContactRound },
+      { label: "Items & services", href: "/app/items", icon: Package },
+      { label: "Users & roles", href: "/app/team-members", icon: ShieldCheck },
+    ],
+  },
+  {
+    label: "Accounting tools",
+    items: [
+      { label: "Banking", href: "/app/bank-accounts", icon: Landmark },
+      { label: "Transactions", href: "/app/transactions", icon: ArrowLeftRight },
+      { label: "Reconciliation", href: "/app/reconciliation", icon: ListChecks },
+      { label: "Bank rules", href: "/app/bank-rules", icon: ListFilter },
+      { label: "Chart of accounts", href: "/app/accounts", icon: ListTree },
+      { label: "Manual journals", href: "/app/journals", icon: BookOpenCheck },
+      { label: "Taxes", href: "/app/taxes", icon: Percent },
+      { label: "Reports", href: "/app/reports", icon: BarChart3 },
+    ],
+  },
+];
+
 function initials(name: string) {
   return name.trim().split(/\s+/).slice(0, 2).map((part) => part[0]?.toUpperCase() ?? "").join("") || "LL";
 }
@@ -81,7 +118,7 @@ export default function AppFrame({ userName, userEmail, children }: AppFrameProp
   const activeLabel = navigationGroups.flatMap((group) => group.items).find((item) => {
     const href = item.slug === "dashboard" ? "/app" : `/app/${item.slug}`;
     return pathname === href;
-  })?.label ?? "Workspace";
+  })?.label ?? (pathname === "/app/profile" ? "Profile & privacy" : "Workspace");
 
   async function handleSignOut() {
     setIsSigningOut(true);
@@ -178,9 +215,51 @@ export default function AppFrame({ userName, userEmail, children }: AppFrameProp
               <p className="truncate text-sm font-semibold">{activeLabel}</p>
             </div>
           </div>
-          <div className="hidden items-center gap-3 sm:flex">
-            <span className="rounded-full border border-border bg-background px-3 py-1.5 text-[11px] font-medium text-muted-foreground">Business account</span>
-            <span className="grid size-8 place-items-center rounded-full bg-accent text-[11px] font-semibold text-accent-foreground">{initials(userName || userEmail)}</span>
+          <div className="flex items-center gap-2 sm:gap-3">
+            <span className="hidden rounded-full border border-border bg-background px-3 py-1.5 text-[11px] font-medium text-muted-foreground sm:inline-flex">Business account</span>
+            <DropdownMenu>
+              <DropdownMenuTrigger render={<Button variant="outline" size="icon" aria-label="Open settings and tools" title="Settings and tools" className="shrink-0" />}>
+                <Settings size={17} strokeWidth={1.8} />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" sideOffset={10} className="max-h-[calc(100dvh-6rem)] w-[min(94vw,48rem)] overflow-y-auto p-4">
+                <div className="grid gap-x-6 gap-y-4 sm:grid-cols-2">
+                  {gearGroups.map((group) => (
+                    <DropdownMenuGroup key={group.label}>
+                      <DropdownMenuLabel className="px-2 pb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">{group.label}</DropdownMenuLabel>
+                      <div className="space-y-1">
+                        {group.items.map((item) => {
+                          const Icon = item.icon;
+                          return (
+                            <DropdownMenuItem key={item.href} render={<Link href={item.href} />} className="min-h-10 gap-3 px-2.5 text-[13px]">
+                              <Icon size={16} strokeWidth={1.7} className="text-primary" />
+                              <span>{item.label}</span>
+                            </DropdownMenuItem>
+                          );
+                        })}
+                      </div>
+                    </DropdownMenuGroup>
+                  ))}
+                  <DropdownMenuGroup>
+                    <DropdownMenuLabel className="px-2 pb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Profile & privacy</DropdownMenuLabel>
+                    <div className="mb-2 rounded-md border border-border bg-background px-3 py-2.5">
+                      <p className="truncate text-sm font-medium">{userName || "Account owner"}</p>
+                      <p className="truncate text-xs text-muted-foreground">{userEmail}</p>
+                    </div>
+                    <div className="space-y-1">
+                      <DropdownMenuItem render={<Link href="/app/profile" />} className="min-h-10 gap-3 px-2.5 text-[13px]">
+                        <UserRound size={16} strokeWidth={1.7} className="text-primary" />
+                        <span>Profile & privacy</span>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => void handleSignOut()} disabled={isSigningOut} className="min-h-10 gap-3 px-2.5 text-[13px]">
+                        <LogOut size={16} strokeWidth={1.7} />
+                        <span>{isSigningOut ? "Signing out…" : "Sign out"}</span>
+                      </DropdownMenuItem>
+                    </div>
+                  </DropdownMenuGroup>
+                </div>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <span className="grid size-8 shrink-0 place-items-center rounded-full bg-accent text-[11px] font-semibold text-accent-foreground">{initials(userName || userEmail)}</span>
           </div>
         </header>
         <main className="min-h-0 flex-1 overflow-y-auto">

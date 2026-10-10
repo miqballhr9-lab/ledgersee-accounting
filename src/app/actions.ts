@@ -5,7 +5,7 @@ import { randomBytes } from "node:crypto";
 import { revalidatePath } from "next/cache";
 
 import { db } from "@/db";
-import { bookkeepingRecord } from "@/db/schema";
+import { bookkeepingRecord, user } from "@/db/schema";
 import { requireUser } from "@/lib/auth";
 import { sendEmailOrThrow } from "@/lib/email";
 import { createUploadUrl } from "@/lib/storage";
@@ -26,6 +26,40 @@ const accountDetailTypes = {
   Income: ["Sales", "Service income", "Other income"],
   Expense: ["Advertising", "Cost of goods sold", "Office expenses", "Payroll expenses", "Travel", "Other expenses"],
 } as const;
+
+export async function updateProfileName(input: string): Promise<{ ok: true; name: string } | { ok: false; message: string }> {
+  const me = await requireUser();
+  const name = input.trim();
+  if (name.length < 2 || name.length > 80) {
+    return { ok: false, message: "Enter a name between 2 and 80 characters." };
+  }
+
+  await db
+    .update(user)
+    .set({ name, updatedAt: new Date() })
+    .where(eq(user.id, me.id));
+  revalidatePath("/app", "layout");
+  return { ok: true, name };
+}
+
+export async function exportMyAccountData() {
+  const me = await requireUser();
+  const records = await db
+    .select({ id: bookkeepingRecord.id, kind: bookkeepingRecord.kind, data: bookkeepingRecord.data, createdAt: bookkeepingRecord.createdAt, updatedAt: bookkeepingRecord.updatedAt })
+    .from(bookkeepingRecord)
+    .where(eq(bookkeepingRecord.userId, me.id))
+    .orderBy(desc(bookkeepingRecord.updatedAt));
+
+  return {
+    exportedAt: new Date().toISOString(),
+    account: { name: me.name, email: me.email },
+    records: records.map((record) => ({
+      ...record,
+      createdAt: record.createdAt.toISOString(),
+      updatedAt: record.updatedAt.toISOString(),
+    })),
+  };
+}
 
 type StoredRow = typeof bookkeepingRecord.$inferSelect;
 
