@@ -67,13 +67,32 @@ export default function VendorsWorkspace({ records: initialRecords, bills, accou
 
   const filteredVendors = useMemo(() => {
     const normalizedSearch = search.trim().toLocaleLowerCase();
-    return summaries.filter(({ vendor, currentBalance }) => {
-      const matchesSearch = !normalizedSearch || [vendor.data.name, vendor.data.company, vendor.data.email, vendor.data.phone]
-        .some((value) => value?.toLocaleLowerCase().includes(normalizedSearch));
+    return summaries.filter(({ vendor, currentBalance, overdueBills }) => {
+      const matchesSearch = !normalizedSearch || [
+        vendor.data.displayName,
+        vendor.data.name,
+        vendor.data.company,
+        vendor.data.email,
+        vendor.data.phone,
+        vendor.data.mobile,
+        vendor.data.address,
+        vendor.data.city,
+        vendor.data.state,
+        vendor.data.businessId,
+        vendor.data.taxId,
+      ].some((value) => value?.toLocaleLowerCase().includes(normalizedSearch));
       const hasBalance = currentBalance !== 0;
-      const matchesBalance = balanceFilter === "all" || (balanceFilter === "open" ? hasBalance : !hasBalance);
+      const isOverdue = overdueBills.length > 0;
+      const matchesBalance = balanceFilter === "all"
+        || (balanceFilter === "open" && hasBalance)
+        || (balanceFilter === "overdue" && isOverdue)
+        || (balanceFilter === "clear" && !hasBalance);
       return matchesSearch && matchesBalance;
-    }).sort((left, right) => (left.vendor.data.company || left.vendor.data.name || "").localeCompare(right.vendor.data.company || right.vendor.data.name || ""));
+    }).sort((left, right) => {
+      const leftName = left.vendor.data.displayName || left.vendor.data.company || left.vendor.data.name || "";
+      const rightName = right.vendor.data.displayName || right.vendor.data.company || right.vendor.data.name || "";
+      return leftName.localeCompare(rightName);
+    });
   }, [balanceFilter, search, summaries]);
 
   const totalPayables = summaries.reduce((sum, summary) => sum + Math.max(0, summary.currentBalance), 0);
@@ -105,24 +124,25 @@ export default function VendorsWorkspace({ records: initialRecords, bills, accou
   }
 
   async function handleDelete(vendor: BookkeepingRecord) {
-    const displayName = vendor.data.company || vendor.data.name || "this vendor";
+    const displayName = vendor.data.displayName || vendor.data.company || vendor.data.name || "this supplier";
     if (!window.confirm(`Delete ${displayName}? Existing bills will remain in your records.`)) return;
     setPendingDelete(vendor.id);
     setActionMessage("");
     try {
       await deleteBookkeepingRecord("vendors", vendor.id);
       setRecords((current) => current.filter((record) => record.id !== vendor.id));
-      setActionMessage("Vendor deleted. Existing bills were kept.");
+      setActionMessage("Supplier deleted. Existing bills were kept.");
     } catch (error) {
-      setActionMessage(error instanceof Error ? error.message : "We couldn’t delete that vendor.");
+      setActionMessage(error instanceof Error ? error.message : "We couldn’t delete that supplier.");
     } finally {
       setPendingDelete(null);
     }
   }
 
   function exportCsv() {
-    const headers = ["Vendor", "Company", "Email", "Phone", "Address", "Opening balance", "Open bills", "Current balance"];
+    const headers = ["Supplier", "Supplier name", "Company", "Email", "Phone", "Address", "Opening balance", "Open bills", "Current balance"];
     const rows = filteredVendors.map(({ vendor, openBills, currentBalance }) => [
+      vendor.data.displayName || "",
       vendor.data.name || "",
       vendor.data.company || "",
       vendor.data.email || "",
@@ -146,20 +166,20 @@ export default function VendorsWorkspace({ records: initialRecords, bills, accou
       <section className="flex flex-wrap items-end justify-between gap-4">
         <div className="min-w-0">
           <p className="text-xs font-medium uppercase tracking-[0.12em] text-primary">Purchases / Contacts</p>
-          <h1 className="mt-1 text-[26px] font-semibold tracking-tight sm:text-3xl">Vendors</h1>
+          <h1 className="mt-1 text-[26px] font-semibold tracking-tight sm:text-3xl">Suppliers</h1>
           <p className="mt-1.5 text-sm text-muted-foreground">Keep supplier details and balances together in one place.</p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
           <Button variant="outline" className="gap-2" onClick={exportCsv}><ArrowDownToLine size={15} />Export CSV</Button>
-          <Button className="gap-2" onClick={openNewVendor}><Plus size={16} />New vendor</Button>
+          <Button className="gap-2" onClick={openNewVendor}><Plus size={16} />New supplier</Button>
         </div>
       </section>
 
       <section aria-label="Vendor summary" className="mt-6 grid gap-3 sm:grid-cols-3">
         {[
-          { label: "All vendors", value: String(records.length), detail: "Saved suppliers and service providers", tone: "text-foreground" },
-          { label: "Open payables", value: formatMoney(totalPayables, currency), detail: `${vendorsWithOpenBills} vendors with unpaid bills`, tone: "text-foreground" },
-          { label: "Overdue payables", value: formatMoney(overduePayables, currency), detail: `${summaries.filter((summary) => summary.overdueBills.length > 0).length} vendors with overdue bills`, tone: "text-destructive" },
+          { label: "All suppliers", value: String(records.length), detail: "Saved suppliers and service providers", tone: "text-foreground" },
+          { label: "Open payables", value: formatMoney(totalPayables, currency), detail: `${vendorsWithOpenBills} suppliers with unpaid bills`, tone: "text-foreground" },
+          { label: "Overdue payables", value: formatMoney(overduePayables, currency), detail: `${summaries.filter((summary) => summary.overdueBills.length > 0).length} suppliers with overdue bills`, tone: "text-destructive" },
         ].map((item) => (
           <div key={item.label} className="rounded-lg border border-border bg-card px-4 py-3.5">
             <p className="text-xs font-medium text-muted-foreground">{item.label}</p>
@@ -175,18 +195,19 @@ export default function VendorsWorkspace({ records: initialRecords, bills, accou
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3.5 sm:px-5">
           <div>
             <p className="text-sm font-semibold">Supplier directory</p>
-            <p className="mt-0.5 text-xs text-muted-foreground">{filteredVendors.length} {filteredVendors.length === 1 ? "vendor" : "vendors"}</p>
+            <p className="mt-0.5 text-xs text-muted-foreground">{filteredVendors.length} {filteredVendors.length === 1 ? "supplier" : "suppliers"}</p>
           </div>
           <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
             <div className="relative min-w-0 flex-1 sm:w-64 sm:flex-none">
               <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-              <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search name, company, or email" className="pl-9" aria-label="Search vendors" />
+              <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search suppliers, contacts, or tax IDs" className="pl-9" aria-label="Search suppliers" />
             </div>
             <Select value={balanceFilter} onValueChange={(value) => setBalanceFilter(value ?? "all")}>
-              <SelectTrigger className="w-[155px]" aria-label="Filter vendors by balance"><SelectValue placeholder="All vendors" /></SelectTrigger>
+              <SelectTrigger className="w-[170px]" aria-label="Filter suppliers by balance"><SelectValue placeholder="All suppliers" /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All vendors</SelectItem>
+                <SelectItem value="all">All suppliers</SelectItem>
                 <SelectItem value="open">With open balance</SelectItem>
+                <SelectItem value="overdue">With overdue bills</SelectItem>
                 <SelectItem value="clear">No open balance</SelectItem>
               </SelectContent>
             </Select>
@@ -197,7 +218,7 @@ export default function VendorsWorkspace({ records: initialRecords, bills, accou
           <Table>
             <TableHeader>
               <TableRow className="bg-muted/40 hover:bg-muted/40">
-                {["Vendor", "Email", "Phone", "Open bills", "Balance", ""].map((heading) => (
+                {["Supplier", "Email", "Phone", "Open bills", "Balance", ""].map((heading) => (
                   <TableHead key={heading || "actions"} className="whitespace-nowrap text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">{heading}</TableHead>
                 ))}
               </TableRow>
@@ -207,8 +228,8 @@ export default function VendorsWorkspace({ records: initialRecords, bills, accou
                 <TableRow key={vendor.id} className="group">
                   <TableCell className="max-w-[280px]">
                     <Button type="button" variant="link" className="block h-auto max-w-full justify-start p-0 text-left" onClick={() => openEditVendor(vendor)}>
-                      <span className="block truncate text-[13px] font-medium text-foreground" title={vendor.data.company || vendor.data.name || ""}>{vendor.data.company || vendor.data.name || "Unnamed vendor"}</span>
-                      {vendor.data.company && vendor.data.name && vendor.data.company !== vendor.data.name ? <span className="mt-0.5 block truncate text-xs text-muted-foreground">{vendor.data.name}</span> : null}
+                      <span className="block truncate text-[13px] font-medium text-foreground" title={vendor.data.displayName || vendor.data.company || vendor.data.name || ""}>{vendor.data.displayName || vendor.data.company || vendor.data.name || "Unnamed supplier"}</span>
+                      {vendor.data.name && (vendor.data.displayName || vendor.data.company) && vendor.data.name !== (vendor.data.displayName || vendor.data.company) ? <span className="mt-0.5 block truncate text-xs text-muted-foreground">{vendor.data.name}</span> : null}
                     </Button>
                   </TableCell>
                   <TableCell className="max-w-[220px] truncate text-[13px] text-muted-foreground" title={vendor.data.email || ""}>{vendor.data.email || "—"}</TableCell>
@@ -217,10 +238,10 @@ export default function VendorsWorkspace({ records: initialRecords, bills, accou
                   <TableCell className="whitespace-nowrap text-right text-[13px] font-medium tabular-nums">{formatMoney(currentBalance, currency)}</TableCell>
                   <TableCell className="text-right">
                     <DropdownMenu>
-                      <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" aria-label={`More actions for ${vendor.data.name || "vendor"}`}><MoreHorizontal size={15} /></Button>} />
+                      <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" aria-label={`More actions for ${vendor.data.displayName || vendor.data.name || "supplier"}`}><MoreHorizontal size={15} /></Button>} />
                       <DropdownMenuContent align="end">
-                        <DropdownMenuItem onClick={() => openEditVendor(vendor)}><Pencil size={14} />Edit vendor</DropdownMenuItem>
-                        <DropdownMenuItem disabled={pendingDelete === vendor.id} onClick={() => void handleDelete(vendor)}><Trash2 size={14} />Delete vendor</DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => openEditVendor(vendor)}><Pencil size={14} />Edit supplier</DropdownMenuItem>
+                        <DropdownMenuItem disabled={pendingDelete === vendor.id} onClick={() => void handleDelete(vendor)}><Trash2 size={14} />Delete supplier</DropdownMenuItem>
                       </DropdownMenuContent>
                     </DropdownMenu>
                   </TableCell>
@@ -230,9 +251,9 @@ export default function VendorsWorkspace({ records: initialRecords, bills, accou
                 <TableRow>
                   <TableCell colSpan={6} className="h-52 whitespace-normal text-center">
                     <div className="mx-auto max-w-sm">
-                      <p className="text-sm font-medium">{records.length ? "No vendors match this search" : "No vendors yet"}</p>
-                      <p className="mt-1 text-sm text-muted-foreground">{records.length ? "Try another name or balance filter." : "Add a supplier to keep contact details and bills connected."}</p>
-                      {!records.length ? <Button className="mt-4 gap-2" onClick={openNewVendor}><Plus size={15} />New vendor</Button> : null}
+                      <p className="text-sm font-medium">{records.length ? "No suppliers match this search" : "No suppliers yet"}</p>
+                      <p className="mt-1 text-sm text-muted-foreground">{records.length ? "Try another search or balance filter." : "Add a supplier to keep contact details and bills connected."}</p>
+                      {!records.length ? <Button className="mt-4 gap-2" onClick={openNewVendor}><Plus size={15} />New supplier</Button> : null}
                     </div>
                   </TableCell>
                 </TableRow>

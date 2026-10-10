@@ -77,11 +77,12 @@ export const modules: readonly ModuleDefinition[] = [
     ],
   },
   {
-    slug: "vendors", kind: "vendors", label: "Vendor", plural: "Vendors",
-    description: "Suppliers and service providers you pay.", titleKey: "name",
+    slug: "vendors", kind: "vendors", label: "Supplier", plural: "Suppliers",
+    description: "Manage supplier contacts, purchasing details, and balances.", titleKey: "name",
     columns: ["name", "company", "email", "phone", "openingBalance"],
     fields: [
-      { key: "name", label: "Contact name", section: "Contact information", required: true },
+      { key: "name", label: "Supplier name", section: "Contact information", required: true },
+      { key: "displayName", label: "Display name", help: "Name shown in the supplier directory; defaults to supplier name." },
       { key: "company", label: "Company" },
       { key: "email", label: "Email", type: "email" },
       { key: "emailCc", label: "CC" },
@@ -101,7 +102,7 @@ export const modules: readonly ModuleDefinition[] = [
       { key: "taxId", label: "Sales tax ID" },
       { key: "paymentTerms", label: "Payment terms", type: "select", options: ["Due on receipt", "15 days", "30 days", "60 days"] },
       { key: "accountNumber", label: "Account number" },
-      { key: "defaultExpenseAccount", label: "Default expense category", type: "select", help: "This category is prefilled on new bills from this vendor." },
+      { key: "defaultExpenseAccount", label: "Default expense category", type: "select", help: "This category is prefilled on new bills from this supplier." },
       { key: "openingBalance", label: "Opening balance", type: "number", section: "Opening balance", placeholder: "0.00" },
       { key: "openingBalanceDate", label: "As of", type: "date" },
       { key: "notes", label: "Notes", type: "textarea", section: "Notes and attachments" },
@@ -221,7 +222,7 @@ export const modules: readonly ModuleDefinition[] = [
     columns: ["billNumber", "vendor", "billDate", "dueDate", "category", "amount", "paymentMethod", "status"],
     fields: [
       { key: "billNumber", label: "Bill number", required: true },
-      { key: "vendor", label: "Vendor", required: true },
+      { key: "vendor", label: "Supplier", required: true },
       { key: "paymentMethod", label: "Payment account", type: "select", options: ["Credit"], help: "Choose a Cash, Bank, or Credit card account from your Chart of Accounts, or leave it unpaid on credit." },
       { key: "billDate", label: "Bill date", type: "date" },
       { key: "dueDate", label: "Due date", type: "date" },
@@ -248,11 +249,11 @@ export const modules: readonly ModuleDefinition[] = [
   },
   {
     slug: "purchase-orders", kind: "purchase-orders", label: "Purchase order", plural: "Purchase orders",
-    description: "Confirm vendor orders, receive products, and record purchases as bills or expenses.", titleKey: "poNumber",
+    description: "Confirm supplier orders, receive products, and record purchases as bills or expenses.", titleKey: "poNumber",
     columns: ["poNumber", "vendor", "date", "expectedDate", "amount", "status"],
     fields: [
       { key: "poNumber", label: "PO number", required: true },
-      { key: "vendor", label: "Vendor", required: true },
+      { key: "vendor", label: "Supplier", required: true },
       { key: "date", label: "Date", type: "date" },
       { key: "expectedDate", label: "Expected date", type: "date" },
       { key: "currency", label: "Currency", type: "currency" },
@@ -409,7 +410,7 @@ export const navigationGroups: NavigationGroup[] = [
   {
     label: "Purchases",
     items: [
-      { slug: "vendors", label: "Vendors", icon: "ContactRound" },
+      { slug: "vendors", label: "Suppliers", icon: "ContactRound" },
       { slug: "bills", label: "Bills", icon: "Receipt" },
       { slug: "expenses", label: "Expenses", icon: "WalletCards" },
       { slug: "purchase-orders", label: "Purchase orders", icon: "ShoppingCart" },

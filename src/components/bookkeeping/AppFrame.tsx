@@ -95,7 +95,7 @@ const gearGroups = [
     items: [
       { label: "Company settings", href: "/app/settings", icon: Building2 },
       { label: "Customers", href: "/app/customers", icon: Users },
-      { label: "Vendors", href: "/app/vendors", icon: ContactRound },
+      { label: "Suppliers", href: "/app/vendors", icon: ContactRound },
       { label: "Items & services", href: "/app/items", icon: Package },
       { label: "Users & roles", href: "/app/team-members", icon: ShieldCheck },
     ],

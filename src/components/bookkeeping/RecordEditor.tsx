@@ -71,6 +71,9 @@ function getInitialValues(module: ModuleDefinition, record: BookkeepingRecord | 
     ])),
     customerId: record?.data.customerId ?? "",
   };
+  if (module.kind === "vendors") {
+    values.displayName = record?.data.displayName || record?.data.company || record?.data.name || values.displayName;
+  }
   if (module.kind === "invoices") {
     values.paymentTerms = record?.data.paymentTerms || "30 days";
     values.dueDate = dueDateForTerms(values.issueDate, values.paymentTerms) || values.dueDate;
@@ -340,7 +343,12 @@ export default function RecordEditor({ module, record, customers, vendors, items
         : values;
       const expenseCategories = [...new Set(expenseLines.map((line) => line.category.trim()).filter(Boolean))];
       const expenseDescription = values.memo?.trim() || expenseLines.map((line) => line.description.trim()).filter(Boolean).join("; ") || expenseCategories.join(", ");
-      const recordValues = module.kind === "expenses"
+      const recordValues = module.kind === "vendors"
+        ? {
+            ...normalizedValues,
+            displayName: normalizedValues.displayName?.trim() || normalizedValues.company?.trim() || normalizedValues.name?.trim() || "",
+          }
+        : module.kind === "expenses"
         ? {
             ...normalizedValues,
             category: expenseCategories.length > 1 ? "Multiple categories" : expenseCategories[0] ?? "",
@@ -423,9 +431,9 @@ export default function RecordEditor({ module, record, customers, vendors, items
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-[680px]">
+      <DialogContent className={`max-h-[calc(100dvh-2rem)] overflow-y-auto ${module.kind === "vendors" ? "sm:max-w-[820px]" : "sm:max-w-[680px]"}`}>
         <DialogHeader className="pr-8">
-          <DialogTitle className="text-lg">{record ? `Edit ${module.label.toLowerCase()}` : `New ${module.label.toLowerCase()}`}</DialogTitle>
+          <DialogTitle className="text-lg">{module.kind === "vendors" ? (record ? "Edit supplier" : "Add supplier") : record ? `Edit ${module.label.toLowerCase()}` : `New ${module.label.toLowerCase()}`}</DialogTitle>
           <DialogDescription>{module.description}</DialogDescription>
         </DialogHeader>
 
@@ -652,17 +660,17 @@ export default function RecordEditor({ module, record, customers, vendors, items
                         }}
                       >
                         <SelectTrigger id={`field-${field.key}`} className="w-full" aria-required={field.required}>
-                          <SelectValue placeholder={vendorOptions.length ? "Choose a vendor" : "Add a vendor first"} />
+                          <SelectValue placeholder={vendorOptions.length ? "Choose a supplier" : "Add a supplier first"} />
                         </SelectTrigger>
                         <SelectContent>
                           {vendorOptions.map((vendor) => {
-                            const name = vendor.data.name.trim();
-                            const detail = vendor.data.company?.trim() || vendor.data.email?.trim();
+                            const name = vendor.data.displayName?.trim() || vendor.data.name.trim();
+                            const detail = [vendor.data.company?.trim(), vendor.data.email?.trim()].find((value) => value && value !== name);
                             return <SelectItem value={vendor.id} key={vendor.id}>{detail ? `${name} · ${detail}` : name}</SelectItem>;
                           })}
                         </SelectContent>
                       </Select>
-                      {!vendorOptions.length ? <p className="text-xs leading-5 text-muted-foreground">Add a vendor in Vendors before creating this record.</p> : null}
+                      {!vendorOptions.length ? <p className="text-xs leading-5 text-muted-foreground">Add a supplier in Suppliers before creating this record.</p> : null}
                     </>
                   ) : null}
 
