@@ -6,6 +6,7 @@ import Image from "next/image";
 import { ArrowDownToLine, Plus, Search } from "lucide-react";
 
 import {
+  advancePurchaseOrder,
   convertBookkeepingRecord,
   createCustomerDocumentShareLink,
   createInvoiceShareLink,
@@ -87,6 +88,7 @@ function createDefaults(module: ModuleDefinition, records: BookkeepingRecord[], 
   if (module.kind === "purchase-orders") {
     values.poNumber = `PO-${String(records.filter((record) => record.kind === "purchase-orders").length + 1).padStart(4, "0")}`;
     values.date = dateString(today);
+    values.currency = defaultCurrency;
     values.status = "Draft";
   }
   if (module.kind === "credit-notes") {
@@ -138,6 +140,18 @@ function formatCurrency(value: number, currency: string) {
   }
 }
 
+function purchaseOrderStage(status: string | undefined) {
+  switch (status) {
+    case "Sent":
+    case "RFQ Sent": return "sent";
+    case "Purchase Order": return "confirmed";
+    case "Received": return "received";
+    case "Converted": return "billed";
+    case "Cancelled": return "cancelled";
+    default: return "draft";
+  }
+}
+
 export default function ModuleWorkspace({ module, records: initialRecords, customers, vendors, accounts, items, defaultCurrency, sourceFilter }: ModuleWorkspaceProps) {
   const router = useRouter();
   const [records, setRecords] = useState(initialRecords);
@@ -174,7 +188,9 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
     } : null;
     return records.filter((record) => {
       const matchesSearch = !normalizedSearch || Object.values(record.data).some((value) => value.toLowerCase().includes(normalizedSearch));
-      const matchesFilter = filter === "all" || !filterKey || record.data[filterKey] === filter;
+      const matchesFilter = module.kind === "purchase-orders" && filter.startsWith("po:")
+        ? purchaseOrderStage(record.data.status) === filter.slice(3)
+        : filter === "all" || !filterKey || record.data[filterKey] === filter;
       const matchesDateRange = !sourceFilter || recordsWithinBudgetDates([record], sourceFilter.startDate, sourceFilter.endDate).length > 0;
       const matchesBudgetHead = !budgetLine || budgetActualRecords(budgetLine, [record]).length > 0;
       return matchesSearch && matchesFilter && matchesDateRange && matchesBudgetHead;
@@ -192,6 +208,15 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
     : visibleRecords;
   const canExport = module.kind !== "settings";
   const currency = records.find((record) => record.data.currency)?.data.currency || "USD";
+  const purchaseOrderStages = [
+    { id: "all", label: "All orders", count: records.length },
+    { id: "po:draft", label: "RFQ drafts", count: records.filter((record) => purchaseOrderStage(record.data.status) === "draft").length },
+    { id: "po:sent", label: "Awaiting response", count: records.filter((record) => purchaseOrderStage(record.data.status) === "sent").length },
+    { id: "po:confirmed", label: "To receive", count: records.filter((record) => purchaseOrderStage(record.data.status) === "confirmed").length },
+    { id: "po:received", label: "To bill", count: records.filter((record) => purchaseOrderStage(record.data.status) === "received").length },
+    { id: "po:billed", label: "Billed", count: records.filter((record) => purchaseOrderStage(record.data.status) === "billed").length },
+    { id: "po:cancelled", label: "Cancelled", count: records.filter((record) => purchaseOrderStage(record.data.status) === "cancelled").length },
+  ];
 
   useEffect(() => setPage(1), [search, filter]);
 
@@ -263,10 +288,23 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
       setPaymentError("");
       return;
     }
+    if (kind === "cancel-order" && !window.confirm(`Cancel purchase order ${record.data.poNumber || ""}?`)) return;
 
     setPendingAction(true);
     try {
-      if (kind === "convert") {
+      if (["send-rfq", "confirm-order", "receive-order", "cancel-order"].includes(kind)) {
+        const transition = kind === "send-rfq" ? "send-rfq" : kind === "confirm-order" ? "confirm" : kind === "receive-order" ? "receive" : "cancel";
+        const result = await advancePurchaseOrder(record.id, transition);
+        setRecords((current) => current.map((item) => item.id === record.id ? { ...item, data: { ...item.data, status: result.status } } : item));
+        setPage(1);
+        const messages = {
+          "RFQ Sent": `RFQ emailed to ${record.data.vendor}.`,
+          "Purchase Order": "Purchase order confirmed and ready for receiving.",
+          Received: "Items marked received and linked product stock updated.",
+          Cancelled: "Purchase order cancelled.",
+        };
+        setActionMessage(messages[result.status as keyof typeof messages]);
+      } else if (kind === "convert") {
         await convertBookkeepingRecord(record.id);
         setActionMessage(`Converted to ${module.kind === "purchase-orders" ? "a bill" : "an invoice"}.`);
       } else if (kind === "send") {
@@ -378,6 +416,24 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
         </div>
       ) : null}
 
+      {module.kind === "purchase-orders" ? (
+        <div className="mt-6 flex min-w-0 gap-2 overflow-x-auto border-y border-border py-2" aria-label="Purchase order stages">
+          {purchaseOrderStages.map((stage) => (
+            <Button
+              key={stage.id}
+              type="button"
+              size="sm"
+              variant={filter === stage.id ? "default" : "outline"}
+              className="shrink-0 gap-2"
+              aria-pressed={filter === stage.id}
+              onClick={() => setFilter(stage.id)}
+            >
+              {stage.label}<span className="tabular-nums opacity-75">{stage.count}</span>
+            </Button>
+          ))}
+        </div>
+      ) : null}
+
       {actionMessage ? <p role="status" className="mt-4 rounded-md border border-border bg-card px-3 py-2 text-sm text-muted-foreground">{actionMessage}</p> : null}
 
       <section className="mt-6 overflow-hidden rounded-lg border border-border bg-card">
@@ -391,7 +447,7 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
               <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
               <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={`Search ${module.plural.toLowerCase()}`} className="pl-9" aria-label={`Search ${module.plural}`} />
             </div>
-            {filterKey && filterOptions.length ? (
+            {module.kind !== "purchase-orders" && filterKey && filterOptions.length ? (
               <Select value={filter} onValueChange={(value) => setFilter(value ?? "all")}>
                 <SelectTrigger className="w-[150px]" aria-label="Filter records"><SelectValue placeholder="All records" /></SelectTrigger>
                 <SelectContent>

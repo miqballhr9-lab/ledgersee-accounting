@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowRightLeft, BadgeCheck, Check, CircleDollarSign, Copy, Ellipsis, Link2, Mail, Pencil, Play, Printer, Trash2 } from "lucide-react";
+import { ArrowRightLeft, BadgeCheck, Ban, Check, CircleDollarSign, Copy, Ellipsis, Link2, Mail, PackageCheck, Pencil, Play, Printer, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -8,7 +8,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import type { ModuleDefinition } from "@/lib/bookkeeping-config";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
 
-export type RecordActionKind = "convert" | "payment" | "send" | "mark-paid" | "match" | "apply-credit" | "generate" | "duplicate" | "share" | "print";
+export type RecordActionKind = "convert" | "payment" | "send" | "send-rfq" | "confirm-order" | "receive-order" | "cancel-order" | "mark-paid" | "match" | "apply-credit" | "generate" | "duplicate" | "share" | "print";
 
 interface RecordTableProps {
   module: ModuleDefinition;
@@ -116,7 +116,15 @@ function displayValue(record: BookkeepingRecord, key: string) {
 
 function rowActions(module: ModuleDefinition, record: BookkeepingRecord, onAction: RecordTableProps["onAction"]) {
   const actions: { kind: RecordActionKind; label: string; icon: typeof ArrowRightLeft }[] = [];
-  if (["estimates", "sales-orders", "purchase-orders"].includes(module.kind)) actions.push({ kind: "convert", label: "Convert", icon: ArrowRightLeft });
+  const purchaseStatus = record.data.status === "Sent" ? "RFQ Sent" : record.data.status || "Draft";
+  const canCancelPurchaseOrder = module.kind === "purchase-orders" && ["Draft", "RFQ Sent", "Purchase Order"].includes(purchaseStatus);
+  if (module.kind === "purchase-orders") {
+    const status = record.data.status === "Sent" ? "RFQ Sent" : record.data.status || "Draft";
+    if (status === "Draft") actions.push({ kind: "send-rfq", label: "Send RFQ", icon: Mail });
+    else if (status === "RFQ Sent") actions.push({ kind: "confirm-order", label: "Confirm", icon: BadgeCheck });
+    else if (status === "Purchase Order") actions.push({ kind: "receive-order", label: "Receive", icon: PackageCheck });
+    else if (status === "Received") actions.push({ kind: "convert", label: "Create bill", icon: ArrowRightLeft });
+  } else if (["estimates", "sales-orders"].includes(module.kind)) actions.push({ kind: "convert", label: "Convert", icon: ArrowRightLeft });
   if (module.kind === "invoices") actions.push({ kind: "payment", label: "Record payment", icon: CircleDollarSign }, { kind: "send", label: "Send invoice", icon: Mail });
   if (["estimates", "sales-orders", "credit-notes"].includes(module.kind)) actions.push({ kind: "send", label: `Send ${module.label.toLowerCase()}`, icon: Mail });
   if (module.kind === "bills") actions.push({ kind: "mark-paid", label: "Mark paid", icon: Check });
@@ -131,7 +139,14 @@ function rowActions(module: ModuleDefinition, record: BookkeepingRecord, onActio
           <Icon size={13} />{label}
         </Button>
       ))}
-      {["invoices", "estimates", "sales-orders", "credit-notes"].includes(module.kind) ? (
+      {canCancelPurchaseOrder ? (
+        <DropdownMenu>
+          <DropdownMenuTrigger render={<Button type="button" variant="outline" size="icon-sm" aria-label="More purchase order actions"><Ellipsis size={15} /></Button>} />
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem className="text-destructive focus:text-destructive" onClick={() => onAction("cancel-order", record)}><Ban size={14} />Cancel purchase order</DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      ) : ["invoices", "estimates", "sales-orders", "credit-notes"].includes(module.kind) ? (
         <DropdownMenu>
           <DropdownMenuTrigger render={<Button type="button" variant="outline" size="icon-sm" aria-label={`More ${module.label.toLowerCase()} actions`}><Ellipsis size={15} /></Button>} />
           <DropdownMenuContent align="end">
@@ -167,26 +182,27 @@ export default function RecordTable({ module, records, onEdit, onDelete, onActio
           </TableRow>
         </TableHeader>
         <TableBody>
-          {records.map((record) => (
-            <TableRow key={record.id} className="group">
-              {module.columns.map((key) => (
-                <TableCell key={key} className="max-w-[240px] whitespace-nowrap py-3 text-[13px]">
-                  {key === module.titleKey ? <span className="font-medium text-foreground">{displayValue(record, key)}</span> : displayValue(record, key)}
+          {records.map((record) => {
+            const purchaseStatus = record.data.status === "Sent" ? "RFQ Sent" : record.data.status || "Draft";
+            const canEdit = module.kind !== "purchase-orders" || ["Draft", "RFQ Sent"].includes(purchaseStatus);
+            const canDelete = module.kind !== "purchase-orders" || purchaseStatus === "Draft";
+            return (
+              <TableRow key={record.id} className="group">
+                {module.columns.map((key) => (
+                  <TableCell key={key} className="max-w-[240px] whitespace-nowrap py-3 text-[13px]">
+                    {key === module.titleKey ? <span className="font-medium text-foreground">{displayValue(record, key)}</span> : displayValue(record, key)}
+                  </TableCell>
+                ))}
+                <TableCell className="whitespace-nowrap text-right">
+                  <div className="flex items-center justify-end gap-1.5">
+                    {rowActions(module, record, onAction)}
+                    {canEdit ? <Button type="button" variant="ghost" size="icon-sm" aria-label={`Edit ${module.label.toLowerCase()}`} onClick={() => onEdit(record)}><Pencil size={14} /></Button> : null}
+                    {canDelete ? <Button type="button" variant="ghost" size="icon-sm" aria-label={`Delete ${module.label.toLowerCase()}`} className="text-muted-foreground hover:text-destructive" onClick={() => onDelete(record)}><Trash2 size={14} /></Button> : null}
+                  </div>
                 </TableCell>
-              ))}
-              <TableCell className="whitespace-nowrap text-right">
-                <div className="flex items-center justify-end gap-1.5">
-                  {rowActions(module, record, onAction)}
-                  <Button type="button" variant="ghost" size="icon-sm" aria-label={`Edit ${module.label.toLowerCase()}`} onClick={() => onEdit(record)}>
-                    <Pencil size={14} />
-                  </Button>
-                  <Button type="button" variant="ghost" size="icon-sm" aria-label={`Delete ${module.label.toLowerCase()}`} className="text-muted-foreground hover:text-destructive" onClick={() => onDelete(record)}>
-                    <Trash2 size={14} />
-                  </Button>
-                </div>
-              </TableCell>
-            </TableRow>
-          ))}
+              </TableRow>
+            );
+          })}
         </TableBody>
       </Table>
     </div>

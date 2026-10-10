@@ -224,16 +224,16 @@ export const modules: readonly ModuleDefinition[] = [
   },
   {
     slug: "purchase-orders", kind: "purchase-orders", label: "Purchase order", plural: "Purchase orders",
-    description: "Track orders to suppliers and convert them to bills.", titleKey: "poNumber",
+    description: "Send vendor RFQs, confirm orders, receive products, and create bills.", titleKey: "poNumber",
     columns: ["poNumber", "vendor", "date", "expectedDate", "amount", "status"],
     fields: [
       { key: "poNumber", label: "PO number", required: true },
       { key: "vendor", label: "Vendor", required: true },
       { key: "date", label: "Date", type: "date" },
       { key: "expectedDate", label: "Expected date", type: "date" },
+      { key: "currency", label: "Currency", type: "currency" },
       lineItemsField,
       { key: "taxRate", label: "Tax rate (%)", type: "number" },
-      { key: "status", label: "Status", type: "select", options: ["Draft", "Sent", "Received", "Converted", "Cancelled"] },
     ],
   },
   {

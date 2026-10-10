@@ -242,6 +242,7 @@ export async function saveBookkeepingRecord(
   if (!isRecordKind(kind)) throw new Error("That section isn’t available.");
   if (kind === "reconciliations") throw new Error("Completed reconciliations can only be created from the reconciliation screen.");
   let data = amountFromLineItems(sanitizePayload(input), kind);
+  if (kind === "purchase-orders" && !id) data = { ...data, status: "Draft" };
   if (kind === "payroll") {
     data = normalizePayrollData(data);
     if (data.paymentAccountId) {
@@ -468,6 +469,28 @@ export async function saveBookkeepingRecord(
   }
 
   if (id) {
+    if (kind === "purchase-orders") {
+      const updated = await db.transaction(async (transaction) => {
+        const [existing] = await transaction
+          .select()
+          .from(bookkeepingRecord)
+          .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, kind)))
+          .for("update")
+          .limit(1);
+        if (!existing) throw new Error("We couldn’t find that purchase order. Refresh and try again.");
+        const status = existing.data.status === "Sent" ? "RFQ Sent" : existing.data.status || "Draft";
+        if (!["Draft", "RFQ Sent"].includes(status)) throw new Error("Confirmed purchase orders can’t be edited. Cancel the order or create a new one.");
+        const [saved] = await transaction
+          .update(bookkeepingRecord)
+          .set({ data: { ...existing.data, ...data, status }, updatedAt: new Date() })
+          .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, kind)))
+          .returning();
+        return saved;
+      });
+      revalidatePath("/app", "layout");
+      return serializeRow(updated);
+    }
+
     let updatedData = data;
     if (kind === "invoices") {
       const [existing] = await db
@@ -757,6 +780,15 @@ export async function deleteBookkeepingRecord(kind: string, id: string): Promise
   const me = await requireUser();
   if (!isRecordKind(kind)) throw new Error("That section isn’t available.");
   if (kind === "reconciliations") throw new Error("Completed reconciliations can’t be deleted.");
+  if (kind === "purchase-orders") {
+    const [order] = await db
+      .select()
+      .from(bookkeepingRecord)
+      .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, kind)))
+      .limit(1);
+    if (!order) throw new Error("We couldn’t find that purchase order. Refresh and try again.");
+    if (!["Draft", "Cancelled"].includes(order.data.status || "Draft")) throw new Error("Only draft or cancelled purchase orders can be deleted.");
+  }
   if (kind === "accounts") {
     const [existing] = await db
       .select()
@@ -876,43 +908,169 @@ export async function markRecordPaid(kind: string, id: string): Promise<void> {
 
 export async function convertBookkeepingRecord(id: string): Promise<void> {
   const me = await requireUser();
-  const [source] = await db
+  await db.transaction(async (transaction) => {
+    const [source] = await transaction
+      .select()
+      .from(bookkeepingRecord)
+      .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id)))
+      .for("update")
+      .limit(1);
+    if (!source) throw new Error("We couldn’t find that record. Refresh and try again.");
+    const sourceKind = source.kind as RecordKind;
+    const targetKind = convertTargets[sourceKind];
+    if (!targetKind) throw new Error("This record can’t be converted.");
+    if (sourceKind === "purchase-orders" && source.data.status !== "Received") {
+      throw new Error(source.data.status === "Converted" ? "This purchase order already has a bill." : "Receive this purchase order before creating its bill.");
+    }
+
+    const today = new Date().toISOString().slice(0, 10);
+    const sourceData = source.data;
+    const targetData = amountFromLineItems({
+      ...sourceData,
+      ...(targetKind === "invoices"
+        ? {
+            invoiceNumber: `INV-${Date.now()}`,
+            issueDate: today,
+            paymentTerms: "30 days",
+            dueDate: dueDateForTerms(today, "30 days"),
+            paidAmount: "0",
+            status: "Draft",
+          }
+        : {
+            billNumber: `BILL-${Date.now()}`,
+            billDate: today,
+            dueDate: "",
+            paidAmount: "0",
+            status: "Open",
+          }),
+    }, targetKind);
+    await transaction.insert(bookkeepingRecord).values({ userId: me.id, kind: targetKind, data: targetData });
+    await transaction
+      .update(bookkeepingRecord)
+      .set({ data: { ...sourceData, status: "Converted" }, updatedAt: new Date() })
+      .where(and(eq(bookkeepingRecord.id, source.id), eq(bookkeepingRecord.userId, me.id)));
+  });
+  revalidatePath("/app", "layout");
+}
+
+export async function advancePurchaseOrder(
+  id: string,
+  action: "send-rfq" | "confirm" | "receive" | "cancel",
+): Promise<{ status: string }> {
+  const me = await requireUser();
+  if (!["send-rfq", "confirm", "receive", "cancel"].includes(action)) throw new Error("That purchase order action isn’t available.");
+  const [order] = await db
     .select()
     .from(bookkeepingRecord)
-    .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id)))
+    .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "purchase-orders")))
     .limit(1);
-  if (!source) throw new Error("We couldn’t find that record. Refresh and try again.");
-  const sourceKind = source.kind as RecordKind;
-  const targetKind = convertTargets[sourceKind];
-  if (!targetKind) throw new Error("This record can’t be converted.");
+  if (!order) throw new Error("We couldn’t find that purchase order. Refresh and try again.");
 
-  const today = new Date().toISOString().slice(0, 10);
-  const sourceData = source.data;
-  const targetData = amountFromLineItems({
-    ...sourceData,
-    ...(targetKind === "invoices"
-      ? {
-          invoiceNumber: `INV-${Date.now()}`,
-          issueDate: today,
-          paymentTerms: "30 days",
-          dueDate: dueDateForTerms(today, "30 days"),
-          paidAmount: "0",
-          status: "Draft",
+  const currentStatus = order.data.status === "Sent" ? "RFQ Sent" : order.data.status || "Draft";
+  if (action === "send-rfq") {
+    if (currentStatus !== "Draft") throw new Error("Only a draft request can be sent to the vendor.");
+    const vendorRows = await db
+      .select()
+      .from(bookkeepingRecord)
+      .where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "vendors")));
+    const vendorName = order.data.vendor?.trim().toLowerCase();
+    const vendor = vendorRows.find((row) => row.id === order.data.vendorId || row.id === order.data.vendor)
+      ?? vendorRows.find((row) => row.data.name?.trim().toLowerCase() === vendorName);
+    if (!vendor?.data.email) throw new Error("Add an email address to this vendor before sending the RFQ.");
+
+    const [settings] = await db
+      .select()
+      .from(bookkeepingRecord)
+      .where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "settings")))
+      .orderBy(desc(bookkeepingRecord.updatedAt))
+      .limit(1);
+    const company = settings?.data.companyName || me.name;
+    const escapeHtml = (value: string) => value.replace(/[&<>"']/g, (character) => {
+      const entities: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
+      return entities[character] ?? character;
+    });
+    const lines = parseInvoiceLines(order.data.lineItems || "");
+    const lineRows = lines.map((line) => {
+      const quantity = Number(line.quantity) || 0;
+      const rate = Number(line.rate) || 0;
+      return `<tr><td>${escapeHtml(line.name)}</td><td>${escapeHtml(line.quantity)}</td><td>${escapeHtml(line.rate)}</td><td>${(quantity * rate).toFixed(2)}</td></tr>`;
+    }).join("");
+    const number = order.data.poNumber || "Purchase order";
+    await sendEmailOrThrow({
+      to: vendor.data.email,
+      subject: `Request for quotation ${number} from ${company}`,
+      html: `<p>Hello ${escapeHtml(vendor.data.name || "there")},</p><p>Please review our request for quotation <strong>${escapeHtml(number)}</strong>${order.data.expectedDate ? `, expected by ${escapeHtml(order.data.expectedDate)}` : ""}.</p><table style="border-collapse:collapse;width:100%"><thead><tr><th align="left">Item</th><th align="left">Qty</th><th align="left">Rate</th><th align="left">Amount</th></tr></thead><tbody>${lineRows}</tbody></table><p>Total: ${escapeHtml(order.data.amount || "0")} ${escapeHtml(order.data.currency || "USD")}</p><p>${escapeHtml(company)}</p>`,
+      fromName: company,
+    });
+
+    const [updated] = await db
+      .update(bookkeepingRecord)
+      .set({ data: { ...order.data, status: "RFQ Sent", sentAt: new Date().toISOString() }, updatedAt: new Date() })
+      .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "purchase-orders"), eq(bookkeepingRecord.data, order.data)))
+      .returning({ id: bookkeepingRecord.id });
+    if (!updated) throw new Error("The purchase order changed while the RFQ was being sent. Refresh and try again.");
+    revalidatePath("/app", "layout");
+    return { status: "RFQ Sent" };
+  }
+
+  const result = await db.transaction(async (transaction) => {
+    const [lockedOrder] = await transaction
+      .select()
+      .from(bookkeepingRecord)
+      .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "purchase-orders")))
+      .for("update")
+      .limit(1);
+    if (!lockedOrder) throw new Error("We couldn’t find that purchase order. Refresh and try again.");
+    const status = lockedOrder.data.status === "Sent" ? "RFQ Sent" : lockedOrder.data.status || "Draft";
+    const updatedAt = new Date();
+
+    if (action === "confirm") {
+      if (status !== "RFQ Sent") throw new Error("Send the RFQ before confirming this order.");
+      await transaction.update(bookkeepingRecord)
+        .set({ data: { ...lockedOrder.data, status: "Purchase Order", confirmedAt: updatedAt.toISOString() }, updatedAt })
+        .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "purchase-orders")));
+      return "Purchase Order";
+    }
+
+    if (action === "receive") {
+      if (status !== "Purchase Order") throw new Error("Confirm this purchase order before receiving its items.");
+      const lines = parseInvoiceLines(lockedOrder.data.lineItems || "");
+      const quantities = new Map<string, number>();
+      for (const line of lines) {
+        if (!line.itemId) continue;
+        const quantity = Number(line.quantity);
+        if (!Number.isFinite(quantity) || quantity <= 0) throw new Error("Check the ordered quantities before receiving items.");
+        quantities.set(line.itemId, (quantities.get(line.itemId) || 0) + quantity);
+      }
+      const itemIds = [...quantities.keys()];
+      if (itemIds.length) {
+        const linkedItems = await transaction.select().from(bookkeepingRecord)
+          .where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "items"), inArray(bookkeepingRecord.id, itemIds)));
+        if (linkedItems.length !== itemIds.length) throw new Error("A linked item is no longer available. Update the purchase order before receiving it.");
+        for (const item of linkedItems) {
+          if (item.data.itemType !== "Product") continue;
+          const nextStock = Number(item.data.stock || 0) + (quantities.get(item.id) || 0);
+          if (!Number.isFinite(nextStock)) throw new Error(`Check the stock quantity for ${item.data.name || "this item"}.`);
+          await transaction.update(bookkeepingRecord)
+            .set({ data: { ...item.data, stock: String(nextStock) }, updatedAt })
+            .where(and(eq(bookkeepingRecord.id, item.id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "items")));
         }
-      : {
-          billNumber: `BILL-${Date.now()}`,
-          billDate: today,
-          dueDate: "",
-          paidAmount: "0",
-          status: "Open",
-        }),
-  }, targetKind);
-  await db.insert(bookkeepingRecord).values({ userId: me.id, kind: targetKind, data: targetData });
-  await db
-    .update(bookkeepingRecord)
-    .set({ data: { ...sourceData, status: "Converted" }, updatedAt: new Date() })
-    .where(and(eq(bookkeepingRecord.id, source.id), eq(bookkeepingRecord.userId, me.id)));
+      }
+      await transaction.update(bookkeepingRecord)
+        .set({ data: { ...lockedOrder.data, status: "Received", receivedAt: updatedAt.toISOString() }, updatedAt })
+        .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "purchase-orders")));
+      return "Received";
+    }
+
+    if (!["Draft", "RFQ Sent", "Purchase Order"].includes(status)) throw new Error("This purchase order can no longer be cancelled.");
+    await transaction.update(bookkeepingRecord)
+      .set({ data: { ...lockedOrder.data, status: "Cancelled", cancelledAt: updatedAt.toISOString() }, updatedAt })
+      .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "purchase-orders")));
+    return "Cancelled";
+  });
+
   revalidatePath("/app", "layout");
+  return { status: result };
 }
 
 export async function toggleTransactionMatch(id: string): Promise<void> {

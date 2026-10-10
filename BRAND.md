@@ -8,8 +8,8 @@ value_props:
   - "Read-only sample workspace preview for the dashboard, invoices, and expenses; preview records are not saved"
   - "Dashboard KPIs and monthly income-versus-expense chart based on saved records"
   - "CRUD workspaces for customers, vendors, items, invoices, estimates, sales orders, credit notes, recurring invoices, bills, expenses, purchase orders, banking, accounts, journals, taxes, team roles, and company settings"
+  - "Purchase orders follow an RFQ workflow: email vendors, confirm orders, receive products into linked item stock, cancel eligible orders, then create one bill after receipt"
   - "Bills have a dedicated payables workspace with outstanding and overdue totals, vendor/date/category visibility, status and category filters, CSV export, and direct edit, delete, and mark-paid actions"
-  - "Expense entry captures payee, payment account/date/method, reference number, memo, receipt, and multiple Chart of Accounts category-description-amount lines; line totals feed expense lists, category reports, and budget actuals"
 ctas:
   - "Sign in"
   - "Create account"
