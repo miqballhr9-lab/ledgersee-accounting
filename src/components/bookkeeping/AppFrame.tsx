@@ -183,7 +183,7 @@ export default function AppFrame({ userName, userEmail, children }: AppFrameProp
                 onOpenChange={(open) => setOpenGroup(open ? group.label : null)}
                 className="space-y-1"
               >
-                <CollapsibleTrigger className="flex w-full items-center justify-between rounded-md px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.15em] text-sidebar-foreground/55 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring">
+                <CollapsibleTrigger className="flex w-full items-center justify-between rounded-md px-3 py-1.5 text-sm font-medium text-sidebar-foreground/75 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring">
                   <span>{group.label}</span>
                   <ChevronDown size={14} className={`shrink-0 transition-transform ${isOpen ? "rotate-180" : ""}`} />
                 </CollapsibleTrigger>
