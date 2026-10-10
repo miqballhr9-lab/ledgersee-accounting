@@ -374,7 +374,6 @@ export const navigationGroups: NavigationGroup[] = [
       { slug: "journals", label: "Manual journals", icon: "BookOpenCheck" },
       { slug: "taxes", label: "Taxes", icon: "Percent" },
       { slug: "reports", label: "Reports", icon: "ChartNoAxesCombined" },
-      { slug: "budgets", label: "Budgets", icon: "BarChart3" },
     ],
   },
   {
@@ -383,6 +382,7 @@ export const navigationGroups: NavigationGroup[] = [
       { slug: "payroll", label: "Payroll", icon: "Banknote" },
       { slug: "team-members", label: "Users & roles", icon: "ShieldCheck" },
       { slug: "settings", label: "Settings", icon: "Settings2" },
+      { slug: "budgets", label: "Budgets", icon: "BarChart3" },
     ],
   },
 ];
