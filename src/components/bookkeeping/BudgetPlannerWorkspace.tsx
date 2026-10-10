@@ -112,7 +112,7 @@ export default function BudgetPlannerWorkspace({ budgets, financialRecords, acco
     .filter((account) => (account.data.type === "Income" || account.data.type === "Expense") && account.data.name?.trim())
     .map((account) => ({
       value: `account:${account.id}`,
-      label: `${account.data.name} · ${account.data.type}`,
+      label: account.data.name.trim(),
       budgetHead: account.data.name.trim(),
       category: account.data.type === "Income" ? "Sales" : "Expenses",
       type: account.data.type as BudgetHeadOption["type"],
@@ -466,7 +466,7 @@ export default function BudgetPlannerWorkspace({ budgets, financialRecords, acco
                               if (option) setLines((current) => current.map((item, lineIndex) => lineIndex === index ? { ...item, budgetHead: option.budgetHead, headKey: option.value, type: option.type } : item));
                             }}
                           >
-                            <SelectTrigger aria-label={`Budget Head on line ${index + 1}`} className="w-full"><SelectValue placeholder="Choose a budget head" /></SelectTrigger>
+                            <SelectTrigger aria-label={`Budget Head on line ${index + 1}`} className="w-full min-w-0"><span className="min-w-0 flex-1 truncate text-left">{selectedHead?.label ?? "Choose a budget head"}</span></SelectTrigger>
                             <SelectContent>
                               {line.category === "Payroll" ? <SelectGroup>
                                 <SelectLabel>Payroll</SelectLabel>
