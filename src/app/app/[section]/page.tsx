@@ -23,8 +23,8 @@ export async function generateMetadata({ params }: SectionPageProps): Promise<Me
 export default async function SectionPage({ params }: SectionPageProps) {
   const { section } = await params;
   if (section === "payroll") {
-    const groups = await listBookkeepingRecordGroups(["payroll"]);
-    return <PayrollWorkspace records={groups.payroll ?? []} asOfDate={new Date().toISOString().slice(0, 10)} />;
+    const groups = await listBookkeepingRecordGroups(["payroll", "accounts"]);
+    return <PayrollWorkspace records={groups.payroll ?? []} accounts={groups.accounts ?? []} asOfDate={new Date().toISOString().slice(0, 10)} />;
   }
 
   if (section === "reports") {

@@ -11,13 +11,16 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { calculatePayroll, emptyPayrollValues, payrollCsvFields, type PayrollValues } from "@/lib/payroll-utils";
+import { paymentAccountLabel, paymentAccountType } from "@/lib/payment-accounts";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
 
 interface PayrollWorkspaceProps {
   records: BookkeepingRecord[];
+  accounts: BookkeepingRecord[];
   asOfDate: string;
 }
 
@@ -60,6 +63,9 @@ function recordToValues(record: BookkeepingRecord, month: string): PayrollValues
     designation: data.designation || "",
     joiningDate: data.joiningDate || "",
     month: data.month || month,
+    paymentAccountId: data.paymentAccountId || "",
+    paymentAccountName: data.paymentAccountName || "",
+    paymentMethod: data.paymentMethod || "",
     baseSalary: data.baseSalary || "0",
     increment: data.increment || "0",
     workingDays: data.workingDays || "26",
@@ -112,7 +118,7 @@ function nextPayrollMonth(month: string) {
   return value === 12 ? `${year + 1}-01` : `${year}-${String(value + 1).padStart(2, "0")}`;
 }
 
-export default function PayrollWorkspace({ records, asOfDate }: PayrollWorkspaceProps) {
+export default function PayrollWorkspace({ records, accounts, asOfDate }: PayrollWorkspaceProps) {
   const router = useRouter();
   const uploadRef = useRef<HTMLInputElement>(null);
   const currentMonth = asOfDate.slice(0, 7);
@@ -129,6 +135,7 @@ export default function PayrollWorkspace({ records, asOfDate }: PayrollWorkspace
   const [isDeleting, setIsDeleting] = useState("");
   const [isSending, setIsSending] = useState("");
   const [isImporting, setIsImporting] = useState(false);
+  const paymentAccounts = accounts.filter((account) => paymentAccountType(account));
   const totals = calculatePayroll(values);
 
   const periodRecords = useMemo(() => savedRecords.filter((record) => {
@@ -367,6 +374,7 @@ export default function PayrollWorkspace({ records, asOfDate }: PayrollWorkspace
                   <TableHead>Employee</TableHead>
                   <TableHead>Designation</TableHead>
                   <TableHead>Days</TableHead>
+                  <TableHead>Payment account</TableHead>
                   <TableHead className="text-right">Gross salary</TableHead>
                   <TableHead className="text-right">Tax</TableHead>
                   <TableHead className="text-right">Other deductions</TableHead>
@@ -386,6 +394,7 @@ export default function PayrollWorkspace({ records, asOfDate }: PayrollWorkspace
                     </TableCell>
                     <TableCell>{record.data.designation || "—"}</TableCell>
                     <TableCell className="tabular-nums">{record.data.workedDays || "0"} / {record.data.workingDays || "0"}</TableCell>
+                    <TableCell>{record.data.paymentAccountName ? <><span className="font-medium">{record.data.paymentMethod || "Account"}</span><span className="block text-xs text-muted-foreground">{record.data.paymentAccountName}</span></> : <span className="text-muted-foreground">Not set</span>}</TableCell>
                     <TableCell className="text-right font-medium tabular-nums">{formatRupees(Number(record.data.grossSalary || 0))}</TableCell>
                     <TableCell className="text-right tabular-nums">{formatRupees(Number(record.data.taxDeduction || 0))}</TableCell>
                     <TableCell className="text-right tabular-nums">{formatRupees(Math.max(0, Number(record.data.totalDeductions || 0) - Number(record.data.taxDeduction || 0)))}</TableCell>
@@ -428,6 +437,18 @@ export default function PayrollWorkspace({ records, asOfDate }: PayrollWorkspace
             <section className="space-y-3">
               <h3 className="text-sm font-semibold">Employee details</h3>
               <div className="grid gap-4 sm:grid-cols-2">{employeeFields.map(renderInputField)}</div>
+              <div className="space-y-1.5">
+                <Label htmlFor="payroll-payment-account">Salary payment account</Label>
+                <Select value={values.paymentAccountId || undefined} onValueChange={(value) => updateField("paymentAccountId", value ?? "")}>
+                  <SelectTrigger id="payroll-payment-account" className="w-full">
+                    <SelectValue placeholder={paymentAccounts.length ? "Choose a Cash, Bank, or Credit card account" : "Add an account in Chart of Accounts first"} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {paymentAccounts.map((account) => <SelectItem key={account.id} value={account.id}>{paymentAccountLabel(account)}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+                {!paymentAccounts.length ? <p className="text-xs text-muted-foreground">Create a Cash, Bank, or Credit card account in Chart of Accounts to record how salary is paid.</p> : <p className="text-xs text-muted-foreground">Optional. Choose the account used to pay this employee.</p>}
+              </div>
               <div className="grid gap-4 sm:grid-cols-3">
                 <div className="space-y-1.5">
                   <Label htmlFor="payroll-month">Payroll month</Label>

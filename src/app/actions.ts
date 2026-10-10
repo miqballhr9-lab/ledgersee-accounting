@@ -137,6 +137,9 @@ function normalizePayrollData(data: Record<string, string>): Record<string, stri
     designation: data.designation || "",
     joiningDate: data.joiningDate || "",
     month: data.month || "",
+    paymentAccountId: data.paymentAccountId || "",
+    paymentAccountName: data.paymentAccountName || "",
+    paymentMethod: data.paymentMethod || "",
     baseSalary: data.baseSalary || "",
     increment: data.increment || "0",
     workingDays: data.workingDays || "",
@@ -246,6 +249,23 @@ export async function saveBookkeepingRecord(
   let data = amountFromLineItems(sanitizePayload(input));
   if (kind === "payroll") {
     data = normalizePayrollData(data);
+    if (data.paymentAccountId) {
+      const [paymentAccount] = await db
+        .select()
+        .from(bookkeepingRecord)
+        .where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "accounts"), eq(bookkeepingRecord.id, data.paymentAccountId)))
+        .limit(1);
+      const accountType = paymentAccount ? paymentAccountType({ kind: "accounts", data: paymentAccount.data }) : null;
+      if (!paymentAccount || !accountType) throw new Error("Choose an available Cash, Bank, or Credit card account from Chart of Accounts.");
+      data = {
+        ...data,
+        paymentAccountId: paymentAccount.id,
+        paymentAccountName: paymentAccount.data.name || paymentAccount.data.code || "Account",
+        paymentMethod: accountType,
+      };
+    } else {
+      data = { ...data, paymentAccountName: "", paymentMethod: "" };
+    }
     const payrollRows = await db
       .select()
       .from(bookkeepingRecord)
@@ -576,6 +596,28 @@ export async function importPayrollCsv(input: string): Promise<{ created: number
     }
   });
 
+  const accountRows = await db
+    .select()
+    .from(bookkeepingRecord)
+    .where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "accounts")));
+  for (const [index, data] of imported.entries()) {
+    if (!data.paymentAccountName && !data.paymentMethod) continue;
+    if (!data.paymentAccountName) throw new Error(`CSV row ${index + 2}: add the payment account name, not just its type.`);
+    const accountName = data.paymentAccountName.trim().toLowerCase();
+    const matches = accountRows.filter((account) =>
+      [account.data.name, account.data.code].some((value) => value?.trim().toLowerCase() === accountName),
+    );
+    if (matches.length !== 1) throw new Error(`CSV row ${index + 2}: the payment account must match one account in Chart of Accounts.`);
+    const paymentAccount = matches[0];
+    const accountType = paymentAccountType({ kind: "accounts", data: paymentAccount.data });
+    if (!accountType || (data.paymentMethod && data.paymentMethod !== accountType)) {
+      throw new Error(`CSV row ${index + 2}: choose a matching Cash, Bank, or Credit card account.`);
+    }
+    data.paymentAccountId = paymentAccount.id;
+    data.paymentAccountName = paymentAccount.data.name || paymentAccount.data.code || "Account";
+    data.paymentMethod = accountType;
+  }
+
   const seenEmployees = new Set<string>();
   for (const data of imported) {
     const key = `${data.month}:${data.employeeId.toLowerCase()}`;
@@ -644,6 +686,7 @@ export async function sendPayrollSlip(id: string): Promise<void> {
     ["Employee", data.employeeName || "Employee"],
     ["Employee ID", data.employeeId || "—"],
     ["Pay period", data.month || "—"],
+    ["Payment account", data.paymentAccountName ? `${data.paymentMethod || "Account"} · ${data.paymentAccountName}` : "Not set"],
     ["Base salary", formatAmount(data.baseSalary)],
     ["After increment", formatAmount(data.afterIncrement)],
     ["Gross salary", formatAmount(data.grossSalary)],

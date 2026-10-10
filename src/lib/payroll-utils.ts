@@ -6,6 +6,9 @@ export interface PayrollValues {
   designation: string;
   joiningDate: string;
   month: string;
+  paymentAccountId: string;
+  paymentAccountName: string;
+  paymentMethod: string;
   baseSalary: string;
   increment: string;
   workingDays: string;
@@ -34,7 +37,7 @@ export interface PayrollTotals {
 }
 
 export const payrollCsvFields = [
-  "employeeId", "employeeName", "employeeEmail", "cnic", "designation", "joiningDate", "month", "baseSalary", "increment",
+  "employeeId", "employeeName", "employeeEmail", "cnic", "designation", "joiningDate", "month", "paymentAccountName", "paymentMethod", "baseSalary", "increment",
   "workingDays", "workedDays", "incentive", "overtimeAllowance", "gymAllowance", "medicalAllowance", "otherAllowance",
   "taxDeduction", "advanceDeduction", "loanDeduction", "fineDeduction", "adjustment", "description",
 ] as const satisfies readonly (keyof PayrollValues)[];
@@ -103,6 +106,9 @@ export function emptyPayrollValues(month: string): PayrollValues {
     designation: "",
     joiningDate: "",
     month,
+    paymentAccountId: "",
+    paymentAccountName: "",
+    paymentMethod: "",
     baseSalary: "0",
     increment: "0",
     workingDays: "26",
