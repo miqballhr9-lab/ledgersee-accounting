@@ -129,6 +129,8 @@ export const modules: readonly ModuleDefinition[] = [
     fields: [
       { key: "invoiceNumber", label: "Invoice number", required: true },
       { key: "customer", label: "Customer", required: true },
+      { key: "billingAddress", label: "Billing address", type: "textarea", section: "Customer addresses" },
+      { key: "shippingAddress", label: "Shipping address", type: "textarea" },
       { key: "paymentTerms", label: "Payment terms", type: "select", required: true, options: ["Due on receipt", "15 days", "30 days", "60 days"] },
       { key: "paymentMethod", label: "Payment account", type: "select", options: ["Credit"], help: "Choose a Cash, Bank, or Credit card account from your Chart of Accounts, or leave it unpaid on credit." },
       { key: "issueDate", label: "Issue date", type: "date" },

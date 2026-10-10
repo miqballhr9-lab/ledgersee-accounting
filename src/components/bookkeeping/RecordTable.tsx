@@ -7,12 +7,14 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import type { ModuleDefinition } from "@/lib/bookkeeping-config";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
+import { formatCustomerAddress } from "@/lib/customer-utils";
 
 export type RecordActionKind = "convert" | "convert-expense" | "payment" | "send" | "send-rfq" | "confirm-order" | "receive-order" | "cancel-order" | "mark-paid" | "match" | "apply-credit" | "generate" | "duplicate" | "share" | "print";
 
 interface RecordTableProps {
   module: ModuleDefinition;
   records: BookkeepingRecord[];
+  columns?: readonly string[];
   onEdit: (record: BookkeepingRecord) => void;
   onDelete: (record: BookkeepingRecord) => void;
   onAction: (kind: RecordActionKind, record: BookkeepingRecord) => void;
@@ -23,6 +25,7 @@ const columnLabels: Record<string, string> = {
   company: "Company",
   email: "Email",
   phone: "Phone",
+  address: "Address",
   openingBalance: "Opening balance",
   sku: "SKU",
   itemType: "Type",
@@ -79,7 +82,9 @@ const columnLabels: Record<string, string> = {
 };
 
 function displayValue(record: BookkeepingRecord, key: string) {
-  const value = key === "paymentMethod" && record.data.paymentAccountName
+  const value = key === "address"
+    ? formatCustomerAddress(record.data).replaceAll("\n", " · ")
+    : key === "paymentMethod" && record.data.paymentAccountName
     ? `${record.data.paymentMethod} · ${record.data.paymentAccountName}`
     : record.data[key] ?? "";
   if (!value) return <span className="text-muted-foreground/60">—</span>;
@@ -177,7 +182,7 @@ function rowActions(module: ModuleDefinition, record: BookkeepingRecord, onActio
   );
 }
 
-export default function RecordTable({ module, records, onEdit, onDelete, onAction }: RecordTableProps) {
+export default function RecordTable({ module, records, columns = module.columns, onEdit, onDelete, onAction }: RecordTableProps) {
   if (records.length === 0) {
     return (
       <div className="grid min-h-56 place-items-center border-t border-border px-6 py-10 text-center">
@@ -194,7 +199,7 @@ export default function RecordTable({ module, records, onEdit, onDelete, onActio
       <Table>
         <TableHeader>
           <TableRow className="bg-muted/40 hover:bg-muted/40">
-            {module.columns.map((key) => <TableHead key={key} className="whitespace-nowrap text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">{columnLabels[key] ?? key}</TableHead>)}
+            {columns.map((key) => <TableHead key={key} className="whitespace-nowrap text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">{columnLabels[key] ?? key}</TableHead>)}
             <TableHead className="w-[170px] text-right text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">Actions</TableHead>
           </TableRow>
         </TableHeader>
@@ -205,8 +210,8 @@ export default function RecordTable({ module, records, onEdit, onDelete, onActio
             const canDelete = module.kind !== "purchase-orders" || purchaseStatus === "Draft";
             return (
               <TableRow key={record.id} className="group">
-                {module.columns.map((key) => (
-                  <TableCell key={key} className="max-w-[240px] whitespace-nowrap py-3 text-[13px]">
+                {columns.map((key) => (
+                  <TableCell key={key} className={`max-w-[240px] py-3 text-[13px] ${key === "address" ? "whitespace-normal" : "whitespace-nowrap"}`}>
                     {key === module.titleKey ? <span className="font-medium text-foreground">{displayValue(record, key)}</span> : displayValue(record, key)}
                   </TableCell>
                 ))}

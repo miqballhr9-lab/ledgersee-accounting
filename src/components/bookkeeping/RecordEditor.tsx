@@ -23,6 +23,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { CurrencyPicker } from "@/components/bookkeeping/CurrencyPicker";
 import type { ModuleDefinition } from "@/lib/bookkeeping-config";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
+import { formatCustomerAddress } from "@/lib/customer-utils";
 import { expenseLinesFromData } from "@/lib/expense-utils";
 import { currencyAmount, dueDateForTerms, invoiceSubtotal, parseInvoiceLines } from "@/lib/invoice-utils";
 import { accountCategoryForType } from "@/lib/account-types";
@@ -61,7 +62,8 @@ interface ExpenseEntryLine {
 
 const structuredLineKinds = new Set(["invoices", "estimates", "sales-orders", "credit-notes", "recurring-invoices", "purchase-orders"]);
 const shareableDocumentKinds = new Set(["invoices", "estimates", "sales-orders", "credit-notes"]);
-function getInitialValues(module: ModuleDefinition, record: BookkeepingRecord | null, defaults: Record<string, string>) {
+
+function getInitialValues(module: ModuleDefinition, record: BookkeepingRecord | null, defaults: Record<string, string>, customers: BookkeepingRecord[]) {
   const values: Record<string, string> = {
     ...Object.fromEntries(module.fields.map((field) => [
       field.key,
@@ -72,6 +74,12 @@ function getInitialValues(module: ModuleDefinition, record: BookkeepingRecord | 
   if (module.kind === "invoices") {
     values.paymentTerms = record?.data.paymentTerms || "30 days";
     values.dueDate = dueDateForTerms(values.issueDate, values.paymentTerms) || values.dueDate;
+    const customer = customers.find((option) => option.id === values.customerId)
+      ?? customers.find((option) => option.data.name?.trim().toLowerCase() === values.customer?.trim().toLowerCase());
+    if (customer) {
+      values.billingAddress = values.billingAddress?.trim() || formatCustomerAddress(customer.data);
+      values.shippingAddress = values.shippingAddress?.trim() || formatCustomerAddress(customer.data, "shipping");
+    }
   }
   if (module.kind === "invoices" || module.kind === "bills") {
     values.paymentMethod = record?.data.paymentAccountId || record?.data.paymentMethod || "Credit";
@@ -140,7 +148,7 @@ function selectedCatalogItemLabel(items: BookkeepingRecord[], itemId: string, cu
 }
 
 export default function RecordEditor({ module, record, customers, vendors, items, accounts, defaultCurrency, defaults, open, onOpenChange, onSaved, onSaveComplete }: RecordEditorProps) {
-  const [values, setValues] = useState<Record<string, string>>(() => getInitialValues(module, record, defaults));
+  const [values, setValues] = useState<Record<string, string>>(() => getInitialValues(module, record, defaults, customers));
   const [invoiceLines, setInvoiceLines] = useState<InvoiceLine[]>(() => readInvoiceLines(record?.data.lineItems ?? "", items));
   const [expenseLines, setExpenseLines] = useState<ExpenseEntryLine[]>(() => readExpenseEditorLines(record));
   const availableItems = items.filter((item) => item.data.name?.trim());
@@ -161,7 +169,7 @@ export default function RecordEditor({ module, record, customers, vendors, items
   const sendWindow = useRef<Window | null>(null);
 
   useEffect(() => {
-    setValues(getInitialValues(module, record, defaults));
+    setValues(getInitialValues(module, record, defaults, customers));
     setInvoiceLines(readInvoiceLines(record?.data.lineItems ?? "", itemsRef.current));
     setExpenseLines(readExpenseEditorLines(record));
     setSavedRecordId(record?.id ?? null);
@@ -170,7 +178,7 @@ export default function RecordEditor({ module, record, customers, vendors, items
     setShareLink("");
     sendMethod.current = "email";
     sendWindow.current = null;
-  }, [defaults, module, record]);
+  }, [customers, defaults, module, record]);
 
   useEffect(() => {
     itemsRef.current = items;
@@ -599,7 +607,15 @@ export default function RecordEditor({ module, record, customers, vendors, items
                           const customer = customerOptions.find((option) => option.id === customerId);
                           if (customer?.data.name) {
                             changeValue(field.key, customer.data.name);
-                            setValues((current) => ({ ...current, customer: customer.data.name, customerId: customer.id }));
+                            setValues((current) => ({
+                              ...current,
+                              customer: customer.data.name,
+                              customerId: customer.id,
+                              ...(module.kind === "invoices" ? {
+                                billingAddress: formatCustomerAddress(customer.data),
+                                shippingAddress: formatCustomerAddress(customer.data, "shipping"),
+                              } : {}),
+                            }));
                           }
                         }}
                       >

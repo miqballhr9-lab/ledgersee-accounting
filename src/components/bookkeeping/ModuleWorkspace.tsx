@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
-import { ArrowDownToLine, Plus, Search } from "lucide-react";
+import { ArrowDownToLine, Plus, Search, SlidersHorizontal } from "lucide-react";
 
 import {
   advancePurchaseOrder,
@@ -24,11 +24,13 @@ import {
 } from "@/app/actions";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuLabel, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { type ModuleDefinition } from "@/lib/bookkeeping-config";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
+import { formatCustomerAddress } from "@/lib/customer-utils";
 import { paymentAccountLabel, paymentAccountType } from "@/lib/payment-accounts";
 import { budgetActualRecords, recordsWithinBudgetDates, type BudgetLine } from "@/lib/budget-utils";
 import JournalEntryEditor from "@/components/bookkeeping/JournalEntryEditor";
@@ -46,7 +48,31 @@ interface ModuleWorkspaceProps {
   sourceFilter?: { startDate: string; endDate: string; budgetHead: string };
 }
 
-const pageSize = 10;
+const DEFAULT_PAGE_SIZE = 10;
+const CUSTOMER_PAGE_SIZES = [50, 75, 100, 150, 300] as const;
+type CustomerPageSize = (typeof CUSTOMER_PAGE_SIZES)[number];
+
+const CUSTOMER_COLUMN_OPTIONS = [
+  { key: "name", label: "Name" },
+  { key: "company", label: "Company" },
+  { key: "email", label: "Email" },
+  { key: "phone", label: "Phone" },
+  { key: "address", label: "Address" },
+  { key: "openingBalance", label: "Opening balance" },
+] as const;
+type CustomerListColumn = (typeof CUSTOMER_COLUMN_OPTIONS)[number]["key"];
+
+const DEFAULT_CUSTOMER_COLUMNS: CustomerListColumn[] = ["name", "company", "email", "phone", "openingBalance"];
+const CUSTOMER_PREFERENCES_KEY = "mikledger:customer-list-preferences:v1";
+
+interface CustomerListPreferences {
+  columns: CustomerListColumn[];
+  pageSize: CustomerPageSize;
+}
+
+function isCustomerListColumn(value: unknown): value is CustomerListColumn {
+  return CUSTOMER_COLUMN_OPTIONS.some((column) => column.key === value);
+}
 
 function dateString(date: Date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
@@ -159,6 +185,8 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("all");
   const [page, setPage] = useState(1);
+  const [customerPreferences, setCustomerPreferences] = useState<CustomerListPreferences>({ columns: DEFAULT_CUSTOMER_COLUMNS, pageSize: 50 });
+  const [customerPreferencesReady, setCustomerPreferencesReady] = useState(false);
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingRecord, setEditingRecord] = useState<BookkeepingRecord | null>(null);
   const [defaults, setDefaults] = useState<Record<string, string>>({});
@@ -175,8 +203,40 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
   const [expenseConversionError, setExpenseConversionError] = useState("");
   const paymentAccounts = accounts.filter((account) => paymentAccountType(account));
   const expenseAccounts = accounts.filter((account) => account.kind === "accounts" && account.data.type === "Expense" && account.data.locked !== "true");
+  const pageSize = module.kind === "customers" ? customerPreferences.pageSize : DEFAULT_PAGE_SIZE;
 
   useEffect(() => setRecords(initialRecords), [initialRecords]);
+
+  useEffect(() => {
+    if (module.kind !== "customers") return;
+    try {
+      const storedPreferences = window.localStorage.getItem(CUSTOMER_PREFERENCES_KEY);
+      if (storedPreferences) {
+        const parsed: unknown = JSON.parse(storedPreferences);
+        if (typeof parsed === "object" && parsed !== null) {
+          const preferences = parsed as Record<string, unknown>;
+          const storedColumns = Array.isArray(preferences.columns)
+            ? Array.from(new Set(preferences.columns.filter(isCustomerListColumn)))
+            : [...DEFAULT_CUSTOMER_COLUMNS];
+          if (!storedColumns.includes("name")) storedColumns.unshift("name");
+          const storedPageSize = CUSTOMER_PAGE_SIZES.find((size) => size === preferences.pageSize) ?? 50;
+          setCustomerPreferences({ columns: storedColumns, pageSize: storedPageSize });
+        }
+      }
+    } catch {
+      setCustomerPreferences({ columns: DEFAULT_CUSTOMER_COLUMNS, pageSize: 50 });
+    }
+    setCustomerPreferencesReady(true);
+  }, [module.kind]);
+
+  useEffect(() => {
+    if (module.kind !== "customers" || !customerPreferencesReady) return;
+    try {
+      window.localStorage.setItem(CUSTOMER_PREFERENCES_KEY, JSON.stringify(customerPreferences));
+    } catch {
+      return;
+    }
+  }, [customerPreferences, customerPreferencesReady, module.kind]);
 
   const filterKey = ["status", "category", "type", "role", "accountType", "enabled"].find((key) => records.some((record) => record.data[key]));
   const filterOptions = filterKey
@@ -214,6 +274,7 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
         return customer?.data.name ? { ...record, data: { ...record.data, customer: customer.data.name } } : record;
       })
     : visibleRecords;
+  const visibleColumns = module.kind === "customers" ? customerPreferences.columns : module.columns;
   const canExport = module.kind !== "settings";
   const currency = records.find((record) => record.data.currency)?.data.currency || "USD";
   const purchaseOrderStages = [
@@ -227,6 +288,17 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
   ];
 
   useEffect(() => setPage(1), [search, filter]);
+
+  function updateCustomerColumn(column: CustomerListColumn, visible: boolean) {
+    setCustomerPreferences((current) => {
+      if (column === "name" && !visible) return current;
+      const columns = visible
+        ? [...new Set([...current.columns, column])]
+        : current.columns.filter((currentColumn) => currentColumn !== column);
+      return { ...current, columns };
+    });
+    setPage(1);
+  }
 
   function openNewRecord() {
     const existingSettings = module.kind === "settings" ? records[0] : undefined;
@@ -415,7 +487,7 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
   }
 
   function exportCsv() {
-    const rows = [module.columns, ...filteredRecords.map((record) => module.columns.map((key) => record.data[key] ?? ""))];
+    const rows = [visibleColumns, ...filteredRecords.map((record) => visibleColumns.map((key) => key === "address" ? formatCustomerAddress(record.data).replaceAll("\n", ", ") : record.data[key] ?? ""))];
     const csv = rows.map((row) => row.map(toCsvValue).join(",")).join("\r\n");
     const objectUrl = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
     const anchor = document.createElement("a");
@@ -494,12 +566,48 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
                 </SelectContent>
               </Select>
             ) : null}
+            {module.kind === "customers" ? (
+              <>
+                <DropdownMenu>
+                  <DropdownMenuTrigger render={<Button type="button" variant="outline" className="gap-2"><SlidersHorizontal size={15} />Columns</Button>} />
+                  <DropdownMenuContent align="end" className="min-w-48">
+                    <DropdownMenuLabel>Show columns</DropdownMenuLabel>
+                    {CUSTOMER_COLUMN_OPTIONS.map((column) => (
+                      <DropdownMenuCheckboxItem
+                        key={column.key}
+                        checked={customerPreferences.columns.includes(column.key)}
+                        disabled={column.key === "name"}
+                        onCheckedChange={(checked) => updateCustomerColumn(column.key, checked === true)}
+                      >
+                        {column.label}
+                      </DropdownMenuCheckboxItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+                <Select
+                  value={String(customerPreferences.pageSize)}
+                  onValueChange={(value) => {
+                    const nextPageSize = CUSTOMER_PAGE_SIZES.find((size) => String(size) === value);
+                    if (nextPageSize) {
+                      setCustomerPreferences((current) => ({ ...current, pageSize: nextPageSize }));
+                      setPage(1);
+                    }
+                  }}
+                >
+                  <SelectTrigger className="w-[128px]" aria-label="Customers per page"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {CUSTOMER_PAGE_SIZES.map((size) => <SelectItem key={size} value={String(size)}>{size} per page</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </>
+            ) : null}
           </div>
         </div>
 
         <RecordTable
           module={module}
           records={tableRecords}
+          columns={visibleColumns}
           onEdit={openEditRecord}
           onDelete={(record) => void handleDelete(record)}
           onAction={(kind, record) => void handleAction(kind, record)}

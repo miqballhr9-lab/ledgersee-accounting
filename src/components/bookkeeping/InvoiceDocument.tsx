@@ -39,9 +39,18 @@ export default function InvoiceDocument({ invoice, companyName, documentKind = "
         </dl>
       </header>
 
-      <section className="py-6">
-        <p className="text-xs font-semibold uppercase tracking-[0.1em] text-muted-foreground">Bill to</p>
-        <p className="mt-2 text-base font-medium">{invoice.customer || "Customer"}</p>
+      <section className="grid gap-5 border-b border-border py-6 sm:grid-cols-2">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.1em] text-muted-foreground">Bill to</p>
+          <p className="mt-2 text-base font-medium">{invoice.customer || "Customer"}</p>
+          {invoice.billingAddress ? <p className="mt-1 whitespace-pre-line text-sm leading-6 text-muted-foreground">{invoice.billingAddress}</p> : null}
+        </div>
+        {invoice.shippingAddress ? (
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.1em] text-muted-foreground">Ship to</p>
+            <p className="mt-2 whitespace-pre-line text-sm leading-6 text-muted-foreground">{invoice.shippingAddress}</p>
+          </div>
+        ) : null}
       </section>
 
       <div className="overflow-x-auto">
