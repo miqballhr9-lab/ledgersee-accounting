@@ -364,7 +364,7 @@ export const navigationGroups: NavigationGroup[] = [
     ],
   },
   {
-    label: "Accounting",
+    label: "Accounts",
     items: [
       { slug: "bank-accounts", label: "Banking", icon: "Landmark" },
       { slug: "transactions", label: "Transactions", icon: "ArrowLeftRight" },
