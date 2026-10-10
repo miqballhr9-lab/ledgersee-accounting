@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { ArrowDownToLine, ArrowUpFromLine, Boxes, ClipboardCheck, History, Package, Search } from "lucide-react";
 
 import { createInventoryMovement } from "@/app/actions";
+import InventoryBulkCount from "@/components/bookkeeping/InventoryBulkCount";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -129,6 +130,7 @@ export default function InventoryWorkspace({ products: productRecords, movements
           <p className="mt-1 text-sm text-muted-foreground">Keep product quantities, receipts, deliveries, and counts in sync.</p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <InventoryBulkCount products={products} />
           {movementActions.map(({ type, label, icon: Icon, variant }) => (
             <Button key={type} type="button" variant={variant} disabled={!products.length} onClick={() => openMovement(type)}>
               <Icon size={16} strokeWidth={1.8} />

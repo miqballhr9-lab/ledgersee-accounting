@@ -17,6 +17,7 @@ import { accountCategoryForType, accountDetailsForType } from "@/lib/account-typ
 import { budgetActual, budgetExpectedTotal, budgetVariance, parseBudgetLines, parseCsv, recordsWithinBudgetDates, type BudgetCategory, type BudgetLine, type BudgetLineType, type BudgetPeriod } from "@/lib/budget-utils";
 import { calculatePayroll, payrollCsvFields, serializePayroll, type PayrollValues } from "@/lib/payroll-utils";
 import { MAX_ITEM_IMPORT_ROWS, type ItemImportData, type ItemImportRow } from "@/lib/item-import";
+import { MAX_INVENTORY_COUNT_ROWS, type InventoryCountRow } from "@/lib/inventory-import";
 
 const convertTargets: Partial<Record<RecordKind, RecordKind>> = {
   estimates: "invoices",
@@ -1850,4 +1851,97 @@ export async function getAttachmentUploadTarget(
   if (size > 10 * 1024 * 1024) throw new Error("Attachments must be 10 MB or smaller.");
   const target = await createUploadUrl({ filename, contentType, size });
   return { uploadUrl: target.uploadUrl, publicUrl: target.publicUrl };
+}
+export async function saveBulkInventoryCount(input: {
+  rows: InventoryCountRow[];
+  date: string;
+  reference?: string;
+}): Promise<{ checkedCount: number; adjustedCount: number }> {
+  const me = await requireUser();
+  const rows: InventoryCountRow[] = [];
+  const seenItemIds = new Set<string>();
+
+  if (!input || !Array.isArray(input.rows) || input.rows.length === 0 || input.rows.length > MAX_INVENTORY_COUNT_ROWS) {
+    throw new Error(`Choose between 1 and ${MAX_INVENTORY_COUNT_ROWS} product counts to save.`);
+  }
+
+  for (const [index, value] of input.rows.entries()) {
+    if (!value || typeof value !== "object") throw new Error(`Check the product on count row ${index + 2}.`);
+    const itemId = typeof value.itemId === "string" ? value.itemId.trim() : "";
+    const quantity = typeof value.quantity === "string" ? value.quantity.trim() : "";
+    const parsedQuantity = Number(quantity);
+    if (!itemId || !quantity || !Number.isFinite(parsedQuantity) || parsedQuantity < 0 || parsedQuantity > 1_000_000_000_000) {
+      throw new Error(`Enter a valid non-negative counted quantity on count row ${index + 2}.`);
+    }
+    if (seenItemIds.has(itemId)) throw new Error(`A product appears more than once on count row ${index + 2}.`);
+    seenItemIds.add(itemId);
+    rows.push({ itemId, quantity: String(parsedQuantity) });
+  }
+
+  const date = typeof input.date === "string" ? input.date.trim() : "";
+  const parsedDate = /^\d{4}-\d{2}-\d{2}$/.test(date) ? new Date(`${date}T00:00:00.000Z`) : null;
+  if (!parsedDate || Number.isNaN(parsedDate.getTime()) || parsedDate.toISOString().slice(0, 10) !== date) {
+    throw new Error("Choose a valid stock count date.");
+  }
+  const reference = typeof input.reference === "string" ? input.reference.trim().slice(0, 100) : "";
+
+  const adjustedCount = await db.transaction(async (transaction) => {
+    const itemIds = rows.map((row) => row.itemId).sort();
+    const items = await transaction
+      .select()
+      .from(bookkeepingRecord)
+      .where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "items"), inArray(bookkeepingRecord.id, itemIds)))
+      .orderBy(bookkeepingRecord.id)
+      .for("update");
+
+    if (items.length !== rows.length || items.some((item) => item.data.itemType !== "Product")) {
+      throw new Error("The spreadsheet includes a product that is no longer in your inventory. Download a fresh template and try again.");
+    }
+
+    const countedById = new Map(rows.map((row) => [row.itemId, Number(row.quantity)]));
+    const updatedAt = new Date();
+    const movements: (typeof bookkeepingRecord.$inferInsert)[] = [];
+
+    for (const item of items) {
+      const countedStock = countedById.get(item.id);
+      if (countedStock === undefined) throw new Error("The count sheet has changed. Download a fresh template and try again.");
+      const previousStock = Number(item.data.stock || 0);
+      if (!Number.isFinite(previousStock) || previousStock < 0) {
+        throw new Error(`${item.data.name || "A product"} has an invalid current stock balance. Fix its count before importing.`);
+      }
+      const change = countedStock - previousStock;
+      if (change === 0) continue;
+
+      await transaction
+        .update(bookkeepingRecord)
+        .set({ data: { ...item.data, stock: String(countedStock) }, updatedAt })
+        .where(and(eq(bookkeepingRecord.id, item.id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "items")));
+
+      movements.push({
+        userId: me.id,
+        kind: "inventory-movements",
+        data: {
+          movementType: "Adjustment",
+          itemId: item.id,
+          itemName: item.data.name || "Product",
+          sku: item.data.sku || "",
+          unit: item.data.unit || "",
+          quantity: String(Math.abs(change)),
+          change: String(change),
+          previousStock: String(previousStock),
+          resultingStock: String(countedStock),
+          date,
+          reference: reference || "Bulk stock count",
+          notes: "Physical count imported from spreadsheet.",
+        },
+        updatedAt,
+      });
+    }
+
+    if (movements.length > 0) await transaction.insert(bookkeepingRecord).values(movements);
+    return movements.length;
+  });
+
+  revalidatePath("/app", "layout");
+  return { checkedCount: rows.length, adjustedCount };
 }
