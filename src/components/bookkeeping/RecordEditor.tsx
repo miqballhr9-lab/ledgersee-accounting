@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { Fragment, useEffect, useRef, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { ChevronDown, Copy, LoaderCircle, Mail, MessageCircle, MessageSquareText, Plus, Printer, Share2, Trash2, UploadCloud } from "lucide-react";
 
@@ -24,6 +24,7 @@ import { CurrencyPicker } from "@/components/bookkeeping/CurrencyPicker";
 import type { ModuleDefinition } from "@/lib/bookkeeping-config";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
 import { currencyAmount, dueDateForTerms, invoiceSubtotal, parseInvoiceLines } from "@/lib/invoice-utils";
+import { accountCategoryForType } from "@/lib/account-types";
 import { paymentAccountLabel, paymentAccountType } from "@/lib/payment-accounts";
 
 interface RecordEditorProps {
@@ -344,6 +345,9 @@ export default function RecordEditor({ module, record, customers, vendors, items
   const invoiceTotal = Math.max(0, subtotal + taxAmount - discount);
   const hasStructuredLines = structuredLineKinds.has(module.kind);
   const customerOptions = customers.filter((customer) => customer.data.name?.trim());
+  const expenseAccounts = accounts.filter((account) =>
+    account.data.locked !== "true" && accountCategoryForType(account.data.accountType ?? "") === "Expense",
+  );
   const selectedCustomer = customerOptions.find((customer) => customer.id === values.customerId)
     ?? customerOptions.find((customer) => customer.data.name?.trim().toLowerCase() === values.customer?.trim().toLowerCase())
     ?? customerOptions.find((customer) => customer.id === values.customer);
@@ -366,11 +370,14 @@ export default function RecordEditor({ module, record, customers, vendors, items
             </>
           ) : null}
           <div className="grid gap-x-5 gap-y-4 sm:grid-cols-2">
-            {module.fields.map((field) => {
+            {module.fields.map((field, index) => {
               const value = values[field.key] ?? "";
               const isWide = field.type === "textarea" || field.type === "file";
+              const startsSection = Boolean(field.section && module.fields[index - 1]?.section !== field.section);
               return (
-                <div key={field.key} className={`min-w-0 space-y-2 ${isWide ? "sm:col-span-2" : ""}`}>
+                <Fragment key={field.key}>
+                {startsSection ? <div className="border-b border-border pb-2 pt-1 text-sm font-semibold text-foreground sm:col-span-2">{field.section}</div> : null}
+                <div className={`min-w-0 space-y-2 ${isWide ? "sm:col-span-2" : ""}`}>
                   {field.type === "checkbox" ? (
                     <div className="flex min-h-9 items-center gap-3 rounded-md border border-border px-3">
                       <Checkbox
@@ -559,7 +566,13 @@ export default function RecordEditor({ module, record, customers, vendors, items
                         value={vendorOptions.find((vendor) => vendor.data.name === value)?.id}
                         onValueChange={(vendorId) => {
                           const vendor = vendorOptions.find((option) => option.id === vendorId);
-                          if (vendor?.data.name) changeValue(field.key, vendor.data.name);
+                          if (vendor?.data.name) {
+                            changeValue(field.key, vendor.data.name);
+                            if (module.kind === "bills" && vendor.data.defaultExpenseAccount) {
+                              const expenseAccount = expenseAccounts.find((account) => account.id === vendor.data.defaultExpenseAccount);
+                              if (expenseAccount?.data.name) changeValue("category", expenseAccount.data.name);
+                            }
+                          }
                         }}
                       >
                         <SelectTrigger id={`field-${field.key}`} className="w-full" aria-required={field.required}>
@@ -575,6 +588,19 @@ export default function RecordEditor({ module, record, customers, vendors, items
                       </Select>
                       {!vendorOptions.length ? <p className="text-xs leading-5 text-muted-foreground">Add a vendor in Vendors before creating this record.</p> : null}
                     </>
+                  ) : null}
+
+                  {field.key === "defaultExpenseAccount" && module.kind === "vendors" ? (
+                    <Select value={value || "none"} onValueChange={(nextValue) => changeValue(field.key, nextValue === "none" ? "" : nextValue ?? "")}>
+                      <SelectTrigger id={`field-${field.key}`} className="w-full">
+                        <SelectValue placeholder="Choose an expense category" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">No default</SelectItem>
+                        {expenseAccounts.map((account) => <SelectItem value={account.id} key={account.id}>{account.data.name || "Unnamed account"}</SelectItem>)}
+                        {value && !expenseAccounts.some((account) => account.id === value) ? <SelectItem value={value}>{value} · previously saved</SelectItem> : null}
+                      </SelectContent>
+                    </Select>
                   ) : null}
 
                   {field.type === "select" && field.key === "paymentMethod" && (module.kind === "invoices" || module.kind === "bills") ? (
@@ -595,7 +621,7 @@ export default function RecordEditor({ module, record, customers, vendors, items
                     </>
                   ) : null}
 
-                  {field.type === "select" && !(field.key === "paymentMethod" && (module.kind === "invoices" || module.kind === "bills")) ? (
+                  {field.type === "select" && field.key !== "defaultExpenseAccount" && !(field.key === "paymentMethod" && (module.kind === "invoices" || module.kind === "bills")) ? (
                     <Select value={value || undefined} onValueChange={(nextValue) => changeValue(field.key, nextValue ?? "")}>
                       <SelectTrigger id={`field-${field.key}`} className="w-full">
                         <SelectValue placeholder="Choose an option" />
@@ -648,6 +674,7 @@ export default function RecordEditor({ module, record, customers, vendors, items
 
                   {field.help && field.type !== "file" && field.type !== "checkbox" && !(hasStructuredLines && field.key === "lineItems") ? <p className="text-xs leading-5 text-muted-foreground">{field.help}</p> : null}
                 </div>
+                </Fragment>
               );
             })}
           </div>

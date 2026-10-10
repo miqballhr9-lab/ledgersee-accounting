@@ -79,11 +79,12 @@ export default async function SectionPage({ params, searchParams }: SectionPageP
   }
 
   if (section === "vendors") {
-    const groups = await listBookkeepingRecordGroups(["vendors", "bills", "settings"]);
+    const groups = await listBookkeepingRecordGroups(["vendors", "bills", "accounts", "settings"]);
     return (
       <VendorsWorkspace
         records={groups.vendors ?? []}
         bills={groups.bills ?? []}
+        accounts={groups.accounts ?? []}
         currency={groups.settings?.[0]?.data.currency || "USD"}
         asOfDate={new Date().toISOString().slice(0, 10)}
       />

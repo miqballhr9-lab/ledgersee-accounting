@@ -17,6 +17,7 @@ import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
 interface VendorsWorkspaceProps {
   records: BookkeepingRecord[];
   bills: BookkeepingRecord[];
+  accounts: BookkeepingRecord[];
   currency: string;
   asOfDate: string;
 }
@@ -40,7 +41,7 @@ function csvValue(value: string) {
   return `"${value.replaceAll('"', '""')}"`;
 }
 
-export default function VendorsWorkspace({ records: initialRecords, bills, currency, asOfDate }: VendorsWorkspaceProps) {
+export default function VendorsWorkspace({ records: initialRecords, bills, accounts, currency, asOfDate }: VendorsWorkspaceProps) {
   const router = useRouter();
   const [records, setRecords] = useState(initialRecords);
   const [search, setSearch] = useState("");
@@ -86,7 +87,7 @@ export default function VendorsWorkspace({ records: initialRecords, bills, curre
 
   function openNewVendor() {
     setEditingRecord(null);
-    setDefaults({ openingBalance: "0" });
+    setDefaults({ openingBalance: "0", openingBalanceDate: asOfDate });
     setActionMessage("");
     setEditorOpen(true);
   }
@@ -258,7 +259,7 @@ export default function VendorsWorkspace({ records: initialRecords, bills, curre
           customers={[]}
           vendors={[]}
           items={[]}
-          accounts={[]}
+          accounts={accounts}
           defaults={defaults}
           open={editorOpen}
           onOpenChange={setEditorOpen}

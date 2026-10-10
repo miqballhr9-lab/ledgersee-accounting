@@ -5,6 +5,7 @@ export type FieldType = "text" | "email" | "number" | "date" | "select" | "curre
 export interface FormField {
   key: string;
   label: string;
+  section?: string;
   type?: FieldType;
   placeholder?: string;
   required?: boolean;
@@ -52,12 +53,31 @@ export const modules: readonly ModuleDefinition[] = [
     description: "Suppliers and service providers you pay.", titleKey: "name",
     columns: ["name", "company", "email", "phone", "openingBalance"],
     fields: [
-      { key: "name", label: "Contact name", required: true },
+      { key: "name", label: "Contact name", section: "Contact information", required: true },
       { key: "company", label: "Company" },
       { key: "email", label: "Email", type: "email" },
+      { key: "emailCc", label: "CC" },
+      { key: "emailBcc", label: "BCC" },
       { key: "phone", label: "Phone" },
-      { key: "address", label: "Address", type: "textarea" },
-      { key: "openingBalance", label: "Opening balance", type: "number", placeholder: "0.00" },
+      { key: "mobile", label: "Mobile" },
+      { key: "fax", label: "Fax" },
+      { key: "otherContact", label: "Other contact" },
+      { key: "website", label: "Website" },
+      { key: "address", label: "Street address", section: "Address" },
+      { key: "addressLine2", label: "Address line 2" },
+      { key: "city", label: "City" },
+      { key: "state", label: "State / region" },
+      { key: "postalCode", label: "ZIP / postal code" },
+      { key: "country", label: "Country" },
+      { key: "businessId", label: "Business ID", section: "Tax and purchasing" },
+      { key: "taxId", label: "Sales tax ID" },
+      { key: "paymentTerms", label: "Payment terms", type: "select", options: ["Due on receipt", "15 days", "30 days", "60 days"] },
+      { key: "accountNumber", label: "Account number" },
+      { key: "defaultExpenseAccount", label: "Default expense category", type: "select", help: "This category is prefilled on new bills from this vendor." },
+      { key: "openingBalance", label: "Opening balance", type: "number", section: "Opening balance", placeholder: "0.00" },
+      { key: "openingBalanceDate", label: "As of", type: "date" },
+      { key: "notes", label: "Notes", type: "textarea", section: "Notes and attachments" },
+      { key: "attachment", label: "Attachment", type: "file", help: "Attach a PDF, image, or CSV up to 10 MB." },
     ],
   },
   {
