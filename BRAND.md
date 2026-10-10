@@ -1,7 +1,7 @@
 ---
 name: "MIKLEDGER"
 slug: "mikledger"
-one_liner: "MIKLEDGER is a small-business bookkeeping workspace for customers, sales documents, purchases, banking, and financial reports."
+one_liner: "MIKLEDGER is a small-business bookkeeping and payroll workspace for customers, sales documents, purchases, banking, and financial reports."
 audience: "Founders, freelancers, and small operators who need practical finance workflows without a complex setup."
 value_props:
   - "Email and password sign-up/sign-in with records isolated to the signed-in account"

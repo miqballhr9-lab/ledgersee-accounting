@@ -14,6 +14,7 @@ import { siteUrl } from "@/lib/site";
 import { isRecordKind, type BookkeepingRecord, type RecordKind } from "@/lib/bookkeeping-types";
 import { paymentAccountType } from "@/lib/payment-accounts";
 import { budgetActual, budgetExpectedTotal, budgetVariance, parseBudgetLines, recordsWithinBudgetDates, type BudgetLine, type BudgetLineType, type BudgetPeriod } from "@/lib/budget-utils";
+import { calculatePayroll, serializePayroll, type PayrollValues } from "@/lib/payroll-utils";
 
 const convertTargets: Partial<Record<RecordKind, RecordKind>> = {
   estimates: "invoices",
@@ -127,6 +128,64 @@ function amountFromLineItems(data: Record<string, string>): Record<string, strin
   };
 }
 
+function normalizePayrollData(data: Record<string, string>): Record<string, string> {
+  const values: PayrollValues = {
+    employeeId: data.employeeId || "",
+    employeeName: data.employeeName || "",
+    cnic: data.cnic || "",
+    designation: data.designation || "",
+    joiningDate: data.joiningDate || "",
+    month: data.month || "",
+    baseSalary: data.baseSalary || "",
+    increment: data.increment || "0",
+    workingDays: data.workingDays || "",
+    workedDays: data.workedDays || "",
+    incentive: data.incentive || "0",
+    overtimeAllowance: data.overtimeAllowance || "0",
+    gymAllowance: data.gymAllowance || "0",
+    medicalAllowance: data.medicalAllowance || "0",
+    otherAllowance: data.otherAllowance || "0",
+    taxDeduction: data.taxDeduction || "",
+    advanceDeduction: data.advanceDeduction || "0",
+    loanDeduction: data.loanDeduction || "0",
+    fineDeduction: data.fineDeduction || "0",
+    adjustment: data.adjustment || "0",
+    description: data.description || "",
+  };
+
+  if (!values.employeeId || !values.employeeName || !values.cnic || !values.designation || !values.baseSalary) {
+    throw new Error("Enter the employee ID, name, CNIC, designation, and base salary.");
+  }
+  if (!/^\d{5}-?\d{7}-?\d$/.test(values.cnic)) throw new Error("Enter a valid 13-digit CNIC.");
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(values.month)) throw new Error("Choose a valid payroll month.");
+  if (values.joiningDate) {
+    const joiningDate = new Date(`${values.joiningDate}T00:00:00.000Z`);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(values.joiningDate) || !Number.isFinite(joiningDate.getTime()) || joiningDate.toISOString().slice(0, 10) !== values.joiningDate) {
+      throw new Error("Choose a valid employee joining date.");
+    }
+  }
+
+  const numericFields: (keyof PayrollValues)[] = [
+    "baseSalary", "increment", "workingDays", "workedDays", "incentive", "overtimeAllowance", "gymAllowance",
+    "medicalAllowance", "otherAllowance", "taxDeduction", "advanceDeduction", "loanDeduction", "fineDeduction", "adjustment",
+  ];
+  for (const key of numericFields) {
+    const value = values[key].trim();
+    if (!value) continue;
+    const number = Number(value);
+    if (!Number.isFinite(number) || Math.abs(number) > 1_000_000_000_000) throw new Error("Enter valid salary amounts and working days.");
+    if (key !== "adjustment" && number < 0) throw new Error("Salary, allowances, days, tax, and deductions can’t be negative.");
+  }
+
+  const workingDays = Number(values.workingDays);
+  const workedDays = Number(values.workedDays);
+  if (!Number.isInteger(workingDays) || workingDays < 1 || workingDays > 31) throw new Error("Total working days must be from 1 to 31.");
+  if (!Number.isInteger(workedDays) || workedDays < 0 || workedDays > workingDays) throw new Error("Worked days can’t exceed total working days.");
+  if (calculatePayroll(values).payableSalary < 0) throw new Error("Deductions exceed the gross salary. Adjust the deductions or adjustment.");
+
+  return serializePayroll(values);
+}
+
 export async function listBookkeepingRecords(kind: string): Promise<BookkeepingRecord[]> {
   const me = await requireUser();
   if (!isRecordKind(kind)) throw new Error("That section isn’t available.");
@@ -181,6 +240,20 @@ export async function saveBookkeepingRecord(
   if (!isRecordKind(kind)) throw new Error("That section isn’t available.");
   if (kind === "reconciliations") throw new Error("Completed reconciliations can only be created from the reconciliation screen.");
   let data = amountFromLineItems(sanitizePayload(input));
+  if (kind === "payroll") {
+    data = normalizePayrollData(data);
+    const payrollRows = await db
+      .select()
+      .from(bookkeepingRecord)
+      .where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "payroll")));
+    if (id && !payrollRows.some((row) => row.id === id)) throw new Error("We couldn’t find that payroll entry. Refresh and try again.");
+    const duplicate = payrollRows.some((row) =>
+      row.id !== id &&
+      row.data.month === data.month &&
+      row.data.employeeId?.toLowerCase() === data.employeeId.toLowerCase(),
+    );
+    if (duplicate) throw new Error("That employee already has a payroll entry for this month.");
+  }
   if (kind === "invoices") {
     const paymentTerms = data.paymentTerms || "30 days";
     if (!["Due on receipt", "15 days", "30 days", "60 days"].includes(paymentTerms)) throw new Error("Choose one of the available payment terms.");

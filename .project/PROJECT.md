@@ -1,7 +1,7 @@
 <!-- OWNER: Build (with the user) · READERS: every agent · READ THIS FIRST -->
 # MIKLEDGER
 
-**One-liner:** MIKLEDGER is a small-business bookkeeping workspace for customers, sales documents, purchases, banking, and financial reports.
+**One-liner:** MIKLEDGER is a small-business bookkeeping and payroll workspace for customers, sales documents, purchases, banking, and financial reports.
 
 ## Goal
 Give owners a clear, account-specific place to manage routine bookkeeping and follow outstanding money.
@@ -31,7 +31,7 @@ Founders, freelancers, and small operators who need practical finance workflows 
 - Manual journals support multiple debit and credit lines, account choices from Chart of Accounts, balanced totals, and CSV line import; the Trial Balance includes these entries and remains compatible with older journals.
 - Chart of Accounts has searchable and type-filtered account rows, opening-balance visibility, and a dedicated side panel for account details, sub-accounts, and locking; accounts used by journal entries cannot be deleted.
 - A back arrow in the workspace header returns to the previous page, with a dashboard fallback for directly opened sections.
-- Monthly payroll records are saved per account with employee ID, CNIC, salary increments, attendance, allowances, Pakistan Tax Year 2027 salary-tax estimates, deductions, adjustments, descriptions, and final payable salary; entries can be searched, edited, and deleted.
+- Monthly payroll records are saved per account with employee ID, joining date, CNIC, salary increments, attendance, allowances, Pakistan Tax Year 2027 salary-tax estimates, deductions, adjustments, descriptions, and final payable salary; entries can be searched, edited, and deleted, with clear form feedback when a save is rejected.
 
 ## Constraints / must-nots
 This is a working demo, not a substitute for professional accounting or tax advice. Team roles and approval settings are saved in the account’s team directory; they do not invite separate users or enforce different sign-in permissions. Financial summaries reflect the records entered by the account owner.

@@ -5,8 +5,7 @@ import { useRouter } from "next/navigation";
 import { Banknote, CalendarDays, CircleDollarSign, Pencil, Plus, Trash2, Users } from "lucide-react";
 import { toast } from "sonner";
 
-import { deleteBookkeepingRecord } from "@/app/actions";
-import { savePayrollRecord } from "@/app/payroll-actions";
+import { deleteBookkeepingRecord, saveBookkeepingRecord } from "@/app/actions";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -24,7 +23,7 @@ interface PayrollWorkspaceProps {
 interface PayrollFieldSpec {
   name: keyof PayrollValues;
   label: string;
-  type?: "text" | "number";
+  type?: "text" | "number" | "date";
   required?: boolean;
   step?: string;
   allowNegative?: boolean;
@@ -57,6 +56,7 @@ function recordToValues(record: BookkeepingRecord, month: string): PayrollValues
     employeeName: data.employeeName || "",
     cnic: data.cnic || "",
     designation: data.designation || "",
+    joiningDate: data.joiningDate || "",
     month: data.month || month,
     baseSalary: data.baseSalary || "0",
     increment: data.increment || "0",
@@ -103,6 +103,7 @@ export default function PayrollWorkspace({ records, asOfDate }: PayrollWorkspace
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingId, setEditingId] = useState("");
   const [values, setValues] = useState<PayrollValues>(() => emptyPayrollValues(currentMonth));
+  const [saveError, setSaveError] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState("");
   const totals = calculatePayroll(values);
@@ -121,17 +122,20 @@ export default function PayrollWorkspace({ records, asOfDate }: PayrollWorkspace
   }), { gross: 0, payable: 0, tax: 0 }), [periodRecords]);
 
   function updateField(name: keyof PayrollValues, value: string) {
+    setSaveError("");
     setValues((previous) => ({ ...previous, [name]: value }));
   }
 
   function openNewEntry() {
     setEditingId("");
+    setSaveError("");
     setValues(emptyPayrollValues(selectedMonth));
     setDialogOpen(true);
   }
 
   function openEditEntry(record: BookkeepingRecord) {
     setEditingId(record.id);
+    setSaveError("");
     setValues(recordToValues(record, selectedMonth));
     setDialogOpen(true);
   }
@@ -159,15 +163,19 @@ export default function PayrollWorkspace({ records, asOfDate }: PayrollWorkspace
   async function handleSave(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setIsSaving(true);
+    setSaveError("");
     try {
-      const saved = await savePayrollRecord(values, editingId || undefined);
+      const payload: Record<string, string> = { ...values };
+      const saved = await saveBookkeepingRecord("payroll", payload, editingId || undefined);
       setSavedRecords((previous) => [saved, ...previous.filter((record) => record.id !== saved.id)]);
       setSelectedMonth(saved.data.month);
       setDialogOpen(false);
       toast.success(editingId ? "Payroll entry updated." : "Payroll entry saved.");
       router.refresh();
     } catch (error) {
-      toast.error(errorMessage(error));
+      const message = errorMessage(error);
+      setSaveError(message);
+      toast.error(message);
     } finally {
       setIsSaving(false);
     }
@@ -193,6 +201,7 @@ export default function PayrollWorkspace({ records, asOfDate }: PayrollWorkspace
     { name: "employeeName", label: "Employee name", required: true, placeholder: "Full name" },
     { name: "cnic", label: "CNIC", required: true, placeholder: "12345-1234567-1" },
     { name: "designation", label: "Designation", required: true, placeholder: "Job title" },
+    { name: "joiningDate", label: "Joining date", type: "date" },
   ];
 
   return (
@@ -261,6 +270,7 @@ export default function PayrollWorkspace({ records, asOfDate }: PayrollWorkspace
                     <TableCell>
                       <p className="font-medium">{record.data.employeeName || "Unnamed employee"}</p>
                       <p className="mt-0.5 text-xs text-muted-foreground">{record.data.employeeId} · {record.data.cnic}</p>
+                      <p className="mt-0.5 text-xs text-muted-foreground">Joined: {record.data.joiningDate || "Not set"}</p>
                     </TableCell>
                     <TableCell>{record.data.designation || "—"}</TableCell>
                     <TableCell className="tabular-nums">{record.data.workedDays || "0"} / {record.data.workingDays || "0"}</TableCell>
@@ -361,6 +371,7 @@ export default function PayrollWorkspace({ records, asOfDate }: PayrollWorkspace
               <p className="text-xs text-muted-foreground">Gross pay − tax − advance − loan − fines + adjustment</p>
             </section>
 
+            {saveError ? <p role="alert" className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">{saveError}</p> : null}
             <div className="flex flex-col-reverse gap-2 border-t border-border pt-4 sm:flex-row sm:justify-end">
               <Button type="button" variant="outline" onClick={() => setDialogOpen(false)} disabled={isSaving}>Cancel</Button>
               <Button type="submit" disabled={isSaving}>{isSaving ? "Saving…" : editingId ? "Save changes" : "Save payroll entry"}</Button>

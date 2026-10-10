@@ -3,6 +3,7 @@ export interface PayrollValues {
   employeeName: string;
   cnic: string;
   designation: string;
+  joiningDate: string;
   month: string;
   baseSalary: string;
   increment: string;
@@ -92,6 +93,7 @@ export function emptyPayrollValues(month: string): PayrollValues {
     employeeName: "",
     cnic: "",
     designation: "",
+    joiningDate: "",
     month,
     baseSalary: "0",
     increment: "0",
