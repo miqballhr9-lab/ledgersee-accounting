@@ -417,13 +417,11 @@ export default function BudgetPlannerWorkspace({ budgets, financialRecords, acco
                 <TableBody>
                   {lines.map((line, index) => {
                     const actual = actuals[index] ?? 0;
-                    const lineActualRecords = budgetActualRecords(line, periodRecords);
-                    const actualSourceKinds = new Set(lineActualRecords.map((record) => record.kind));
                     const directSourceKind: BookkeepingRecord["kind"] | null = line.category === "Payroll"
                       ? "payroll"
                       : line.category === "Sales"
                         ? "invoices"
-                        : actualSourceKinds.size === 1 ? lineActualRecords[0].kind : null;
+                        : null;
                     const variance = budgetVariance(line, actual);
                     const categoryAccountHeads = line.category === "Expenses" ? accountHeads.filter((option) => option.category === "Expenses") : [];
                     const categorySalesHeads = line.category === "Sales" ? salesHeads : [];
