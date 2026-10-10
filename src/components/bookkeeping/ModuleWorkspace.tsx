@@ -34,6 +34,7 @@ import { formatCustomerAddress } from "@/lib/customer-utils";
 import { paymentAccountLabel, paymentAccountType } from "@/lib/payment-accounts";
 import { budgetActualRecords, recordsWithinBudgetDates, type BudgetLine } from "@/lib/budget-utils";
 import JournalEntryEditor from "@/components/bookkeeping/JournalEntryEditor";
+import ItemsBulkImport from "@/components/bookkeeping/ItemsBulkImport";
 import RecordEditor from "@/components/bookkeeping/RecordEditor";
 import RecordTable, { type RecordActionKind } from "@/components/bookkeeping/RecordTable";
 
@@ -497,6 +498,15 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
     URL.revokeObjectURL(objectUrl);
   }
 
+  function handleItemsImported(importedRecords: BookkeepingRecord[]) {
+    setRecords((current) => [...importedRecords, ...current]);
+    setPage(1);
+    setSearch("");
+    setFilter("all");
+    setActionMessage(`${importedRecords.length} ${importedRecords.length === 1 ? "item or service" : "items and services"} added from Excel.`);
+    router.refresh();
+  }
+
   return (
     <div className="mx-auto w-full max-w-[1440px] px-4 py-6 sm:px-7 sm:py-8">
       <section className="flex flex-wrap items-end justify-between gap-4">
@@ -505,8 +515,9 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
           <h1 className="mt-1 text-[26px] font-semibold tracking-tight sm:text-3xl">{module.plural}</h1>
           <p className="mt-1.5 text-sm text-muted-foreground">{module.description}</p>
         </div>
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="flex w-full flex-wrap items-center justify-end gap-2 sm:w-auto sm:shrink-0">
           {canExport ? <Button variant="outline" className="gap-2" onClick={exportCsv}><ArrowDownToLine size={15} />Export CSV</Button> : null}
+          {module.kind === "items" ? <ItemsBulkImport onImported={handleItemsImported} /> : null}
           <Button className="gap-2" onClick={openNewRecord}><Plus size={16} />{module.kind === "settings" ? "Edit company profile" : `New ${module.label.toLowerCase()}`}</Button>
         </div>
       </section>

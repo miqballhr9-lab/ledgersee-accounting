@@ -16,6 +16,7 @@ import { paymentAccountType } from "@/lib/payment-accounts";
 import { accountCategoryForType, accountDetailsForType } from "@/lib/account-types";
 import { budgetActual, budgetExpectedTotal, budgetVariance, parseBudgetLines, parseCsv, recordsWithinBudgetDates, type BudgetCategory, type BudgetLine, type BudgetLineType, type BudgetPeriod } from "@/lib/budget-utils";
 import { calculatePayroll, payrollCsvFields, serializePayroll, type PayrollValues } from "@/lib/payroll-utils";
+import { MAX_ITEM_IMPORT_ROWS, type ItemImportData, type ItemImportRow } from "@/lib/item-import";
 
 const convertTargets: Partial<Record<RecordKind, RecordKind>> = {
   estimates: "invoices",
@@ -551,6 +552,69 @@ export async function saveBookkeepingRecord(
   }
   revalidatePath("/app", "layout");
   return serializeRow(created);
+}
+
+export async function importBookkeepingItems(input: ItemImportRow[]): Promise<BookkeepingRecord[]> {
+  const me = await requireUser();
+  if (!Array.isArray(input) || input.length === 0 || input.length > MAX_ITEM_IMPORT_ROWS) {
+    throw new Error(`Choose between 1 and ${MAX_ITEM_IMPORT_ROWS} item rows to import.`);
+  }
+
+  const rows: ItemImportRow[] = [];
+  const uploadedSkus = new Set<string>();
+  const numericFields: (keyof Pick<ItemImportData, "rate" | "taxRate" | "cost" | "reorderPoint">)[] = ["rate", "taxRate", "cost", "reorderPoint"];
+
+  for (const [index, entry] of input.entries()) {
+    if (!entry || typeof entry !== "object" || !Number.isInteger(entry.rowNumber) || entry.rowNumber < 2 || !entry.data || typeof entry.data !== "object") {
+      throw new Error(`Check the item details on import row ${index + 2}.`);
+    }
+
+    const data = {} as ItemImportData;
+    for (const key of ["name", "sku", "itemType", "rate", "unit", "taxRate", "cost", "reorderPoint"] as const) {
+      const value = entry.data[key];
+      if (typeof value !== "string") throw new Error(`Check ${key} on spreadsheet row ${entry.rowNumber}.`);
+      data[key] = value.trim();
+      if (data[key].length > 250) throw new Error(`${key} is too long on spreadsheet row ${entry.rowNumber}.`);
+    }
+
+    data.itemType = data.itemType || "Product";
+    if (!data.name) throw new Error(`Add a name on spreadsheet row ${entry.rowNumber}.`);
+    if (!["Product", "Service"].includes(data.itemType)) throw new Error(`Choose Product or Service on spreadsheet row ${entry.rowNumber}.`);
+    for (const key of numericFields) {
+      const value = data[key];
+      if (!value && key !== "rate") continue;
+      const amount = Number(value);
+      if (!Number.isFinite(amount) || amount < 0 || amount > 1_000_000_000_000) {
+        throw new Error(`Enter a valid non-negative ${key === "rate" ? "rate" : key === "taxRate" ? "tax rate" : key === "cost" ? "unit cost" : "reorder point"} on spreadsheet row ${entry.rowNumber}.`);
+      }
+    }
+
+    const skuKey = data.sku.toLocaleLowerCase();
+    if (skuKey && uploadedSkus.has(skuKey)) throw new Error(`The SKU ${data.sku} appears more than once in the spreadsheet.`);
+    if (skuKey) uploadedSkus.add(skuKey);
+    rows.push({ rowNumber: entry.rowNumber, data });
+  }
+
+  const created = await db.transaction(async (transaction) => {
+    if (uploadedSkus.size > 0) {
+      const existingItems = await transaction
+        .select({ data: bookkeepingRecord.data })
+        .from(bookkeepingRecord)
+        .where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "items")));
+      const existingSkus = new Set(existingItems.map((item) => item.data.sku?.trim().toLocaleLowerCase()).filter(Boolean));
+      const duplicate = rows.find((row) => row.data.sku && existingSkus.has(row.data.sku.toLocaleLowerCase()));
+      if (duplicate) throw new Error(`SKU ${duplicate.data.sku} on spreadsheet row ${duplicate.rowNumber} already exists in Items & services.`);
+    }
+
+    const saved = await transaction
+      .insert(bookkeepingRecord)
+      .values(rows.map((row) => ({ userId: me.id, kind: "items", data: sanitizePayload({ ...row.data }) })))
+      .returning();
+    return saved.map(serializeRow);
+  });
+
+  revalidatePath("/app", "layout");
+  return created;
 }
 
 function isBudgetDate(value: unknown): value is string {
