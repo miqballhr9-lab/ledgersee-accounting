@@ -1,11 +1,12 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { ArrowDownToLine, CalendarRange } from "lucide-react";
+import { ArrowDownToLine, CalendarRange, Check, ChevronsUpDown } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
 
@@ -15,10 +16,11 @@ interface ReportsWorkspaceProps {
 }
 
 type ReportKey = "profit-loss" | "balance-sheet" | "cash-flow" | "trial-balance" | "sales-customer" | "expenses-category" | "ageing" | "tax-summary";
+type ReportGroupKey = "standard" | "sales" | "expenses" | "customers";
 type ReportRow = Record<string, string | number>;
 
 const reportOptions: { key: ReportKey; label: string; description: string }[] = [
-  { key: "profit-loss", label: "Income Statement", description: "Revenue, gross profit, expenses, and net income over the selected period." },
+  { key: "profit-loss", label: "Profit & Loss", description: "Income and costs over the selected period." },
   { key: "balance-sheet", label: "Balance Sheet", description: "Assets, liabilities, and equity from your recorded balances." },
   { key: "cash-flow", label: "Cash Flow", description: "Money received and paid, grouped by month." },
   { key: "trial-balance", label: "Trial Balance", description: "Debit and credit totals from opening balances and journals." },
@@ -27,6 +29,27 @@ const reportOptions: { key: ReportKey; label: string; description: string }[] = 
   { key: "ageing", label: "Receivable / Payable Ageing", description: "Open customer and supplier balances by due date." },
   { key: "tax-summary", label: "Tax Summary", description: "Tax collected from invoices at your configured rates." },
 ];
+
+const reportGroups: { key: ReportGroupKey; label: string; reports: ReportKey[] }[] = [
+  { key: "standard", label: "Standard reports", reports: ["profit-loss", "balance-sheet", "cash-flow", "trial-balance", "tax-summary"] },
+  { key: "sales", label: "Sales reports", reports: ["sales-customer"] },
+  { key: "expenses", label: "Expense reports", reports: ["expenses-category"] },
+  { key: "customers", label: "Customer & vendor reports", reports: ["ageing"] },
+];
+
+function sourceRecordCount(key: ReportKey, records: BookkeepingRecord[]) {
+  const sourceKinds: Record<ReportKey, string[]> = {
+    "profit-loss": ["invoices", "bills", "expenses"],
+    "balance-sheet": ["accounts", "invoices", "bills", "expenses", "journals"],
+    "cash-flow": ["transactions", "payments", "expenses", "bills"],
+    "trial-balance": ["accounts", "journals"],
+    "sales-customer": ["invoices"],
+    "expenses-category": ["bills", "expenses"],
+    ageing: ["invoices", "bills"],
+    "tax-summary": ["invoices", "taxes"],
+  };
+  return records.filter((record) => sourceKinds[key].includes(record.kind)).length;
+}
 
 function rowAmount(record: BookkeepingRecord, key = "amount") {
   const amount = Number(record.data[key] ?? 0);
@@ -239,9 +262,12 @@ function buildReport(key: ReportKey, records: BookkeepingRecord[], asOfDate: str
 
 export default function ReportsWorkspace({ records, asOfDate }: ReportsWorkspaceProps) {
   const [reportKey, setReportKey] = useState<ReportKey>("profit-loss");
+  const [groupKey, setGroupKey] = useState<ReportGroupKey>("standard");
+  const [reportPickerOpen, setReportPickerOpen] = useState(false);
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
   const option = reportOptions.find((item) => item.key === reportKey) ?? reportOptions[0];
+  const reportGroup = reportGroups.find((group) => group.key === groupKey) ?? reportGroups[0];
   const filteredRecords = useMemo(() => records.filter((record) => {
     const date = recordDate(record);
     return (!fromDate || date >= fromDate) && (!toDate || date <= toDate);
@@ -265,7 +291,7 @@ export default function ReportsWorkspace({ records, asOfDate }: ReportsWorkspace
     const objectUrl = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
     const anchor = document.createElement("a");
     anchor.href = objectUrl;
-    anchor.download = `${reportKey === "profit-loss" ? "income-statement" : reportKey}.csv`;
+    anchor.download = `${reportKey}.csv`;
     anchor.click();
     URL.revokeObjectURL(objectUrl);
   }
@@ -273,38 +299,92 @@ export default function ReportsWorkspace({ records, asOfDate }: ReportsWorkspace
   return (
     <div className="mx-auto w-full max-w-[1440px] px-4 py-6 sm:px-7 sm:py-8">
       <section className="flex flex-wrap items-end justify-between gap-4">
-        <div><p className="text-xs font-medium uppercase tracking-[0.12em] text-primary">Accounting / Analysis</p><h1 className="mt-1 text-[26px] font-semibold tracking-tight sm:text-3xl">Reports</h1><p className="mt-1.5 text-sm text-muted-foreground">Read your books by period and export the figures when you need them.</p></div>
+        <div className="min-w-0"><p className="text-xs font-medium uppercase tracking-[0.12em] text-primary">Accounting / Analysis</p><h1 className="mt-1 text-[26px] font-semibold tracking-tight sm:text-3xl">Reports</h1><p className="mt-1.5 text-sm text-muted-foreground">Read your books by period and export the figures when you need them.</p></div>
         <Button variant="outline" className="gap-2" onClick={exportReport}><ArrowDownToLine size={15} />Export CSV</Button>
       </section>
 
-      <section className="mt-6 grid gap-3 rounded-lg border border-border bg-card p-4 sm:grid-cols-[minmax(220px,1fr)_minmax(160px,0.65fr)_minmax(160px,0.65fr)] sm:items-end">
-        <div className="space-y-2"><label className="text-xs font-medium" htmlFor="report-type">Report</label><Select value={reportKey} onValueChange={(value) => setReportKey((value as ReportKey) ?? "profit-loss")}><SelectTrigger id="report-type" className="w-full"><SelectValue>{option.label}</SelectValue></SelectTrigger><SelectContent>{reportOptions.map((item) => <SelectItem key={item.key} value={item.key}>{item.label}</SelectItem>)}</SelectContent></Select></div>
-        <div className="space-y-2"><label className="text-xs font-medium" htmlFor="report-from">From</label><Input id="report-from" type="date" value={fromDate} onChange={(event) => setFromDate(event.target.value)} /></div>
-        <div className="space-y-2"><label className="text-xs font-medium" htmlFor="report-to">To</label><Input id="report-to" type="date" value={toDate} onChange={(event) => setToDate(event.target.value)} /></div>
-      </section>
+      <div className="mt-6 grid min-w-0 gap-5 lg:grid-cols-[230px_minmax(0,1fr)]">
+        <aside className="rounded-lg border border-border bg-card p-3">
+          <h2 className="px-2 py-2 text-xs font-semibold uppercase tracking-[0.1em] text-muted-foreground">Reports & analytics</h2>
+          <nav aria-label="Report categories" className="mt-1 space-y-1">
+            {reportGroups.map((group) => (
+              <Button
+                key={group.key}
+                type="button"
+                variant={group.key === groupKey ? "secondary" : "ghost"}
+                className="h-auto min-h-10 w-full justify-between gap-2 px-3 py-2 text-left"
+                onClick={() => {
+                  setGroupKey(group.key);
+                  if (!group.reports.includes(reportKey)) setReportKey(group.reports[0]);
+                }}
+                aria-current={group.key === groupKey ? "true" : undefined}
+              >
+                <span className="min-w-0 truncate">{group.label}</span>
+                <span className="shrink-0 text-xs text-muted-foreground">{group.reports.length}</span>
+              </Button>
+            ))}
+          </nav>
+        </aside>
 
-      <section className="mt-5 overflow-hidden rounded-lg border border-border bg-card">
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-5 py-4">
-          <div className="flex items-start gap-3"><span className="grid size-9 place-items-center rounded-lg bg-accent text-accent-foreground"><CalendarRange size={17} /></span><div><h2 className="text-sm font-semibold">{option.label}</h2><p className="mt-1 text-xs text-muted-foreground">{option.description}</p></div></div>
-          <span className="text-xs text-muted-foreground">{filteredRecords.length} matching records</span>
+        <div className="min-w-0 space-y-4">
+          <section className="grid gap-3 rounded-lg border border-border bg-card p-4 sm:grid-cols-[minmax(220px,1.2fr)_minmax(150px,0.8fr)_minmax(150px,0.8fr)] sm:items-end">
+            <div className="min-w-0 space-y-2">
+              <label className="text-xs font-medium" htmlFor="report-picker">Report</label>
+              <Popover open={reportPickerOpen} onOpenChange={setReportPickerOpen}>
+                <PopoverTrigger
+                  render={
+                    <Button id="report-picker" type="button" variant="outline" role="combobox" aria-expanded={reportPickerOpen} className="w-full justify-between gap-2 font-normal">
+                      <span className="min-w-0 flex-1 truncate text-left">{option.label}</span>
+                      <ChevronsUpDown size={16} className="shrink-0 text-muted-foreground" />
+                    </Button>
+                  }
+                />
+                <PopoverContent align="start" className="w-[min(30rem,calc(100vw-2rem))] p-0">
+                  <Command>
+                    <CommandInput placeholder="Type report name here" />
+                    <CommandList>
+                      <CommandEmpty>No reports found in this category.</CommandEmpty>
+                      <CommandGroup heading={reportGroup.label}>
+                        {reportOptions.filter((item) => reportGroup.reports.includes(item.key)).map((item) => (
+                          <CommandItem key={item.key} value={`${item.label} ${item.description}`} onSelect={() => { setReportKey(item.key); setReportPickerOpen(false); }}>
+                            <span className="min-w-0 flex-1 truncate">{item.label}</span>
+                            <Check size={16} className={reportKey === item.key ? "opacity-100" : "opacity-0"} />
+                          </CommandItem>
+                        ))}
+                      </CommandGroup>
+                    </CommandList>
+                  </Command>
+                </PopoverContent>
+              </Popover>
+            </div>
+            <div className="space-y-2"><label className="text-xs font-medium" htmlFor="report-from">From</label><Input id="report-from" type="date" value={fromDate} onChange={(event) => setFromDate(event.target.value)} /></div>
+            <div className="space-y-2"><label className="text-xs font-medium" htmlFor="report-to">To</label><Input id="report-to" type="date" value={toDate} onChange={(event) => setToDate(event.target.value)} /></div>
+          </section>
+
+          <section className="overflow-hidden rounded-lg border border-border bg-card">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-5 py-4">
+              <div className="flex min-w-0 items-start gap-3"><span className="grid size-9 shrink-0 place-items-center rounded-lg bg-accent text-accent-foreground"><CalendarRange size={17} /></span><div className="min-w-0"><h2 className="text-sm font-semibold">{option.label}</h2><p className="mt-1 text-xs text-muted-foreground">{option.description}</p></div></div>
+              <span className="shrink-0 text-xs text-muted-foreground">{sourceRecordCount(reportKey, filteredRecords)} source records</span>
+            </div>
+            {report.rows.length ? (
+              <div className="w-full overflow-x-auto">
+                <Table>
+                  <TableHeader><TableRow className="bg-muted/40 hover:bg-muted/40">{report.columns.map((column) => <TableHead key={column} className={`whitespace-nowrap text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground ${column === report.columns[0] ? "" : "text-right"}`}>{column}</TableHead>)}</TableRow></TableHeader>
+                  <TableBody>
+                    {report.rows.map((row, rowIndex) => (
+                      <TableRow key={`${String(row[report.columns[0]])}-${rowIndex}`}>
+                        {report.columns.map((column) => <TableCell key={column} className={`whitespace-nowrap py-3 text-[13px] ${column === report.columns[0] ? "font-medium" : "text-right tabular-nums"}`}>{displayCell(column, row[column] ?? "—")}</TableCell>)}
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            ) : (
+              <div className="grid min-h-56 place-items-center px-6 py-10 text-center"><div><p className="text-sm font-medium">No records in this report yet</p><p className="mt-1 max-w-sm text-sm text-muted-foreground">Add the related invoices, bills, journals, or tax rates to see actual figures here.</p></div></div>
+            )}
+          </section>
         </div>
-        {report.rows.length ? (
-          <div className="w-full overflow-x-auto">
-            <Table>
-              <TableHeader><TableRow className="bg-muted/40 hover:bg-muted/40">{report.columns.map((column) => <TableHead key={column} className="whitespace-nowrap text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">{column}</TableHead>)}</TableRow></TableHeader>
-              <TableBody>
-                {report.rows.map((row, rowIndex) => (
-                  <TableRow key={`${String(row[report.columns[0]])}-${rowIndex}`}>
-                    {report.columns.map((column) => <TableCell key={column} className={`whitespace-nowrap py-3 text-[13px] ${column === report.columns[0] ? "font-medium" : "tabular-nums"}`}>{displayCell(column, row[column] ?? "—")}</TableCell>)}
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-        ) : (
-          <div className="grid min-h-56 place-items-center px-6 py-10 text-center"><div><p className="text-sm font-medium">No records in this report yet</p><p className="mt-1 max-w-sm text-sm text-muted-foreground">Add the related invoices, bills, journals, or tax rates to see actual figures here.</p></div></div>
-        )}
-      </section>
+      </div>
     </div>
   );
 }
