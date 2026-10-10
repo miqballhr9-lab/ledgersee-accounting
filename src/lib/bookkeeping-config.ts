@@ -119,7 +119,8 @@ export const modules: readonly ModuleDefinition[] = [
       { key: "rate", label: "Rate", type: "number", required: true },
       { key: "unit", label: "Unit", placeholder: "hour, piece, month" },
       { key: "taxRate", label: "Tax rate (%)", type: "number" },
-      { key: "stock", label: "Stock quantity", type: "number" },
+      { key: "cost", label: "Unit cost", type: "number", section: "Inventory", placeholder: "0.00" },
+      { key: "reorderPoint", label: "Reorder point", type: "number", placeholder: "0", help: "Inventory alerts when stock reaches this quantity." },
     ],
   },
   {
@@ -413,6 +414,10 @@ export const navigationGroups: NavigationGroup[] = [
       { slug: "expenses", label: "Expenses", icon: "WalletCards" },
       { slug: "purchase-orders", label: "Purchase orders", icon: "ShoppingCart" },
     ],
+  },
+  {
+    label: "Inventory",
+    items: [{ slug: "inventory", label: "Inventory", icon: "Boxes" }],
   },
   {
     label: "Accounts",

@@ -10,6 +10,7 @@ export const recordKinds = [
   "bills",
   "expenses",
   "purchase-orders",
+  "inventory-movements",
   "bank-accounts",
   "transactions",
   "bank-rules",

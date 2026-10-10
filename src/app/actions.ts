@@ -1081,6 +1081,87 @@ export async function convertPurchaseOrderToExpense(
   revalidatePath("/app", "layout");
 }
 
+export async function createInventoryMovement(input: {
+  itemId: string;
+  movementType: "Receipt" | "Delivery" | "Adjustment";
+  quantity: string;
+  date: string;
+  reference?: string;
+  notes?: string;
+}): Promise<BookkeepingRecord> {
+  const me = await requireUser();
+  const itemId = input.itemId.trim();
+  const quantity = Number(input.quantity);
+  const date = input.date.trim();
+  const reference = (input.reference || "").trim().slice(0, 100);
+  const notes = (input.notes || "").trim().slice(0, 500);
+
+  if (!["Receipt", "Delivery", "Adjustment"].includes(input.movementType)) throw new Error("Choose a valid stock movement.");
+  if (!itemId) throw new Error("Choose a product to continue.");
+  if (!Number.isFinite(quantity) || quantity < 0 || (input.movementType !== "Adjustment" && quantity === 0)) {
+    throw new Error("Enter a valid quantity greater than zero.");
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(new Date(`${date}T00:00:00.000Z`).getTime())) {
+    throw new Error("Choose a valid movement date.");
+  }
+
+  const movement = await db.transaction(async (transaction) => {
+    const [item] = await transaction
+      .select()
+      .from(bookkeepingRecord)
+      .where(and(eq(bookkeepingRecord.id, itemId), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "items")))
+      .for("update")
+      .limit(1);
+
+    if (!item || item.data.itemType !== "Product") throw new Error("Choose a saved product from Items & services.");
+    const previousStock = Number(item.data.stock || 0);
+    if (!Number.isFinite(previousStock) || previousStock < 0) throw new Error("This product has an invalid stock balance. Correct its count before continuing.");
+
+    const change = input.movementType === "Receipt"
+      ? quantity
+      : input.movementType === "Delivery"
+        ? -quantity
+        : quantity - previousStock;
+    const nextStock = previousStock + change;
+    if (input.movementType === "Delivery" && nextStock < 0) throw new Error("There isn’t enough stock for this delivery.");
+    if (input.movementType === "Adjustment" && change === 0) throw new Error("The counted stock matches the current balance.");
+
+    const updatedAt = new Date();
+    await transaction
+      .update(bookkeepingRecord)
+      .set({ data: { ...item.data, stock: String(nextStock) }, updatedAt })
+      .where(and(eq(bookkeepingRecord.id, item.id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "items")));
+
+    const [savedMovement] = await transaction
+      .insert(bookkeepingRecord)
+      .values({
+        userId: me.id,
+        kind: "inventory-movements",
+        data: {
+          movementType: input.movementType,
+          itemId: item.id,
+          itemName: item.data.name || "Product",
+          sku: item.data.sku || "",
+          unit: item.data.unit || "",
+          quantity: String(Math.abs(change)),
+          change: String(change),
+          previousStock: String(previousStock),
+          resultingStock: String(nextStock),
+          date,
+          reference,
+          notes,
+        },
+        updatedAt,
+      })
+      .returning();
+
+    return serializeRow(savedMovement);
+  });
+
+  revalidatePath("/app", "layout");
+  return movement;
+}
+
 export async function advancePurchaseOrder(
   id: string,
   action: "send-rfq" | "confirm" | "receive" | "cancel",
@@ -1173,15 +1254,37 @@ export async function advancePurchaseOrder(
       const itemIds = [...quantities.keys()];
       if (itemIds.length) {
         const linkedItems = await transaction.select().from(bookkeepingRecord)
-          .where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "items"), inArray(bookkeepingRecord.id, itemIds)));
+          .where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "items"), inArray(bookkeepingRecord.id, itemIds)))
+          .for("update");
         if (linkedItems.length !== itemIds.length) throw new Error("A linked item is no longer available. Update the purchase order before receiving it.");
         for (const item of linkedItems) {
           if (item.data.itemType !== "Product") continue;
-          const nextStock = Number(item.data.stock || 0) + (quantities.get(item.id) || 0);
+          const previousStock = Number(item.data.stock || 0);
+          const receivedQuantity = quantities.get(item.id) || 0;
+          const nextStock = previousStock + receivedQuantity;
           if (!Number.isFinite(nextStock)) throw new Error(`Check the stock quantity for ${item.data.name || "this item"}.`);
           await transaction.update(bookkeepingRecord)
             .set({ data: { ...item.data, stock: String(nextStock) }, updatedAt })
             .where(and(eq(bookkeepingRecord.id, item.id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "items")));
+          await transaction.insert(bookkeepingRecord).values({
+            userId: me.id,
+            kind: "inventory-movements",
+            data: {
+              movementType: "Receipt",
+              itemId: item.id,
+              itemName: item.data.name || "Product",
+              sku: item.data.sku || "",
+              unit: item.data.unit || "",
+              quantity: String(receivedQuantity),
+              change: String(receivedQuantity),
+              previousStock: String(previousStock),
+              resultingStock: String(nextStock),
+              date: updatedAt.toISOString().slice(0, 10),
+              reference: lockedOrder.data.poNumber || "Purchase order",
+              notes: "Received from purchase order",
+            },
+            updatedAt,
+          });
         }
       }
       await transaction.update(bookkeepingRecord)

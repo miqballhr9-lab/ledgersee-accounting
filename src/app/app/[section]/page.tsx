@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 
 import { listAllBookkeepingRecords, listBookkeepingRecordGroups } from "@/app/actions";
 import ChartOfAccountsWorkspace from "@/components/bookkeeping/ChartOfAccountsWorkspace";
+import InventoryWorkspace from "@/components/bookkeeping/InventoryWorkspace";
 import BudgetPlannerWorkspace from "@/components/bookkeeping/BudgetPlannerWorkspace";
 import BillsWorkspace from "@/components/bookkeeping/BillsWorkspace";
 import ExpensesWorkspace from "@/components/bookkeeping/ExpensesWorkspace";
@@ -21,12 +22,23 @@ interface SectionPageProps {
 export async function generateMetadata({ params }: SectionPageProps): Promise<Metadata> {
   const { section } = await params;
   const module = moduleBySlug(section);
-  return { title: module?.plural ?? (section === "reports" ? "Reports" : section === "payroll" ? "Payroll" : "Workspace") };
+  return { title: module?.plural ?? (section === "reports" ? "Reports" : section === "payroll" ? "Payroll" : section === "inventory" ? "Inventory" : "Workspace") };
 }
 
 export default async function SectionPage({ params, searchParams }: SectionPageProps) {
   const { section } = await params;
   const { startDate = "", endDate = "", budgetHead = "" } = await searchParams;
+  if (section === "inventory") {
+    const groups = await listBookkeepingRecordGroups(["items", "inventory-movements", "settings"]);
+    return (
+      <InventoryWorkspace
+        products={groups.items ?? []}
+        movements={groups["inventory-movements"] ?? []}
+        currency={groups.settings?.[0]?.data.currency || "USD"}
+      />
+    );
+  }
+
   if (section === "payroll") {
     const groups = await listBookkeepingRecordGroups(["payroll", "accounts"]);
     return <PayrollWorkspace records={groups.payroll ?? []} accounts={groups.accounts ?? []} asOfDate={new Date().toISOString().slice(0, 10)} dateRange={{ startDate, endDate }} />;

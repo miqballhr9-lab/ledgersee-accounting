@@ -8,6 +8,7 @@ import {
   ArrowLeftRight,
   Banknote,
   BarChart3,
+  Boxes,
   BookOpenCheck,
   Building2,
   ChevronDown,
@@ -83,6 +84,7 @@ const icons: Record<string, LucideIcon> = {
   Percent,
   BarChart3,
   Banknote,
+  Boxes,
   ShieldCheck,
   Settings,
 };

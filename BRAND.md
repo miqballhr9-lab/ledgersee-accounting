@@ -9,7 +9,7 @@ value_props:
   - "Dashboard KPIs and monthly income-versus-expense chart based on saved records"
   - "CRUD workspaces for customers, vendors, items, invoices, estimates, sales orders, credit notes, recurring invoices, bills, expenses, purchase orders, banking, accounts, journals, taxes, team roles, and company settings"
   - "Purchase orders follow an RFQ workflow: email vendors, confirm orders, receive products into linked item stock, cancel eligible orders, then create one bill after receipt"
-  - "Bills have a dedicated payables workspace with outstanding and overdue totals, vendor/date/category visibility, status and category filters, CSV export, and direct edit, delete, and mark-paid actions"
+  - "Inventory workspace tracks product on-hand quantities, reorder points, unit-cost valuation, linked purchase receipts, manual deliveries, physical counts, and a saved stock-movement history using one company-wide stock balance"
 ctas:
   - "Sign in"
   - "Create account"
