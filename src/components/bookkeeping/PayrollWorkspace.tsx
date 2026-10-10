@@ -22,6 +22,7 @@ interface PayrollWorkspaceProps {
   records: BookkeepingRecord[];
   accounts: BookkeepingRecord[];
   asOfDate: string;
+  dateRange?: { startDate: string; endDate: string };
 }
 
 interface PayrollFieldSpec {
@@ -118,14 +119,14 @@ function nextPayrollMonth(month: string) {
   return value === 12 ? `${year + 1}-01` : `${year}-${String(value + 1).padStart(2, "0")}`;
 }
 
-export default function PayrollWorkspace({ records, accounts, asOfDate }: PayrollWorkspaceProps) {
+export default function PayrollWorkspace({ records, accounts, asOfDate, dateRange }: PayrollWorkspaceProps) {
   const router = useRouter();
   const uploadRef = useRef<HTMLInputElement>(null);
   const currentMonth = asOfDate.slice(0, 7);
   const [savedRecords, setSavedRecords] = useState(records);
   const [selectedMonth, setSelectedMonth] = useState(currentMonth);
-  const [customFromDate, setCustomFromDate] = useState("");
-  const [customToDate, setCustomToDate] = useState("");
+  const [customFromDate, setCustomFromDate] = useState(dateRange?.startDate ?? "");
+  const [customToDate, setCustomToDate] = useState(dateRange?.endDate ?? "");
   const [search, setSearch] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingId, setEditingId] = useState("");

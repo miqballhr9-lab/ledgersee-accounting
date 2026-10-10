@@ -12,6 +12,7 @@ import type { RecordKind } from "@/lib/bookkeeping-types";
 
 interface SectionPageProps {
   params: Promise<{ section: string }>;
+  searchParams: Promise<{ startDate?: string; endDate?: string; budgetHead?: string }>;
 }
 
 export async function generateMetadata({ params }: SectionPageProps): Promise<Metadata> {
@@ -20,11 +21,12 @@ export async function generateMetadata({ params }: SectionPageProps): Promise<Me
   return { title: module?.plural ?? (section === "reports" ? "Reports" : section === "payroll" ? "Payroll" : "Workspace") };
 }
 
-export default async function SectionPage({ params }: SectionPageProps) {
+export default async function SectionPage({ params, searchParams }: SectionPageProps) {
   const { section } = await params;
+  const { startDate = "", endDate = "", budgetHead = "" } = await searchParams;
   if (section === "payroll") {
     const groups = await listBookkeepingRecordGroups(["payroll", "accounts"]);
-    return <PayrollWorkspace records={groups.payroll ?? []} accounts={groups.accounts ?? []} asOfDate={new Date().toISOString().slice(0, 10)} />;
+    return <PayrollWorkspace records={groups.payroll ?? []} accounts={groups.accounts ?? []} asOfDate={new Date().toISOString().slice(0, 10)} dateRange={{ startDate, endDate }} />;
   }
 
   if (section === "reports") {
@@ -33,8 +35,8 @@ export default async function SectionPage({ params }: SectionPageProps) {
   }
 
   if (section === "budgets") {
-    const groups = await listBookkeepingRecordGroups(["budgets", "invoices", "bills", "expenses", "settings", "accounts"]);
-    const records = [...(groups.invoices ?? []), ...(groups.bills ?? []), ...(groups.expenses ?? [])];
+    const groups = await listBookkeepingRecordGroups(["budgets", "invoices", "bills", "expenses", "payroll", "settings", "accounts"]);
+    const records = [...(groups.invoices ?? []), ...(groups.bills ?? []), ...(groups.expenses ?? []), ...(groups.payroll ?? [])];
     return (
       <BudgetPlannerWorkspace
         budgets={groups.budgets ?? []}
@@ -67,5 +69,6 @@ export default async function SectionPage({ params }: SectionPageProps) {
   const accounts = groups.accounts ?? [];
   const items = groups.items ?? [];
   const settings = groups.settings ?? [];
-  return <ModuleWorkspace module={module} records={records} customers={customers} vendors={vendors} accounts={accounts} items={items} defaultCurrency={settings[0]?.data.currency || "USD"} />;
+  const sourceFilter = budgetHead ? { startDate, endDate, budgetHead } : undefined;
+  return <ModuleWorkspace module={module} records={records} customers={customers} vendors={vendors} accounts={accounts} items={items} defaultCurrency={settings[0]?.data.currency || "USD"} sourceFilter={sourceFilter} />;
 }

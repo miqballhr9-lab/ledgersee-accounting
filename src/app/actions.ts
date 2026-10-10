@@ -550,18 +550,19 @@ export async function saveBudgetPlan(input: unknown, id?: string): Promise<Bookk
   const lines: BudgetLine[] = form.lines.map((value, index) => {
     if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`Check budget line ${index + 1}.`);
     const line = value as Record<string, unknown>;
-    const legacyBudgetHead = typeof line.category === "string" && line.category !== "Sales" && line.category !== "Expenses" ? line.category.trim().slice(0, 120) : "";
+    const legacyBudgetHead = typeof line.category === "string" && line.category !== "Sales" && line.category !== "Expenses" && line.category !== "Payroll" ? line.category.trim().slice(0, 120) : "";
     const budgetHead = typeof line.budgetHead === "string" ? line.budgetHead.trim().slice(0, 120) : legacyBudgetHead;
     const descriptionText = typeof line.description === "string" ? line.description.trim().slice(0, 300) : "";
     const suppliedType: BudgetLineType = line.type === "Income" ? "Income" : line.type === "Expense" ? "Expense" : (() => { throw new Error(`Choose income or expense for line ${index + 1}.`); })();
-    const category: BudgetCategory = line.category === "Sales" || line.category === "Expenses"
+    const category: BudgetCategory = line.category === "Sales" || line.category === "Expenses" || line.category === "Payroll"
       ? line.category
-      : line.category === undefined || (typeof line.category === "string" && line.category !== "Sales" && line.category !== "Expenses")
+      : line.category === undefined || (typeof line.category === "string" && line.category !== "Sales" && line.category !== "Expenses" && line.category !== "Payroll")
         ? suppliedType === "Income" ? "Sales" : "Expenses"
         : (() => { throw new Error(`Choose Sales or Expenses for line ${index + 1}.`); })();
     const type: BudgetLineType = category === "Sales" ? "Income" : "Expense";
     const amount = typeof line.expected === "string" || typeof line.expected === "number" ? Number(line.expected) : Number.NaN;
     if (!budgetHead) throw new Error(`Choose a budget head for line ${index + 1}.`);
+    if (category === "Payroll" && budgetHead.toLocaleLowerCase() !== "gross salary") throw new Error(`Choose Gross Salary for payroll line ${index + 1}.`);
     if (!Number.isFinite(amount) || amount < 0 || amount > 1_000_000_000_000) throw new Error(`Enter a valid expected amount for line ${index + 1}.`);
     return { category, budgetHead, type, expected: (Math.round(amount * 100) / 100).toFixed(2), description: descriptionText };
   });

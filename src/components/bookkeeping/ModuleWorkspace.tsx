@@ -28,6 +28,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { type ModuleDefinition } from "@/lib/bookkeeping-config";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
 import { paymentAccountLabel, paymentAccountType } from "@/lib/payment-accounts";
+import { budgetActualRecords, recordsWithinBudgetDates, type BudgetLine } from "@/lib/budget-utils";
 import JournalEntryEditor from "@/components/bookkeeping/JournalEntryEditor";
 import RecordEditor from "@/components/bookkeeping/RecordEditor";
 import RecordTable, { type RecordActionKind } from "@/components/bookkeeping/RecordTable";
@@ -40,6 +41,7 @@ interface ModuleWorkspaceProps {
   accounts: BookkeepingRecord[];
   items: BookkeepingRecord[];
   defaultCurrency: string;
+  sourceFilter?: { startDate: string; endDate: string; budgetHead: string };
 }
 
 const pageSize = 10;
@@ -136,7 +138,7 @@ function formatCurrency(value: number, currency: string) {
   }
 }
 
-export default function ModuleWorkspace({ module, records: initialRecords, customers, vendors, accounts, items, defaultCurrency }: ModuleWorkspaceProps) {
+export default function ModuleWorkspace({ module, records: initialRecords, customers, vendors, accounts, items, defaultCurrency, sourceFilter }: ModuleWorkspaceProps) {
   const router = useRouter();
   const [records, setRecords] = useState(initialRecords);
   const [search, setSearch] = useState("");
@@ -163,12 +165,21 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
 
   const filteredRecords = useMemo(() => {
     const normalizedSearch = search.trim().toLowerCase();
+    const budgetLine: BudgetLine | null = sourceFilter ? {
+      category: module.kind === "invoices" ? "Sales" : "Expenses",
+      budgetHead: sourceFilter.budgetHead,
+      type: module.kind === "invoices" ? "Income" : "Expense",
+      expected: "0",
+      description: "",
+    } : null;
     return records.filter((record) => {
       const matchesSearch = !normalizedSearch || Object.values(record.data).some((value) => value.toLowerCase().includes(normalizedSearch));
       const matchesFilter = filter === "all" || !filterKey || record.data[filterKey] === filter;
-      return matchesSearch && matchesFilter;
+      const matchesDateRange = !sourceFilter || recordsWithinBudgetDates([record], sourceFilter.startDate, sourceFilter.endDate).length > 0;
+      const matchesBudgetHead = !budgetLine || budgetActualRecords(budgetLine, [record]).length > 0;
+      return matchesSearch && matchesFilter && matchesDateRange && matchesBudgetHead;
     });
-  }, [filter, filterKey, records, search]);
+  }, [filter, filterKey, module.kind, records, search, sourceFilter]);
 
   const pageCount = Math.max(1, Math.ceil(filteredRecords.length / pageSize));
   const visibleRecords = filteredRecords.slice((page - 1) * pageSize, page * pageSize);

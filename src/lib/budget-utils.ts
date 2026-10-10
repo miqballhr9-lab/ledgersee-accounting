@@ -2,7 +2,7 @@ import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
 
 export type BudgetPeriod = "Monthly" | "Quarterly" | "Annual" | "Custom";
 export type BudgetLineType = "Income" | "Expense";
-export type BudgetCategory = "Sales" | "Expenses";
+export type BudgetCategory = "Sales" | "Expenses" | "Payroll";
 
 export interface BudgetLine {
   category: BudgetCategory;
@@ -21,9 +21,10 @@ export function parseBudgetLines(value: string | undefined): BudgetLine[] {
     return parsed.flatMap((item) => {
       if (!item || typeof item !== "object" || Array.isArray(item)) return [];
       const line = item as Record<string, unknown>;
-      const type = line.type === "Income" ? "Income" : "Expense";
+      const suppliedType = line.type === "Income" ? "Income" : "Expense";
       const legacyCategory = typeof line.category === "string" ? line.category : "";
-      const category: BudgetCategory = legacyCategory === "Sales" || legacyCategory === "Expenses" ? legacyCategory : type === "Income" ? "Sales" : "Expenses";
+      const category: BudgetCategory = legacyCategory === "Sales" || legacyCategory === "Expenses" || legacyCategory === "Payroll" ? legacyCategory : suppliedType === "Income" ? "Sales" : "Expenses";
+      const type = category === "Sales" ? "Income" : "Expense";
       const budgetHead = typeof line.budgetHead === "string" ? line.budgetHead : category === legacyCategory ? "" : legacyCategory;
       return [{
         category,
@@ -50,14 +51,24 @@ export function budgetVariance(line: BudgetLine, actual: number) {
 
 export function recordsWithinBudgetDates(records: BookkeepingRecord[], startDate: string, endDate: string) {
   return records.filter((record) => {
+    if (record.kind === "payroll" && /^\d{4}-\d{2}$/.test(record.data.month ?? "")) {
+      const payrollStart = `${record.data.month}-01`;
+      const [year, month] = record.data.month.split("-").map(Number);
+      const payrollEnd = new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10);
+      return (!startDate || payrollEnd >= startDate) && (!endDate || payrollStart <= endDate);
+    }
     const date = record.data.issueDate || record.data.date || record.data.expenseDate || record.data.billDate || record.data.paymentDate || record.createdAt.slice(0, 10);
     return (!startDate || date >= startDate) && (!endDate || date <= endDate);
   });
 }
 
-export function budgetActual(line: BudgetLine, records: BookkeepingRecord[]) {
+export function budgetActualRecords(line: BudgetLine, records: BookkeepingRecord[]) {
   const budgetHead = line.budgetHead.trim().toLocaleLowerCase();
-  if (!budgetHead) return 0;
+  if (!budgetHead) return [];
+
+  if (line.category === "Payroll") {
+    return records.filter((record) => record.kind === "payroll");
+  }
 
   if (line.type === "Income") {
     return records
@@ -65,8 +76,7 @@ export function budgetActual(line: BudgetLine, records: BookkeepingRecord[]) {
         if (record.kind !== "invoices" || ["Draft", "Cancelled"].includes(record.data.status ?? "")) return false;
         const allSales = ["sales", "income", "revenue", "all sales"].includes(budgetHead) || budgetHead.includes("sales") || budgetHead.includes("revenue");
         return allSales || record.data.category?.trim().toLocaleLowerCase() === budgetHead || record.data.customer?.trim().toLocaleLowerCase() === budgetHead;
-      })
-      .reduce((sum, record) => sum + Math.max(0, (Number(record.data.amount) || 0) - (Number(record.data.creditApplied) || 0)), 0);
+      });
   }
 
   const allCosts = ["expenses", "all expenses", "operating expenses", "all costs"].includes(budgetHead);
@@ -75,8 +85,15 @@ export function budgetActual(line: BudgetLine, records: BookkeepingRecord[]) {
       if (record.kind !== "expenses" && record.kind !== "bills") return false;
       if (record.data.status === "Cancelled") return false;
       return allCosts || record.data.category?.trim().toLocaleLowerCase() === budgetHead;
-    })
-    .reduce((sum, record) => sum + (Number(record.data.amount) || 0), 0);
+    });
+}
+
+export function budgetActual(line: BudgetLine, records: BookkeepingRecord[]) {
+  return budgetActualRecords(line, records).reduce((sum, record) => {
+    if (record.kind === "payroll") return sum + (Number(record.data.grossSalary) || 0);
+    if (record.kind === "invoices") return sum + Math.max(0, (Number(record.data.amount) || 0) - (Number(record.data.creditApplied) || 0));
+    return sum + (Number(record.data.amount) || 0);
+  }, 0);
 }
 
 export function budgetPresetRange(period: Exclude<BudgetPeriod, "Custom">, asOfDate: string) {

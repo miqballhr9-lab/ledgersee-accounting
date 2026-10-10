@@ -1,17 +1,19 @@
 "use client";
 
 import { useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowDownToLine, Copy, FileUp, Plus, Save, Send, Trash2 } from "lucide-react";
+import { ArrowDownToLine, Copy, ExternalLink, FileUp, Plus, Save, Send, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { saveBudgetPlan, sendBudgetSummary } from "@/app/actions";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectSeparator, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
-import { budgetActual, budgetExpectedTotal, budgetPresetRange, budgetVariance, csvCell, parseBudgetLines, parseCsv, recordsWithinBudgetDates, type BudgetCategory, type BudgetLine, type BudgetPeriod } from "@/lib/budget-utils";
+import { budgetActual, budgetActualRecords, budgetExpectedTotal, budgetPresetRange, budgetVariance, csvCell, parseBudgetLines, parseCsv, recordsWithinBudgetDates, type BudgetCategory, type BudgetLine, type BudgetPeriod } from "@/lib/budget-utils";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
 
 interface BudgetPlannerWorkspaceProps {
@@ -52,6 +54,24 @@ function formatAmount(value: number, currency: string) {
   }
 }
 
+function sourceRecordDate(record: BookkeepingRecord) {
+  if (record.kind === "payroll") return record.data.month || "";
+  return record.data.issueDate || record.data.date || record.data.expenseDate || record.data.billDate || record.data.paymentDate || record.createdAt.slice(0, 10);
+}
+
+function sourceRecordLabel(record: BookkeepingRecord) {
+  if (record.kind === "payroll") return `${record.data.employeeName || "Employee"} · ${record.data.employeeId || "Payroll"}`;
+  if (record.kind === "invoices") return `${record.data.invoiceNumber || "Invoice"} · ${record.data.customer || "Customer"}`;
+  if (record.kind === "bills") return `${record.data.billNumber || "Bill"} · ${record.data.vendor || record.data.description || "Purchase"}`;
+  return record.data.description || record.data.payee || record.data.category || "Expense";
+}
+
+function sourceRecordAmount(record: BookkeepingRecord) {
+  if (record.kind === "payroll") return Number(record.data.grossSalary) || 0;
+  if (record.kind === "invoices") return Math.max(0, (Number(record.data.amount) || 0) - (Number(record.data.creditApplied) || 0));
+  return Number(record.data.amount) || 0;
+}
+
 function saveCsv(filename: string, rows: (string | number)[][]) {
   const content = `\uFEFF${rows.map((row) => row.map(csvCell).join(",")).join("\r\n")}`;
   const url = URL.createObjectURL(new Blob([content], { type: "text/csv;charset=utf-8" }));
@@ -86,6 +106,7 @@ export default function BudgetPlannerWorkspace({ budgets, financialRecords, acco
   const [isSaving, setIsSaving] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
+  const [activeActualLine, setActiveActualLine] = useState<BudgetLine | null>(null);
 
   const accountHeads: BudgetHeadOption[] = accounts
     .filter((account) => (account.data.type === "Income" || account.data.type === "Expense") && account.data.name?.trim())
@@ -103,6 +124,13 @@ export default function BudgetPlannerWorkspace({ budgets, financialRecords, acco
     category: "Sales",
     type: "Income",
   }];
+  const payrollHeads: BudgetHeadOption[] = [{
+    value: "payroll:gross-salary",
+    label: "Gross Salary",
+    budgetHead: "Gross Salary",
+    category: "Payroll",
+    type: "Expense",
+  }];
   const expenseCategories = new Map<string, string>();
   financialRecords
     .filter((record) => record.kind === "expenses" || record.kind === "bills")
@@ -116,7 +144,7 @@ export default function BudgetPlannerWorkspace({ budgets, financialRecords, acco
     category: "Expenses",
     type: "Expense",
   }));
-  const knownHeadSignatures = new Set([...accountHeads, ...salesHeads, ...expenseHeads].map((option) => `${option.category}:${option.budgetHead.toLocaleLowerCase()}`));
+  const knownHeadSignatures = new Set([...accountHeads, ...salesHeads, ...expenseHeads, ...payrollHeads].map((option) => `${option.category}:${option.budgetHead.toLocaleLowerCase()}`));
   const savedHeadMap = new Map<string, BudgetHeadOption>();
   savedBudgets.flatMap((budget) => parseBudgetLines(budget.data.lines)).forEach((line) => {
     if (!line.budgetHead.trim() || knownHeadSignatures.has(`${line.category}:${line.budgetHead.toLocaleLowerCase()}`)) return;
@@ -124,13 +152,14 @@ export default function BudgetPlannerWorkspace({ budgets, financialRecords, acco
     savedHeadMap.set(value, { value, label: line.budgetHead, budgetHead: line.budgetHead, category: line.category, type: line.type });
   });
   const savedHeadOptions = Array.from(savedHeadMap.values());
-  const budgetHeadOptions = [...accountHeads, ...salesHeads, ...expenseHeads, ...savedHeadOptions];
+  const budgetHeadOptions = [...accountHeads, ...salesHeads, ...expenseHeads, ...payrollHeads, ...savedHeadOptions];
 
   const periodRecords = useMemo(
     () => recordsWithinBudgetDates(financialRecords, dateRange.startDate, dateRange.endDate),
     [dateRange.endDate, dateRange.startDate, financialRecords],
   );
   const actuals = useMemo(() => lines.map((line) => budgetActual(line, periodRecords)), [lines, periodRecords]);
+  const activeActualRecords = activeActualLine ? budgetActualRecords(activeActualLine, periodRecords) : [];
   const expectedTotal = budgetExpectedTotal(lines);
   const actualTotal = actuals.reduce((sum, amount) => sum + amount, 0);
   const varianceTotal = lines.reduce((sum, line, index) => sum + budgetVariance(line, actuals[index] ?? 0), 0);
@@ -184,6 +213,11 @@ export default function BudgetPlannerWorkspace({ budgets, financialRecords, acco
       currency,
       lines,
     };
+  }
+
+  function sourceHref(kind: BookkeepingRecord["kind"], line: BudgetLine) {
+    const query = new URLSearchParams({ startDate: dateRange.startDate, endDate: dateRange.endDate, budgetHead: line.budgetHead });
+    return `/app/${kind}?${query.toString()}`;
   }
 
   async function saveBudget() {
@@ -266,9 +300,9 @@ export default function BudgetPlannerWorkspace({ budgets, financialRecords, acco
         const suppliedType = row[column("type")]?.trim().toLowerCase();
         if (suppliedType && suppliedType !== "income" && suppliedType !== "expense") throw new Error(`Choose Income or Expense on CSV row ${rowIndex + 2}.`);
         const categoryText = budgetHeadColumn === categoryColumn ? "" : (row[categoryColumn] ?? "").trim();
-        if (categoryText && categoryText !== "Sales" && categoryText !== "Expenses") throw new Error(`Choose Sales or Expenses on CSV row ${rowIndex + 2}.`);
+        if (categoryText && categoryText !== "Sales" && categoryText !== "Expenses" && categoryText !== "Payroll") throw new Error(`Choose Sales, Expenses, or Payroll on CSV row ${rowIndex + 2}.`);
         const matchingHead = budgetHeadOptions.find((option) => option.budgetHead.toLocaleLowerCase() === budgetHead.toLocaleLowerCase() && (!categoryText || option.category === categoryText) && (!suppliedType || option.type.toLowerCase() === suppliedType));
-        const category: BudgetCategory = categoryText === "Sales" || categoryText === "Expenses"
+        const category: BudgetCategory = categoryText === "Sales" || categoryText === "Expenses" || categoryText === "Payroll"
           ? categoryText
           : suppliedType ? suppliedType === "income" ? "Sales" : "Expenses" : matchingHead?.category ?? "Expenses";
         const type: BudgetHeadOption["type"] = category === "Sales" ? "Income" : "Expense";
@@ -366,7 +400,7 @@ export default function BudgetPlannerWorkspace({ budgets, financialRecords, acco
 
           <section className="overflow-hidden rounded-lg border border-border bg-card">
             <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-4 sm:px-5">
-              <div><h2 className="text-sm font-semibold">Budget lines</h2><p className="mt-1 text-xs text-muted-foreground">Sales use the Profit &amp; Loss revenue head; expenses use their existing account and category heads for the selected dates.</p></div>
+              <div><h2 className="text-sm font-semibold">Budget lines</h2><p className="mt-1 text-xs text-muted-foreground">Sales use the Profit &amp; Loss revenue head; expenses keep their existing heads, and Payroll tracks Gross Salary for the selected dates.</p></div>
               <Button type="button" variant="outline" size="sm" className="gap-2" onClick={() => setLines((current) => [...current, emptyBudgetLine()])}><Plus size={15} />Add line</Button>
             </div>
             <div className="w-full min-w-0 overflow-x-auto">
@@ -383,10 +417,18 @@ export default function BudgetPlannerWorkspace({ budgets, financialRecords, acco
                 <TableBody>
                   {lines.map((line, index) => {
                     const actual = actuals[index] ?? 0;
+                    const lineActualRecords = budgetActualRecords(line, periodRecords);
+                    const actualSourceKinds = new Set(lineActualRecords.map((record) => record.kind));
+                    const directSourceKind: BookkeepingRecord["kind"] | null = line.category === "Payroll"
+                      ? "payroll"
+                      : line.category === "Sales"
+                        ? "invoices"
+                        : actualSourceKinds.size === 1 ? lineActualRecords[0].kind : null;
                     const variance = budgetVariance(line, actual);
                     const categoryAccountHeads = line.category === "Expenses" ? accountHeads.filter((option) => option.category === "Expenses") : [];
                     const categorySalesHeads = line.category === "Sales" ? salesHeads : [];
                     const categoryExpenseHeads = expenseHeads.filter((option) => option.category === line.category);
+                    const categoryPayrollHeads = line.category === "Payroll" ? payrollHeads : [];
                     const categorySavedHeads = line.category === "Sales"
                       ? budgetHeadOptions.filter((option) => option.category === "Sales" && option.value !== "sales:revenue-invoices" && option.budgetHead.toLocaleLowerCase() === line.budgetHead.toLocaleLowerCase())
                       : savedHeadOptions.filter((option) => option.category === "Expenses");
@@ -398,7 +440,7 @@ export default function BudgetPlannerWorkspace({ budgets, financialRecords, acco
                           <Select
                             value={line.category}
                             onValueChange={(value) => {
-                              if (value !== "Sales" && value !== "Expenses") return;
+                              if (value !== "Sales" && value !== "Expenses" && value !== "Payroll") return;
                               setLines((current) => current.map((item, lineIndex) => lineIndex === index ? {
                                 ...item,
                                 category: value,
@@ -412,6 +454,7 @@ export default function BudgetPlannerWorkspace({ budgets, financialRecords, acco
                             <SelectContent>
                               <SelectItem value="Sales">Sales</SelectItem>
                               <SelectItem value="Expenses">Expenses</SelectItem>
+                              <SelectItem value="Payroll">Payroll</SelectItem>
                             </SelectContent>
                           </Select>
                         </TableCell>
@@ -425,7 +468,10 @@ export default function BudgetPlannerWorkspace({ budgets, financialRecords, acco
                           >
                             <SelectTrigger aria-label={`Budget Head on line ${index + 1}`} className="w-full"><SelectValue placeholder="Choose a budget head" /></SelectTrigger>
                             <SelectContent>
-                              {line.category === "Sales" ? <>
+                              {line.category === "Payroll" ? <SelectGroup>
+                                <SelectLabel>Payroll</SelectLabel>
+                                {categoryPayrollHeads.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
+                              </SelectGroup> : line.category === "Sales" ? <>
                                 <SelectGroup>
                                   <SelectLabel>Profit &amp; Loss</SelectLabel>
                                   {categorySalesHeads.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
@@ -446,7 +492,7 @@ export default function BudgetPlannerWorkspace({ budgets, financialRecords, acco
                           </Select>
                         </TableCell>
                         <TableCell><Input aria-label={`Expected budget on line ${index + 1}`} type="number" min="0" step="0.01" value={line.expected} onChange={(event) => updateLine(index, "expected", event.target.value)} className="text-right tabular-nums" /></TableCell>
-                        <TableCell className="text-right text-sm tabular-nums">{formatAmount(actual, currency)}</TableCell>
+                        <TableCell className="text-right text-sm tabular-nums">{directSourceKind ? <Button type="button" variant="link" className="h-auto p-0 text-sm tabular-nums" aria-label={`Open records behind ${formatAmount(actual, currency)} actual for ${line.budgetHead || `line ${index + 1}`}`} nativeButton={false} render={<Link href={sourceHref(directSourceKind, line)} />}>{formatAmount(actual, currency)}</Button> : <Button type="button" variant="link" className="h-auto p-0 text-sm tabular-nums" aria-label={`View records behind ${formatAmount(actual, currency)} actual for ${line.budgetHead || `line ${index + 1}`}`} onClick={() => setActiveActualLine(line)}>{formatAmount(actual, currency)}</Button>}</TableCell>
                         <TableCell className={`text-right text-sm font-medium tabular-nums ${variance < 0 ? "text-destructive" : "text-primary"}`}>{formatAmount(variance, currency)}</TableCell>
                         <TableCell><Input aria-label={`Description on line ${index + 1}`} value={line.description} maxLength={300} onChange={(event) => updateLine(index, "description", event.target.value)} placeholder="Optional details" /></TableCell>
                         <TableCell><Button type="button" variant="ghost" size="icon" aria-label={`Remove budget line ${index + 1}`} onClick={() => setLines((current) => current.filter((_, lineIndex) => lineIndex !== index))}><Trash2 size={15} /></Button></TableCell>
@@ -487,6 +533,30 @@ export default function BudgetPlannerWorkspace({ budgets, financialRecords, acco
           </section>
         </aside>
       </div>
+      <Dialog open={Boolean(activeActualLine)} onOpenChange={(open) => { if (!open) setActiveActualLine(null); }}>
+        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>{activeActualLine ? `${activeActualLine.budgetHead} actual` : "Actual details"}</DialogTitle>
+            <DialogDescription>Records included from {dateRange.startDate || "the beginning"} to {dateRange.endDate || "today"}.</DialogDescription>
+          </DialogHeader>
+          {activeActualRecords.length ? <div className="divide-y divide-border rounded-md border border-border">
+            {activeActualLine ? activeActualRecords.map((record) => (
+              <div key={record.id} className="flex flex-col gap-3 p-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium">{sourceRecordLabel(record)}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">{record.kind === "payroll" ? "Payroll" : record.kind === "invoices" ? "Sales invoice" : record.kind === "bills" ? "Bill" : "Expense"} · {sourceRecordDate(record)}</p>
+                </div>
+                <div className="flex shrink-0 items-center justify-between gap-3 sm:justify-end">
+                  <span className="text-sm font-medium tabular-nums">{formatAmount(sourceRecordAmount(record), currency)}</span>
+                  <Button type="button" variant="outline" size="sm" nativeButton={false} render={<Link href={sourceHref(record.kind, activeActualLine)} />}>
+                    Open <ExternalLink size={14} />
+                  </Button>
+                </div>
+              </div>
+            )) : null}
+          </div> : <p className="rounded-md border border-dashed border-border p-5 text-center text-sm text-muted-foreground">No saved records match this budget head and date range yet.</p>}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
