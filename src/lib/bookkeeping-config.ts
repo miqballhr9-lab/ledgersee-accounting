@@ -284,6 +284,19 @@ export const modules: readonly ModuleDefinition[] = [
     ],
   },
   {
+    slug: "budgets", kind: "budgets", label: "Budget", plural: "Budgets",
+    description: "Plan expected income and costs, then compare them with recorded results.", titleKey: "name",
+    columns: ["name", "period", "startDate", "endDate", "description"],
+    fields: [
+      { key: "name", label: "Budget name", required: true },
+      { key: "period", label: "Period", type: "select", options: ["Monthly", "Quarterly", "Annual", "Custom"] },
+      { key: "startDate", label: "Start date", type: "date", required: true },
+      { key: "endDate", label: "End date", type: "date", required: true },
+      { key: "lines", label: "Budget lines", type: "textarea", required: true },
+      { key: "description", label: "Description", type: "textarea" },
+    ],
+  },
+  {
     slug: "team-members", kind: "team-members", label: "Team member", plural: "Users & roles",
     description: "Keep your team directory and role permissions organized.", titleKey: "name",
     columns: ["name", "email", "role", "enabled", "canApprove"],
@@ -361,6 +374,7 @@ export const navigationGroups: NavigationGroup[] = [
       { slug: "journals", label: "Manual journals", icon: "BookOpenCheck" },
       { slug: "taxes", label: "Taxes", icon: "Percent" },
       { slug: "reports", label: "Reports", icon: "ChartNoAxesCombined" },
+      { slug: "budgets", label: "Budgets", icon: "BarChart3" },
     ],
   },
   {

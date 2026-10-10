@@ -13,6 +13,7 @@ import { dueDateForTerms, parseInvoiceLines } from "@/lib/invoice-utils";
 import { siteUrl } from "@/lib/site";
 import { isRecordKind, type BookkeepingRecord, type RecordKind } from "@/lib/bookkeeping-types";
 import { paymentAccountType } from "@/lib/payment-accounts";
+import { budgetActual, budgetExpectedTotal, budgetVariance, parseBudgetLines, recordsWithinBudgetDates, type BudgetLine, type BudgetLineType, type BudgetPeriod } from "@/lib/budget-utils";
 
 const convertTargets: Partial<Record<RecordKind, RecordKind>> = {
   estimates: "invoices",
@@ -425,6 +426,92 @@ export async function saveBookkeepingRecord(
   }
   revalidatePath("/app", "layout");
   return serializeRow(created);
+}
+
+function isBudgetDate(value: unknown): value is string {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const date = new Date(`${value}T00:00:00.000Z`);
+  return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value;
+}
+
+export async function saveBudgetPlan(input: unknown, id?: string): Promise<BookkeepingRecord> {
+  await requireUser();
+  if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("Check the budget details and try again.");
+  const form = input as Record<string, unknown>;
+  const name = typeof form.name === "string" ? form.name.trim().slice(0, 100) : "";
+  const description = typeof form.description === "string" ? form.description.trim().slice(0, 1000) : "";
+  const period = form.period;
+  const startDate = form.startDate;
+  const endDate = form.endDate;
+  const currency = typeof form.currency === "string" ? form.currency.trim().slice(0, 3).toUpperCase() : "USD";
+  if (!name) throw new Error("Give this budget a name.");
+  if (!(period === "Monthly" || period === "Quarterly" || period === "Annual" || period === "Custom")) throw new Error("Choose a budget period.");
+  if (!isBudgetDate(startDate) || !isBudgetDate(endDate) || startDate > endDate) throw new Error("Choose a valid start and end date.");
+  if (!/^[A-Z]{3}$/.test(currency)) throw new Error("Choose a valid currency.");
+  if (!Array.isArray(form.lines) || form.lines.length < 1 || form.lines.length > 50) throw new Error("Add between 1 and 50 budget lines.");
+
+  const lines: BudgetLine[] = form.lines.map((value, index) => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`Check budget line ${index + 1}.`);
+    const line = value as Record<string, unknown>;
+    const category = typeof line.category === "string" ? line.category.trim().slice(0, 120) : "";
+    const descriptionText = typeof line.description === "string" ? line.description.trim().slice(0, 300) : "";
+    const type: BudgetLineType = line.type === "Income" ? "Income" : line.type === "Expense" ? "Expense" : (() => { throw new Error(`Choose income or expense for line ${index + 1}.`); })();
+    const amount = typeof line.expected === "string" || typeof line.expected === "number" ? Number(line.expected) : Number.NaN;
+    if (!category) throw new Error(`Enter a category for line ${index + 1}.`);
+    if (!Number.isFinite(amount) || amount < 0 || amount > 1_000_000_000_000) throw new Error(`Enter a valid expected amount for line ${index + 1}.`);
+    return { category, type, expected: (Math.round(amount * 100) / 100).toFixed(2), description: descriptionText };
+  });
+
+  return saveBookkeepingRecord("budgets", {
+    name,
+    period: period as BudgetPeriod,
+    startDate,
+    endDate,
+    currency,
+    description,
+    lines: JSON.stringify(lines),
+  }, id);
+}
+
+function escapeBudgetHtml(value: string) {
+  return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#39;");
+}
+
+export async function sendBudgetSummary(id: string, recipient: string): Promise<void> {
+  const me = await requireUser();
+  const email = recipient.trim().toLowerCase();
+  if (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error("Enter a valid recipient email address.");
+  const [budgetRow] = await db
+    .select()
+    .from(bookkeepingRecord)
+    .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "budgets")))
+    .limit(1);
+  if (!budgetRow) throw new Error("That budget wasn’t found. Save it and try again.");
+
+  const budget = serializeRow(budgetRow);
+  const sourceRows = await db
+    .select()
+    .from(bookkeepingRecord)
+    .where(and(eq(bookkeepingRecord.userId, me.id), inArray(bookkeepingRecord.kind, ["invoices", "bills", "expenses", "settings"])));
+  const records = sourceRows.map(serializeRow);
+  const budgetData = recordsWithinBudgetDates(records, budget.data.startDate ?? "", budget.data.endDate ?? "");
+  const lines = parseBudgetLines(budget.data.lines);
+  const currency = budget.data.currency || records.find((record) => record.kind === "settings")?.data.currency || "USD";
+  const formatAmount = (amount: number) => {
+    try {
+      return new Intl.NumberFormat(undefined, { style: "currency", currency, maximumFractionDigits: 2 }).format(amount);
+    } catch {
+      return `${currency} ${amount.toFixed(2)}`;
+    }
+  };
+  const rows = lines.map((line) => {
+    const actual = budgetActual(line, budgetData);
+    const variance = budgetVariance(line, actual);
+    return `<tr><td>${escapeBudgetHtml(line.category)}</td><td>${line.type}</td><td>${formatAmount(Number(line.expected) || 0)}</td><td>${formatAmount(actual)}</td><td>${formatAmount(variance)}</td><td>${escapeBudgetHtml(line.description)}</td></tr>`;
+  }).join("");
+  const subject = `Budget: ${budget.data.name || "Budget"}`;
+  const html = `<div style="font-family:Arial,sans-serif;color:#13263b;max-width:900px;margin:0 auto"><h1>${escapeBudgetHtml(subject)}</h1><p>${escapeBudgetHtml(budget.data.period || "Custom")} · ${escapeBudgetHtml(budget.data.startDate || "")} to ${escapeBudgetHtml(budget.data.endDate || "")}</p><p>${escapeBudgetHtml(budget.data.description || "Budget overview")}</p><p>Positive variance means favorable: under plan for expenses or above plan for income.</p><table style="width:100%;border-collapse:collapse"><thead><tr><th align="left">Category</th><th align="left">Type</th><th align="right">Expected</th><th align="right">Actual</th><th align="right">Variance</th><th align="left">Description</th></tr></thead><tbody>${rows}</tbody><tfoot><tr><th align="left" colspan="2">Totals</th><th align="right">${formatAmount(budgetExpectedTotal(lines))}</th><th align="right">${formatAmount(lines.reduce((sum, line) => sum + budgetActual(line, budgetData), 0))}</th><th align="right">${formatAmount(lines.reduce((sum, line) => sum + budgetVariance(line, budgetActual(line, budgetData)), 0))}</th><td></td></tr></tfoot></table></div>`;
+  await sendEmailOrThrow({ to: email, subject, html, fromName: "MIKLEDGER" });
 }
 
 export async function deleteBookkeepingRecord(kind: string, id: string): Promise<void> {

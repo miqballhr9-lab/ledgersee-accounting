@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 
 import { listAllBookkeepingRecords, listBookkeepingRecordGroups } from "@/app/actions";
 import ChartOfAccountsWorkspace from "@/components/bookkeeping/ChartOfAccountsWorkspace";
+import BudgetPlannerWorkspace from "@/components/bookkeeping/BudgetPlannerWorkspace";
 import ModuleWorkspace from "@/components/bookkeeping/ModuleWorkspace";
 import ReportsWorkspace from "@/components/bookkeeping/ReportsWorkspace";
 import { moduleBySlug } from "@/lib/bookkeeping-config";
@@ -23,6 +24,19 @@ export default async function SectionPage({ params }: SectionPageProps) {
   if (section === "reports") {
     const records = await listAllBookkeepingRecords();
     return <ReportsWorkspace records={records} asOfDate={new Date().toISOString().slice(0, 10)} />;
+  }
+
+  if (section === "budgets") {
+    const groups = await listBookkeepingRecordGroups(["budgets", "invoices", "bills", "expenses", "settings"]);
+    const records = [...(groups.invoices ?? []), ...(groups.bills ?? []), ...(groups.expenses ?? [])];
+    return (
+      <BudgetPlannerWorkspace
+        budgets={groups.budgets ?? []}
+        financialRecords={records}
+        currency={groups.settings?.[0]?.data.currency || "USD"}
+        asOfDate={new Date().toISOString().slice(0, 10)}
+      />
+    );
   }
 
   const module = moduleBySlug(section);
