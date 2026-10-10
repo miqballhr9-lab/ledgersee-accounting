@@ -68,9 +68,8 @@ function accountIdForLabel(accounts: BookkeepingRecord[], label: string) {
 }
 
 function accountLabel(account: BookkeepingRecord) {
-  const code = account.data.code?.trim();
   const name = account.data.name?.trim();
-  return code && name ? `${code} ${name}` : name || code || "Account";
+  return name || "Unnamed account";
 }
 
 function parseCsv(text: string) {
@@ -190,7 +189,7 @@ export default function JournalEntryEditor({ accounts, record, defaults, open, o
   const [status, setStatus] = useState("");
   const [pending, setPending] = useState(false);
   const importInputRef = useRef<HTMLInputElement>(null);
-  const accountOptions = accounts.filter((account) => account.data.name?.trim() || account.data.code?.trim());
+  const accountOptions = accounts.filter((account) => account.data.name?.trim());
 
   useEffect(() => {
     const startingLines = initialLines(record, accounts);

@@ -14,5 +14,5 @@ export function paymentAccountType(account: Pick<BookkeepingRecord, "kind" | "da
 }
 
 export function paymentAccountLabel(account: BookkeepingRecord): string {
-  return `${paymentAccountType(account)} · ${account.data.name || account.data.code || "Unnamed account"}`;
+  return `${paymentAccountType(account)} · ${account.data.name || "Unnamed account"}`;
 }

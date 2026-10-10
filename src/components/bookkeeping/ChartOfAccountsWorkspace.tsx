@@ -70,7 +70,7 @@ export default function ChartOfAccountsWorkspace({ accounts: initialAccounts, cu
       });
   }, [accounts, search, typeFilter]);
 
-  const parentNames = useMemo(() => new Map(accounts.map((account) => [account.id, account.data.name || account.data.code || "Account"])), [accounts]);
+  const parentNames = useMemo(() => new Map(accounts.map((account) => [account.id, account.data.name || "Unnamed account"])), [accounts]);
 
   function openNewAccount() {
     setEditingAccount(null);

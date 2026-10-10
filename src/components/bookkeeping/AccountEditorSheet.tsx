@@ -236,7 +236,7 @@ export default function AccountEditorSheet({ accounts, currency, open, record, o
                   <SelectTrigger className="w-full" disabled={fieldsDisabled || pending}><SelectValue placeholder="Choose a parent account" /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="none">Choose a parent account</SelectItem>
-                      {parentOptions.map((account) => <SelectItem key={account.id} value={account.id}>{account.data.code ? `${account.data.code} · ` : ""}{account.data.name}</SelectItem>)}
+                      {parentOptions.map((account) => <SelectItem key={account.id} value={account.id}>{account.data.name}</SelectItem>)}
                     </SelectContent>
                   </Select>
                 </div>

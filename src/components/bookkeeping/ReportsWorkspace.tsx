@@ -157,7 +157,7 @@ function buildReport(key: ReportKey, records: BookkeepingRecord[], asOfDate: str
     accounts.forEach((account) => {
       const normalCredit = ["Liability", "Equity", "Income"].includes(account.data.type ?? "");
       const balance = rowAmount(account, "openingBalance");
-      balances.set(account.data.name || account.data.code || "Account", {
+      balances.set(account.data.name || "Unnamed account", {
         type: account.data.type || "Unclassified",
         debit: normalCredit ? 0 : balance,
         credit: normalCredit ? balance : 0,
