@@ -47,6 +47,11 @@ import {
   DropdownMenuLabel,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 import { navigationGroups } from "@/lib/bookkeeping-config";
 import { signOut } from "@/lib/auth-client";
 
@@ -117,6 +122,12 @@ export default function AppFrame({ userName, userEmail, children }: AppFrameProp
   const router = useRouter();
   const [menuOpen, setMenuOpen] = useState(false);
   const [isSigningOut, setIsSigningOut] = useState(false);
+  const [openGroup, setOpenGroup] = useState<string | null>(() =>
+    navigationGroups.find((group) => group.items.some((item) => {
+      const href = item.slug === "dashboard" ? "/app" : `/app/${item.slug}`;
+      return pathname === href || pathname.startsWith(`${href}/`);
+    }))?.label ?? "Overview"
+  );
   const activeLabel = navigationGroups.flatMap((group) => group.items).find((item) => {
     const href = item.slug === "dashboard" ? "/app" : `/app/${item.slug}`;
     return pathname === href;
@@ -162,31 +173,45 @@ export default function AppFrame({ userName, userEmail, children }: AppFrameProp
           </div>
         </div>
 
-        <nav aria-label="Main navigation" className="mt-4 flex-1 space-y-5 overflow-y-auto px-3 pb-5">
-          {navigationGroups.map((group) => (
-            <div key={group.label}>
-              <p className="mb-1.5 px-3 text-[10px] font-semibold uppercase tracking-[0.15em] text-sidebar-foreground/45">{group.label}</p>
-              <div className="space-y-0.5">
-                {group.items.map((item) => {
-                  const href = item.slug === "dashboard" ? "/app" : `/app/${item.slug}`;
-                  const isActive = pathname === href;
-                  const Icon = icons[item.icon] ?? FileText;
-                  return (
-                    <Link
-                      key={item.slug}
-                      href={href}
-                      onClick={() => setMenuOpen(false)}
-                      aria-current={isActive ? "page" : undefined}
-                      className={`flex min-h-9 items-center gap-3 rounded-md px-3 text-[13px] transition-colors ${isActive ? "bg-sidebar-primary font-semibold text-sidebar-primary-foreground" : "text-sidebar-foreground/75 hover:bg-sidebar-accent hover:text-sidebar-foreground"}`}
-                    >
-                      <Icon size={16} strokeWidth={1.75} />
-                      <span className="truncate">{item.label}</span>
-                    </Link>
-                  );
-                })}
-              </div>
-            </div>
-          ))}
+        <nav aria-label="Main navigation" className="mt-4 flex-1 space-y-2 overflow-y-auto px-3 pb-5">
+          {navigationGroups.map((group) => {
+            const isOpen = openGroup === group.label;
+            return (
+              <Collapsible
+                key={group.label}
+                open={isOpen}
+                onOpenChange={(open) => setOpenGroup(open ? group.label : null)}
+                className="space-y-1"
+              >
+                <CollapsibleTrigger className="flex w-full items-center justify-between rounded-md px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.15em] text-sidebar-foreground/55 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring">
+                  <span>{group.label}</span>
+                  <ChevronDown size={14} className={`shrink-0 transition-transform ${isOpen ? "rotate-180" : ""}`} />
+                </CollapsibleTrigger>
+                <CollapsibleContent className="space-y-0.5">
+                  {group.items.map((item) => {
+                    const href = item.slug === "dashboard" ? "/app" : `/app/${item.slug}`;
+                    const isActive = pathname === href || pathname.startsWith(`${href}/`);
+                    const Icon = icons[item.icon] ?? FileText;
+                    return (
+                      <Link
+                        key={item.slug}
+                        href={href}
+                        onClick={() => {
+                          setOpenGroup(group.label);
+                          setMenuOpen(false);
+                        }}
+                        aria-current={isActive ? "page" : undefined}
+                        className={`flex min-h-9 items-center gap-3 rounded-md px-3 text-[13px] transition-colors ${isActive ? "bg-sidebar-primary font-semibold text-sidebar-primary-foreground" : "text-sidebar-foreground/75 hover:bg-sidebar-accent hover:text-sidebar-foreground"}`}
+                      >
+                        <Icon size={16} strokeWidth={1.75} />
+                        <span className="truncate">{item.label}</span>
+                      </Link>
+                    );
+                  })}
+                </CollapsibleContent>
+              </Collapsible>
+            );
+          })}
         </nav>
 
         <div className="border-t border-sidebar-border p-3">
