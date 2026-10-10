@@ -91,29 +91,18 @@ export default function BudgetPlannerWorkspace({ budgets, financialRecords, acco
     .filter((account) => (account.data.type === "Income" || account.data.type === "Expense") && account.data.name?.trim())
     .map((account) => ({
       value: `account:${account.id}`,
-      label: account.data.name.trim(),
+      label: `${account.data.name} · ${account.data.type}`,
       budgetHead: account.data.name.trim(),
       category: account.data.type === "Income" ? "Sales" : "Expenses",
       type: account.data.type as BudgetHeadOption["type"],
     }));
-  const salesRecords = new Map<string, BudgetHeadOption>();
-  financialRecords.filter((record) => record.kind === "invoices").forEach((record) => {
-    const invoiceCategory = record.data.category?.trim();
-    const customer = record.data.customer?.trim();
-    [
-      ...(invoiceCategory ? [{ name: invoiceCategory, source: "category" }] : []),
-      ...(customer ? [{ name: customer, source: "customer" }] : []),
-    ].forEach(({ name: budgetHead, source }) => {
-      const key = `${source}:${budgetHead.toLocaleLowerCase()}`;
-      if (!salesRecords.has(key)) salesRecords.set(key, {
-        value: `sale:${key}`,
-        label: `${budgetHead} · ${source === "category" ? "Sales category" : "Customer"}`,
-        budgetHead,
-        category: "Sales",
-        type: "Income",
-      });
-    });
-  });
+  const salesHeads: BudgetHeadOption[] = [{
+    value: "sales:revenue-invoices",
+    label: "Revenue · invoices",
+    budgetHead: "Revenue · invoices",
+    category: "Sales",
+    type: "Income",
+  }];
   const expenseCategories = new Map<string, string>();
   financialRecords
     .filter((record) => record.kind === "expenses" || record.kind === "bills")
@@ -127,7 +116,7 @@ export default function BudgetPlannerWorkspace({ budgets, financialRecords, acco
     category: "Expenses",
     type: "Expense",
   }));
-  const knownHeadSignatures = new Set([...accountHeads, ...salesRecords.values(), ...expenseHeads].map((option) => `${option.category}:${option.budgetHead.toLocaleLowerCase()}`));
+  const knownHeadSignatures = new Set([...accountHeads, ...salesHeads, ...expenseHeads].map((option) => `${option.category}:${option.budgetHead.toLocaleLowerCase()}`));
   const savedHeadMap = new Map<string, BudgetHeadOption>();
   savedBudgets.flatMap((budget) => parseBudgetLines(budget.data.lines)).forEach((line) => {
     if (!line.budgetHead.trim() || knownHeadSignatures.has(`${line.category}:${line.budgetHead.toLocaleLowerCase()}`)) return;
@@ -135,7 +124,7 @@ export default function BudgetPlannerWorkspace({ budgets, financialRecords, acco
     savedHeadMap.set(value, { value, label: line.budgetHead, budgetHead: line.budgetHead, category: line.category, type: line.type });
   });
   const savedHeadOptions = Array.from(savedHeadMap.values());
-  const budgetHeadOptions = [...accountHeads, ...salesRecords.values(), ...expenseHeads, ...savedHeadOptions];
+  const budgetHeadOptions = [...accountHeads, ...salesHeads, ...expenseHeads, ...savedHeadOptions];
 
   const periodRecords = useMemo(
     () => recordsWithinBudgetDates(financialRecords, dateRange.startDate, dateRange.endDate),
@@ -377,7 +366,7 @@ export default function BudgetPlannerWorkspace({ budgets, financialRecords, acco
 
           <section className="overflow-hidden rounded-lg border border-border bg-card">
             <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-4 sm:px-5">
-              <div><h2 className="text-sm font-semibold">Budget lines</h2><p className="mt-1 text-xs text-muted-foreground">Actual income matches invoices; actual costs match bills and expenses in the selected dates.</p></div>
+              <div><h2 className="text-sm font-semibold">Budget lines</h2><p className="mt-1 text-xs text-muted-foreground">Sales use the Profit &amp; Loss revenue head; expenses use their existing account and category heads for the selected dates.</p></div>
               <Button type="button" variant="outline" size="sm" className="gap-2" onClick={() => setLines((current) => [...current, emptyBudgetLine()])}><Plus size={15} />Add line</Button>
             </div>
             <div className="w-full min-w-0 overflow-x-auto">
@@ -395,10 +384,12 @@ export default function BudgetPlannerWorkspace({ budgets, financialRecords, acco
                   {lines.map((line, index) => {
                     const actual = actuals[index] ?? 0;
                     const variance = budgetVariance(line, actual);
-                    const categoryAccountHeads = accountHeads.filter((option) => option.category === line.category);
-                    const categorySalesHeads = Array.from(salesRecords.values()).filter((option) => option.category === line.category);
+                    const categoryAccountHeads = line.category === "Expenses" ? accountHeads.filter((option) => option.category === "Expenses") : [];
+                    const categorySalesHeads = line.category === "Sales" ? salesHeads : [];
                     const categoryExpenseHeads = expenseHeads.filter((option) => option.category === line.category);
-                    const categorySavedHeads = savedHeadOptions.filter((option) => option.category === line.category);
+                    const categorySavedHeads = line.category === "Sales"
+                      ? budgetHeadOptions.filter((option) => option.category === "Sales" && option.value !== "sales:revenue-invoices" && option.budgetHead.toLocaleLowerCase() === line.budgetHead.toLocaleLowerCase())
+                      : savedHeadOptions.filter((option) => option.category === "Expenses");
                     const selectedHead = budgetHeadOptions.find((option) => option.value === line.headKey && option.category === line.category)
                       ?? budgetHeadOptions.find((option) => option.budgetHead.toLocaleLowerCase() === line.budgetHead.toLocaleLowerCase() && option.category === line.category && option.type === line.type);
                     return (
@@ -434,17 +425,16 @@ export default function BudgetPlannerWorkspace({ budgets, financialRecords, acco
                           >
                             <SelectTrigger aria-label={`Budget Head on line ${index + 1}`} className="w-full"><SelectValue placeholder="Choose a budget head" /></SelectTrigger>
                             <SelectContent>
-                              <SelectGroup>
-                                <SelectLabel>Chart of Accounts</SelectLabel>
-                                {categoryAccountHeads.length ? categoryAccountHeads.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>) : <SelectItem value="no-category-accounts" disabled>No matching accounts yet</SelectItem>}
-                              </SelectGroup>
                               {line.category === "Sales" ? <>
-                                <SelectSeparator />
                                 <SelectGroup>
-                                  <SelectLabel>Sales records</SelectLabel>
-                                  {categorySalesHeads.length ? categorySalesHeads.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>) : <SelectItem value="no-sales-heads" disabled>No invoice heads yet</SelectItem>}
+                                  <SelectLabel>Profit &amp; Loss</SelectLabel>
+                                  {categorySalesHeads.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
                                 </SelectGroup>
                               </> : <>
+                                <SelectGroup>
+                                  <SelectLabel>Chart of Accounts</SelectLabel>
+                                  {categoryAccountHeads.length ? categoryAccountHeads.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>) : <SelectItem value="no-category-accounts" disabled>No matching accounts yet</SelectItem>}
+                                </SelectGroup>
                                 <SelectSeparator />
                                 <SelectGroup>
                                   <SelectLabel>Expense records</SelectLabel>
