@@ -59,7 +59,7 @@ export default function ChartOfAccountsWorkspace({ accounts: initialAccounts, cu
     const normalizedSearch = search.trim().toLowerCase();
     return accounts
       .filter((account) => {
-        const values = [account.data.code, account.data.name, account.data.type, account.data.detailType, account.data.description];
+        const values = [account.data.code, account.data.name, account.data.type, account.data.accountType, account.data.detailType, account.data.description];
         const matchesSearch = !normalizedSearch || values.some((value) => value?.toLowerCase().includes(normalizedSearch));
         const accountType = account.data.type || "Unclassified";
         return matchesSearch && (typeFilter === "all" || accountType === typeFilter);
@@ -183,11 +183,14 @@ export default function ChartOfAccountsWorkspace({ accounts: initialAccounts, cu
                   </TableCell>
                   <TableCell>
                     <span className="flex flex-wrap items-center gap-1.5">
-                      <Badge variant="secondary" className="font-medium">{account.data.type || "Unclassified"}</Badge>
+                      <Badge variant="secondary" className="font-medium">{account.data.accountType || account.data.type || "Unclassified"}</Badge>
                       {account.data.detailType ? <span className="text-xs text-muted-foreground">{account.data.detailType}</span> : null}
                     </span>
                   </TableCell>
-                  <TableCell className="text-right font-medium tabular-nums">{formatCurrency(account.data.openingBalance, currency)}</TableCell>
+                  <TableCell className="text-right font-medium tabular-nums">
+                    <span className="block">{formatCurrency(account.data.openingBalance, currency)}</span>
+                    {account.data.openingBalanceDate ? <span className="mt-0.5 block text-xs font-normal text-muted-foreground">As of {account.data.openingBalanceDate}</span> : null}
+                  </TableCell>
                   <TableCell className="text-right">
                     {account.data.locked === "true" ? <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground"><LockKeyhole size={13} />Locked</span> : <span className="text-xs text-muted-foreground">Active</span>}
                   </TableCell>
@@ -213,7 +216,7 @@ export default function ChartOfAccountsWorkspace({ accounts: initialAccounts, cu
         )}
       </section>
 
-      <AccountEditorSheet accounts={accounts} open={sheetOpen} record={editingAccount} onOpenChange={setSheetOpen} onSaved={handleSaved} />
+      <AccountEditorSheet accounts={accounts} currency={currency} open={sheetOpen} record={editingAccount} onOpenChange={setSheetOpen} onSaved={handleSaved} />
 
       <Dialog open={Boolean(deletingAccount)} onOpenChange={(open) => { if (!open && !deleting) setDeletingAccount(null); }}>
         <DialogContent className="sm:max-w-md">

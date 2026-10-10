@@ -13,6 +13,7 @@ import { dueDateForTerms, parseInvoiceLines } from "@/lib/invoice-utils";
 import { siteUrl } from "@/lib/site";
 import { isRecordKind, type BookkeepingRecord, type RecordKind } from "@/lib/bookkeeping-types";
 import { paymentAccountType } from "@/lib/payment-accounts";
+import { accountCategoryForType, accountDetailsForType } from "@/lib/account-types";
 import { budgetActual, budgetExpectedTotal, budgetVariance, parseBudgetLines, parseCsv, recordsWithinBudgetDates, type BudgetCategory, type BudgetLine, type BudgetLineType, type BudgetPeriod } from "@/lib/budget-utils";
 import { calculatePayroll, payrollCsvFields, serializePayroll, type PayrollValues } from "@/lib/payroll-utils";
 
@@ -21,14 +22,6 @@ const convertTargets: Partial<Record<RecordKind, RecordKind>> = {
   "sales-orders": "invoices",
   "purchase-orders": "bills",
 };
-
-const accountDetailTypes = {
-  Asset: ["Bank", "Cash", "Accounts receivable", "Other current assets", "Fixed assets", "Other assets"],
-  Liability: ["Accounts payable", "Credit card", "Current liabilities", "Long-term liabilities"],
-  Equity: ["Owner’s equity", "Retained earnings", "Opening balance equity"],
-  Income: ["Sales", "Service income", "Other income"],
-  Expense: ["Advertising", "Cost of goods sold", "Office expenses", "Payroll expenses", "Travel", "Other expenses"],
-} as const;
 
 export async function updateProfileName(input: string): Promise<{ ok: true; name: string } | { ok: false; message: string }> {
   const me = await requireUser();
@@ -320,23 +313,33 @@ export async function saveBookkeepingRecord(
       if (data.locked !== "false") throw new Error("This account is locked. Unlock it before changing its details.");
       data = { ...existing.data, locked: "false" };
     } else {
-      const allowedFields = new Set(["code", "name", "type", "detailType", "subAccount", "parentAccount", "openingBalance", "description", "locked"]);
+      const allowedFields = new Set(["code", "name", "type", "accountType", "detailType", "subAccount", "parentAccount", "openingBalance", "openingBalanceDate", "description", "locked"]);
       data = Object.fromEntries(Object.entries(data).filter(([key]) => allowedFields.has(key)));
-      const accountTypes = Object.keys(accountDetailTypes) as (keyof typeof accountDetailTypes)[];
-      if (!data.code?.trim() || !data.name?.trim()) throw new Error("Enter an account number and account name.");
-      if (!accountTypes.some((type) => type === data.type)) throw new Error("Choose an account type.");
-      const selectedType = data.type as keyof typeof accountDetailTypes;
-      if (data.detailType && !accountDetailTypes[selectedType].some((detailType) => detailType === data.detailType)) {
+      const category = accountCategoryForType(data.accountType ?? "");
+      if (!data.name?.trim()) throw new Error("Enter an account name.");
+      if (!category) throw new Error("Choose an account type.");
+      if (!accountDetailsForType(data.accountType ?? "").some((detailType) => detailType === data.detailType)) {
         throw new Error("Choose a detail type that matches this account type.");
       }
+      data.name = data.name.trim();
+      data.code = data.code?.trim() ?? "";
+      data.type = category;
+      if (!data.openingBalance) data.openingBalanceDate = "";
       if (data.openingBalance && !Number.isFinite(Number(data.openingBalance))) throw new Error("Enter a valid opening balance.");
-      if (accountRows.some((account) => account.id !== id && account.data.code?.toLowerCase() === data.code.toLowerCase())) {
+      if (data.openingBalance && !data.openingBalanceDate) throw new Error("Choose an opening balance date.");
+      if (data.openingBalanceDate) {
+        const parsedOpeningDate = new Date(`${data.openingBalanceDate}T00:00:00.000Z`);
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(data.openingBalanceDate) || Number.isNaN(parsedOpeningDate.getTime()) || parsedOpeningDate.toISOString().slice(0, 10) !== data.openingBalanceDate) {
+          throw new Error("Choose a valid opening balance date.");
+        }
+      }
+      if (data.code && accountRows.some((account) => account.id !== id && account.data.code?.trim().toLowerCase() === data.code.toLowerCase())) {
         throw new Error("That account number is already in use.");
       }
       if (data.subAccount === "true") {
         const parent = accountRows.find((account) => account.id === data.parentAccount);
         if (!parent || parent.id === id) throw new Error("Choose a valid parent account.");
-        if (parent.data.type && parent.data.type !== data.type) throw new Error("Choose a parent account with the same account type.");
+        if (parent.data.type !== category || parent.data.subAccount === "true") throw new Error("Choose a parent account with the same account type.");
       } else {
         data.parentAccount = "";
       }

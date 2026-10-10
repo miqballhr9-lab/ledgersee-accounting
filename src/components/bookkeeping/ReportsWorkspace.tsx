@@ -76,7 +76,7 @@ function journalEntries(value: string | undefined) {
 }
 
 function recordDate(record: BookkeepingRecord) {
-  return record.data.issueDate || record.data.date || record.data.expenseDate || record.data.billDate || record.data.paymentDate || record.createdAt.slice(0, 10);
+  return record.data.openingBalanceDate || record.data.issueDate || record.data.date || record.data.expenseDate || record.data.billDate || record.data.paymentDate || record.createdAt.slice(0, 10);
 }
 
 function csvCell(value: string | number) {
@@ -269,6 +269,10 @@ export default function ReportsWorkspace({ records, asOfDate }: ReportsWorkspace
   const option = reportOptions.find((item) => item.key === reportKey) ?? reportOptions[0];
   const reportGroup = reportGroups.find((group) => group.key === groupKey) ?? reportGroups[0];
   const filteredRecords = useMemo(() => records.filter((record) => {
+    if (record.kind === "accounts") {
+      const openingDate = record.data.openingBalanceDate || record.createdAt.slice(0, 10);
+      return !toDate || openingDate <= toDate;
+    }
     const date = recordDate(record);
     return (!fromDate || date >= fromDate) && (!toDate || date <= toDate);
   }), [fromDate, records, toDate]);
