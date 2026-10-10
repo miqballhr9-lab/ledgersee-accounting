@@ -9,7 +9,7 @@ value_props:
   - "Dashboard KPIs and monthly income-versus-expense chart based on saved records"
   - "CRUD workspaces for customers, vendors, items, invoices, estimates, sales orders, credit notes, recurring invoices, bills, expenses, purchase orders, banking, accounts, journals, taxes, team roles, and company settings"
   - "Bills have a dedicated payables workspace with outstanding and overdue totals, vendor/date/category visibility, status and category filters, CSV export, and direct edit, delete, and mark-paid actions"
-  - "Invoice email delivery and payment tracking; estimates and sales orders convert to invoices; purchase orders convert to bills; recurring schedules generate invoices; credit notes apply to invoices"
+  - "Vendors have a supplier directory with contact search, opening balances, linked unpaid and overdue bill totals, balance filters, CSV export, and vendor add/edit/delete actions"
 ctas:
   - "Sign in"
   - "Create account"

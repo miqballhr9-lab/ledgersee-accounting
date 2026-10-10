@@ -6,6 +6,7 @@ import ChartOfAccountsWorkspace from "@/components/bookkeeping/ChartOfAccountsWo
 import BudgetPlannerWorkspace from "@/components/bookkeeping/BudgetPlannerWorkspace";
 import BillsWorkspace from "@/components/bookkeeping/BillsWorkspace";
 import ExpensesWorkspace from "@/components/bookkeeping/ExpensesWorkspace";
+import VendorsWorkspace from "@/components/bookkeeping/VendorsWorkspace";
 import ModuleWorkspace from "@/components/bookkeeping/ModuleWorkspace";
 import PayrollWorkspace from "@/components/bookkeeping/PayrollWorkspace";
 import ReportsWorkspace from "@/components/bookkeeping/ReportsWorkspace";
@@ -71,6 +72,18 @@ export default async function SectionPage({ params, searchParams }: SectionPageP
         records={groups.bills ?? []}
         vendors={groups.vendors ?? []}
         accounts={groups.accounts ?? []}
+        currency={groups.settings?.[0]?.data.currency || "USD"}
+        asOfDate={new Date().toISOString().slice(0, 10)}
+      />
+    );
+  }
+
+  if (section === "vendors") {
+    const groups = await listBookkeepingRecordGroups(["vendors", "bills", "settings"]);
+    return (
+      <VendorsWorkspace
+        records={groups.vendors ?? []}
+        bills={groups.bills ?? []}
         currency={groups.settings?.[0]?.data.currency || "USD"}
         asOfDate={new Date().toISOString().slice(0, 10)}
       />
