@@ -2,8 +2,10 @@ import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
 
 export type BudgetPeriod = "Monthly" | "Quarterly" | "Annual" | "Custom";
 export type BudgetLineType = "Income" | "Expense";
+export type BudgetCategory = "Sales" | "Expenses";
 
 export interface BudgetLine {
+  category: BudgetCategory;
   budgetHead: string;
   headKey?: string;
   type: BudgetLineType;
@@ -20,8 +22,11 @@ export function parseBudgetLines(value: string | undefined): BudgetLine[] {
       if (!item || typeof item !== "object" || Array.isArray(item)) return [];
       const line = item as Record<string, unknown>;
       const type = line.type === "Income" ? "Income" : "Expense";
-      const budgetHead = typeof line.budgetHead === "string" ? line.budgetHead : typeof line.category === "string" ? line.category : "";
+      const legacyCategory = typeof line.category === "string" ? line.category : "";
+      const category: BudgetCategory = legacyCategory === "Sales" || legacyCategory === "Expenses" ? legacyCategory : type === "Income" ? "Sales" : "Expenses";
+      const budgetHead = typeof line.budgetHead === "string" ? line.budgetHead : category === legacyCategory ? "" : legacyCategory;
       return [{
+        category,
         budgetHead,
         headKey: typeof line.headKey === "string" ? line.headKey : "",
         type,

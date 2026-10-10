@@ -13,7 +13,7 @@ import { dueDateForTerms, parseInvoiceLines } from "@/lib/invoice-utils";
 import { siteUrl } from "@/lib/site";
 import { isRecordKind, type BookkeepingRecord, type RecordKind } from "@/lib/bookkeeping-types";
 import { paymentAccountType } from "@/lib/payment-accounts";
-import { budgetActual, budgetExpectedTotal, budgetVariance, parseBudgetLines, parseCsv, recordsWithinBudgetDates, type BudgetLine, type BudgetLineType, type BudgetPeriod } from "@/lib/budget-utils";
+import { budgetActual, budgetExpectedTotal, budgetVariance, parseBudgetLines, parseCsv, recordsWithinBudgetDates, type BudgetCategory, type BudgetLine, type BudgetLineType, type BudgetPeriod } from "@/lib/budget-utils";
 import { calculatePayroll, payrollCsvFields, serializePayroll, type PayrollValues } from "@/lib/payroll-utils";
 
 const convertTargets: Partial<Record<RecordKind, RecordKind>> = {
@@ -550,13 +550,20 @@ export async function saveBudgetPlan(input: unknown, id?: string): Promise<Bookk
   const lines: BudgetLine[] = form.lines.map((value, index) => {
     if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`Check budget line ${index + 1}.`);
     const line = value as Record<string, unknown>;
-    const budgetHead = typeof line.budgetHead === "string" ? line.budgetHead.trim().slice(0, 120) : typeof line.category === "string" ? line.category.trim().slice(0, 120) : "";
+    const legacyBudgetHead = typeof line.category === "string" && line.category !== "Sales" && line.category !== "Expenses" ? line.category.trim().slice(0, 120) : "";
+    const budgetHead = typeof line.budgetHead === "string" ? line.budgetHead.trim().slice(0, 120) : legacyBudgetHead;
     const descriptionText = typeof line.description === "string" ? line.description.trim().slice(0, 300) : "";
-    const type: BudgetLineType = line.type === "Income" ? "Income" : line.type === "Expense" ? "Expense" : (() => { throw new Error(`Choose income or expense for line ${index + 1}.`); })();
+    const suppliedType: BudgetLineType = line.type === "Income" ? "Income" : line.type === "Expense" ? "Expense" : (() => { throw new Error(`Choose income or expense for line ${index + 1}.`); })();
+    const category: BudgetCategory = line.category === "Sales" || line.category === "Expenses"
+      ? line.category
+      : line.category === undefined || (typeof line.category === "string" && line.category !== "Sales" && line.category !== "Expenses")
+        ? suppliedType === "Income" ? "Sales" : "Expenses"
+        : (() => { throw new Error(`Choose Sales or Expenses for line ${index + 1}.`); })();
+    const type: BudgetLineType = category === "Sales" ? "Income" : "Expense";
     const amount = typeof line.expected === "string" || typeof line.expected === "number" ? Number(line.expected) : Number.NaN;
     if (!budgetHead) throw new Error(`Choose a budget head for line ${index + 1}.`);
     if (!Number.isFinite(amount) || amount < 0 || amount > 1_000_000_000_000) throw new Error(`Enter a valid expected amount for line ${index + 1}.`);
-    return { budgetHead, type, expected: (Math.round(amount * 100) / 100).toFixed(2), description: descriptionText };
+    return { category, budgetHead, type, expected: (Math.round(amount * 100) / 100).toFixed(2), description: descriptionText };
   });
 
   return saveBookkeepingRecord("budgets", {
@@ -733,10 +740,10 @@ export async function sendBudgetSummary(id: string, recipient: string): Promise<
   const rows = lines.map((line) => {
     const actual = budgetActual(line, budgetData);
     const variance = budgetVariance(line, actual);
-    return `<tr><td>${escapeBudgetHtml(line.budgetHead)}</td><td>${formatAmount(Number(line.expected) || 0)}</td><td>${formatAmount(actual)}</td><td>${formatAmount(variance)}</td><td>${escapeBudgetHtml(line.description)}</td></tr>`;
+    return `<tr><td>${escapeBudgetHtml(line.category)}</td><td>${escapeBudgetHtml(line.budgetHead)}</td><td>${formatAmount(Number(line.expected) || 0)}</td><td>${formatAmount(actual)}</td><td>${formatAmount(variance)}</td><td>${escapeBudgetHtml(line.description)}</td></tr>`;
   }).join("");
   const subject = `Budget: ${budget.data.name || "Budget"}`;
-  const html = `<div style="font-family:Arial,sans-serif;color:#13263b;max-width:900px;margin:0 auto"><h1>${escapeBudgetHtml(subject)}</h1><p>${escapeBudgetHtml(budget.data.period || "Custom")} · ${escapeBudgetHtml(budget.data.startDate || "")} to ${escapeBudgetHtml(budget.data.endDate || "")}</p><p>${escapeBudgetHtml(budget.data.description || "Budget overview")}</p><p>Positive variance means favorable: under plan for expenses or above plan for income.</p><table style="width:100%;border-collapse:collapse"><thead><tr><th align="left">Budget Head</th><th align="right">Expected</th><th align="right">Actual</th><th align="right">Variance</th><th align="left">Description</th></tr></thead><tbody>${rows}</tbody><tfoot><tr><th align="left">Totals</th><th align="right">${formatAmount(budgetExpectedTotal(lines))}</th><th align="right">${formatAmount(lines.reduce((sum, line) => sum + budgetActual(line, budgetData), 0))}</th><th align="right">${formatAmount(lines.reduce((sum, line) => sum + budgetVariance(line, budgetActual(line, budgetData)), 0))}</th><td></td></tr></tfoot></table></div>`;
+  const html = `<div style="font-family:Arial,sans-serif;color:#13263b;max-width:900px;margin:0 auto"><h1>${escapeBudgetHtml(subject)}</h1><p>${escapeBudgetHtml(budget.data.period || "Custom")} · ${escapeBudgetHtml(budget.data.startDate || "")} to ${escapeBudgetHtml(budget.data.endDate || "")}</p><p>${escapeBudgetHtml(budget.data.description || "Budget overview")}</p><p>Positive variance means favorable: under plan for expenses or above plan for income.</p><table style="width:100%;border-collapse:collapse"><thead><tr><th align="left">Category</th><th align="left">Budget Head</th><th align="right">Expected</th><th align="right">Actual</th><th align="right">Variance</th><th align="left">Description</th></tr></thead><tbody>${rows}</tbody><tfoot><tr><th align="left" colspan="2">Totals</th><th align="right">${formatAmount(budgetExpectedTotal(lines))}</th><th align="right">${formatAmount(lines.reduce((sum, line) => sum + budgetActual(line, budgetData), 0))}</th><th align="right">${formatAmount(lines.reduce((sum, line) => sum + budgetVariance(line, budgetActual(line, budgetData)), 0))}</th><td></td></tr></tfoot></table></div>`;
   await sendEmailOrThrow({ to: email, subject, html, fromName: "MIKLEDGER" });
 }
 
