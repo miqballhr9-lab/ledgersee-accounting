@@ -8,7 +8,7 @@ import { toast } from "sonner";
 import { saveBudgetPlan, sendBudgetSummary } from "@/app/actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectSeparator, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { budgetActual, budgetExpectedTotal, budgetPresetRange, budgetVariance, csvCell, parseBudgetLines, parseCsv, recordsWithinBudgetDates, type BudgetLine, type BudgetPeriod } from "@/lib/budget-utils";
@@ -17,14 +17,26 @@ import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
 interface BudgetPlannerWorkspaceProps {
   budgets: BookkeepingRecord[];
   financialRecords: BookkeepingRecord[];
+  accounts: BookkeepingRecord[];
   currency: string;
   asOfDate: string;
 }
 
+interface BudgetHeadOption {
+  value: string;
+  label: string;
+  budgetHead: string;
+  type: "Income" | "Expense";
+}
+
 const periodOptions: BudgetPeriod[] = ["Monthly", "Quarterly", "Annual", "Custom"];
 
+function savedBudgetHeadKey(type: BudgetHeadOption["type"], budgetHead: string) {
+  return `saved:${type}:${budgetHead.trim().toLocaleLowerCase()}`;
+}
+
 function emptyBudgetLine(): BudgetLine {
-  return { category: "", type: "Expense", expected: "0", description: "" };
+  return { budgetHead: "", headKey: "", type: "Expense", expected: "0", description: "" };
 }
 
 function validPeriod(value: string | undefined): value is BudgetPeriod {
@@ -53,7 +65,7 @@ function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : "We couldn’t save that budget. Please try again.";
 }
 
-export default function BudgetPlannerWorkspace({ budgets, financialRecords, currency, asOfDate }: BudgetPlannerWorkspaceProps) {
+export default function BudgetPlannerWorkspace({ budgets, financialRecords, accounts, currency, asOfDate }: BudgetPlannerWorkspaceProps) {
   const router = useRouter();
   const uploadRef = useRef<HTMLInputElement>(null);
   const [savedBudgets, setSavedBudgets] = useState(budgets);
@@ -73,6 +85,36 @@ export default function BudgetPlannerWorkspace({ budgets, financialRecords, curr
   const [isSaving, setIsSaving] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
+
+  const accountHeads: BudgetHeadOption[] = accounts
+    .filter((account) => (account.data.type === "Income" || account.data.type === "Expense") && account.data.name?.trim())
+    .map((account) => ({
+      value: `account:${account.id}`,
+      label: `${account.data.name} · ${account.data.type}`,
+      budgetHead: account.data.name.trim(),
+      type: account.data.type as BudgetHeadOption["type"],
+    }));
+  const expenseCategories = new Map<string, string>();
+  financialRecords
+    .filter((record) => record.kind === "expenses" || record.kind === "bills")
+    .map((record) => record.data.category?.trim() ?? "")
+    .filter(Boolean)
+    .forEach((budgetHead) => expenseCategories.set(budgetHead.toLocaleLowerCase(), expenseCategories.get(budgetHead.toLocaleLowerCase()) ?? budgetHead));
+  const expenseHeads: BudgetHeadOption[] = Array.from(expenseCategories.values()).map((budgetHead) => ({
+    value: `expense:${budgetHead.toLocaleLowerCase()}`,
+    label: budgetHead,
+    budgetHead,
+    type: "Expense",
+  }));
+  const knownHeadSignatures = new Set([...accountHeads, ...expenseHeads].map((option) => `${option.type}:${option.budgetHead.toLocaleLowerCase()}`));
+  const savedHeadMap = new Map<string, BudgetHeadOption>();
+  savedBudgets.flatMap((budget) => parseBudgetLines(budget.data.lines)).forEach((line) => {
+    if (!line.budgetHead.trim() || knownHeadSignatures.has(`${line.type}:${line.budgetHead.toLocaleLowerCase()}`)) return;
+    const value = savedBudgetHeadKey(line.type, line.budgetHead);
+    savedHeadMap.set(value, { value, label: line.budgetHead, budgetHead: line.budgetHead, type: line.type });
+  });
+  const savedHeadOptions = Array.from(savedHeadMap.values());
+  const budgetHeadOptions = [...accountHeads, ...expenseHeads, ...savedHeadOptions];
 
   const periodRecords = useMemo(
     () => recordsWithinBudgetDates(financialRecords, dateRange.startDate, dateRange.endDate),
@@ -170,18 +212,17 @@ export default function BudgetPlannerWorkspace({ budgets, financialRecords, curr
   }
 
   function downloadTemplate() {
-    saveCsv("mikledger-budget-template.csv", [["name", "period", "startDate", "endDate", "category", "type", "expected", "description"]]);
+    saveCsv("mikledger-budget-template.csv", [["name", "period", "startDate", "endDate", "budgetHead", "expected", "description"]]);
   }
 
   function exportBudget() {
-    const rows: (string | number)[][] = [["name", "period", "startDate", "endDate", "category", "type", "expected", "actual", "variance", "description"]];
+    const rows: (string | number)[][] = [["name", "period", "startDate", "endDate", "budgetHead", "expected", "actual", "variance", "description"]];
     lines.forEach((line, index) => rows.push([
       name,
       period,
       dateRange.startDate,
       dateRange.endDate,
-      line.category,
-      line.type,
+      line.budgetHead,
       Number(line.expected) || 0,
       actuals[index] ?? 0,
       budgetVariance(line, actuals[index] ?? 0),
@@ -201,25 +242,28 @@ export default function BudgetPlannerWorkspace({ budgets, financialRecords, curr
       if (csvRows.length < 2) throw new Error("Add at least one budget row to the template before importing it.");
       const headers = csvRows[0].map((header) => header.trim().replace(/^\uFEFF/, "").toLowerCase().replaceAll(" ", ""));
       const column = (key: string) => headers.indexOf(key);
-      const categoryColumn = column("category");
+      const budgetHeadColumn = column("budgethead") >= 0 ? column("budgethead") : column("category");
       const expectedColumn = column("expected");
-      if (categoryColumn < 0 || expectedColumn < 0) throw new Error("The CSV needs category and expected columns. Download the blank template to get the right format.");
+      if (budgetHeadColumn < 0 || expectedColumn < 0) throw new Error("The CSV needs budgetHead and expected columns. Download the blank template to get the right format.");
       const importedLines = csvRows.slice(1).flatMap((row, rowIndex) => {
-        const category = (row[categoryColumn] ?? "").trim();
-        if (!category) return [];
+        const budgetHead = (row[budgetHeadColumn] ?? "").trim();
+        if (!budgetHead) return [];
         const expectedText = (row[expectedColumn] ?? "").replaceAll(",", "").trim();
         const expected = Number(expectedText || 0);
         if (!Number.isFinite(expected) || expected < 0) throw new Error(`Check the expected amount on CSV row ${rowIndex + 2}.`);
-        const typeText = row[column("type")]?.trim().toLowerCase() || "expense";
-        if (typeText !== "income" && typeText !== "expense") throw new Error(`Choose Income or Expense on CSV row ${rowIndex + 2}.`);
+        const suppliedType = row[column("type")]?.trim().toLowerCase();
+        if (suppliedType && suppliedType !== "income" && suppliedType !== "expense") throw new Error(`Choose Income or Expense on CSV row ${rowIndex + 2}.`);
+        const matchingHead = budgetHeadOptions.find((option) => option.budgetHead.toLocaleLowerCase() === budgetHead.toLocaleLowerCase());
+        const type: BudgetHeadOption["type"] = suppliedType ? suppliedType === "income" ? "Income" : "Expense" : matchingHead?.type ?? "Expense";
         return [{
-          category,
-          type: typeText === "income" ? "Income" as const : "Expense" as const,
+          budgetHead,
+          headKey: matchingHead?.type === type ? matchingHead.value : savedBudgetHeadKey(type, budgetHead),
+          type,
           expected: String(expected),
           description: row[column("description")]?.trim() ?? "",
         }];
       });
-      if (!importedLines.length) throw new Error("Add at least one category and expected amount before importing the template.");
+      if (!importedLines.length) throw new Error("Add at least one budget head and expected amount before importing the template.");
 
       const firstDataRow = csvRows[1];
       const fileName = firstDataRow[column("name")]?.trim();
@@ -281,8 +325,8 @@ export default function BudgetPlannerWorkspace({ budgets, financialRecords, curr
               ) : <p className="flex h-8 items-center text-sm text-muted-foreground">No saved budgets yet</p>}
             </div>
             <div className="flex flex-wrap justify-end gap-2">
-              <Button type="button" variant="outline" className="gap-2" onClick={copyBudget} disabled={!lines.some((line) => line.category.trim())}><Copy size={15} />Copy budget</Button>
-              <Button type="button" variant="outline" className="gap-2" onClick={exportBudget} disabled={!lines.some((line) => line.category.trim())}><ArrowDownToLine size={15} />Download / export</Button>
+              <Button type="button" variant="outline" className="gap-2" onClick={copyBudget} disabled={!lines.some((line) => line.budgetHead.trim())}><Copy size={15} />Copy budget</Button>
+              <Button type="button" variant="outline" className="gap-2" onClick={exportBudget} disabled={!lines.some((line) => line.budgetHead.trim())}><ArrowDownToLine size={15} />Download / export</Button>
               <Button type="button" variant="outline" onClick={startNewBudget}>New budget</Button>
             </div>
           </section>
@@ -307,10 +351,9 @@ export default function BudgetPlannerWorkspace({ budgets, financialRecords, curr
               <Button type="button" variant="outline" size="sm" className="gap-2" onClick={() => setLines((current) => [...current, emptyBudgetLine()])}><Plus size={15} />Add line</Button>
             </div>
             <div className="w-full min-w-0 overflow-x-auto">
-              <Table className="min-w-[1000px]">
+              <Table className="min-w-[900px]">
                 <TableHeader><TableRow className="bg-muted/40 hover:bg-muted/40">
-                  <TableHead className="w-[170px] text-[11px] font-semibold uppercase tracking-[0.06em]">Category</TableHead>
-                  <TableHead className="w-[115px] text-[11px] font-semibold uppercase tracking-[0.06em]">Type</TableHead>
+                  <TableHead className="w-[240px] text-[11px] font-semibold uppercase tracking-[0.06em]">Budget Head</TableHead>
                   <TableHead className="w-[140px] text-right text-[11px] font-semibold uppercase tracking-[0.06em]">Expected budget</TableHead>
                   <TableHead className="w-[140px] text-right text-[11px] font-semibold uppercase tracking-[0.06em]">Actual</TableHead>
                   <TableHead className="w-[140px] text-right text-[11px] font-semibold uppercase tracking-[0.06em]">Variance</TableHead>
@@ -321,10 +364,33 @@ export default function BudgetPlannerWorkspace({ budgets, financialRecords, curr
                   {lines.map((line, index) => {
                     const actual = actuals[index] ?? 0;
                     const variance = budgetVariance(line, actual);
+                    const selectedHead = budgetHeadOptions.find((option) => option.value === line.headKey)
+                      ?? budgetHeadOptions.find((option) => option.budgetHead.toLocaleLowerCase() === line.budgetHead.toLocaleLowerCase() && option.type === line.type);
                     return (
                       <TableRow key={index}>
-                        <TableCell><Input aria-label={`Category on line ${index + 1}`} value={line.category} maxLength={120} onChange={(event) => updateLine(index, "category", event.target.value)} placeholder="e.g. Sales" /></TableCell>
-                        <TableCell><Select value={line.type} onValueChange={(value) => { if (value === "Income" || value === "Expense") updateLine(index, "type", value); }}><SelectTrigger aria-label={`Type on line ${index + 1}`} className="w-full"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="Income">Income</SelectItem><SelectItem value="Expense">Expense</SelectItem></SelectContent></Select></TableCell>
+                        <TableCell>
+                          <Select
+                            value={selectedHead?.value ?? ""}
+                            onValueChange={(value) => {
+                              const option = budgetHeadOptions.find((item) => item.value === value);
+                              if (option) setLines((current) => current.map((item, lineIndex) => lineIndex === index ? { ...item, budgetHead: option.budgetHead, headKey: option.value, type: option.type } : item));
+                            }}
+                          >
+                            <SelectTrigger aria-label={`Budget Head on line ${index + 1}`} className="w-full"><SelectValue placeholder="Choose a budget head" /></SelectTrigger>
+                            <SelectContent>
+                              <SelectGroup>
+                                <SelectLabel>Chart of Accounts</SelectLabel>
+                                {accountHeads.length ? accountHeads.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>) : <SelectItem value="no-accounts" disabled>No income or expense accounts yet</SelectItem>}
+                              </SelectGroup>
+                              <SelectSeparator />
+                              <SelectGroup>
+                                <SelectLabel>Expenses</SelectLabel>
+                                {expenseHeads.length ? expenseHeads.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>) : <SelectItem value="no-expenses" disabled>No saved expense heads yet</SelectItem>}
+                              </SelectGroup>
+                              {savedHeadOptions.length ? <><SelectSeparator /><SelectGroup><SelectLabel>Previous budget heads</SelectLabel>{savedHeadOptions.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}</SelectGroup></> : null}
+                            </SelectContent>
+                          </Select>
+                        </TableCell>
                         <TableCell><Input aria-label={`Expected budget on line ${index + 1}`} type="number" min="0" step="0.01" value={line.expected} onChange={(event) => updateLine(index, "expected", event.target.value)} className="text-right tabular-nums" /></TableCell>
                         <TableCell className="text-right text-sm tabular-nums">{formatAmount(actual, currency)}</TableCell>
                         <TableCell className={`text-right text-sm font-medium tabular-nums ${variance < 0 ? "text-destructive" : "text-primary"}`}>{formatAmount(variance, currency)}</TableCell>
@@ -333,7 +399,7 @@ export default function BudgetPlannerWorkspace({ budgets, financialRecords, curr
                       </TableRow>
                     );
                   })}
-                  {lines.length > 0 ? <TableRow className="bg-muted/30 font-semibold"><TableCell colSpan={2}>Total</TableCell><TableCell className="text-right tabular-nums">{formatAmount(expectedTotal, currency)}</TableCell><TableCell className="text-right tabular-nums">{formatAmount(actualTotal, currency)}</TableCell><TableCell className={`text-right tabular-nums ${varianceTotal < 0 ? "text-destructive" : "text-primary"}`}>{formatAmount(varianceTotal, currency)}</TableCell><TableCell colSpan={2}></TableCell></TableRow> : null}
+                  {lines.length > 0 ? <TableRow className="bg-muted/30 font-semibold"><TableCell>Total</TableCell><TableCell className="text-right tabular-nums">{formatAmount(expectedTotal, currency)}</TableCell><TableCell className="text-right tabular-nums">{formatAmount(actualTotal, currency)}</TableCell><TableCell className={`text-right tabular-nums ${varianceTotal < 0 ? "text-destructive" : "text-primary"}`}>{formatAmount(varianceTotal, currency)}</TableCell><TableCell colSpan={2}></TableCell></TableRow> : null}
                 </TableBody>
               </Table>
             </div>
@@ -361,7 +427,7 @@ export default function BudgetPlannerWorkspace({ budgets, financialRecords, curr
             <h2 className="text-sm font-semibold">Spreadsheet workflow</h2>
             <ol className="mt-3 space-y-2 text-xs leading-5 text-muted-foreground">
               <li>1. Download the blank CSV template.</li>
-              <li>2. Fill in the budget name, dates, categories, and expected amounts.</li>
+              <li>2. Fill in the budget name, dates, budget heads, and expected amounts.</li>
               <li>3. Import it to save or update this budget.</li>
             </ol>
           </section>

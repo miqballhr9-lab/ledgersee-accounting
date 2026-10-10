@@ -4,7 +4,8 @@ export type BudgetPeriod = "Monthly" | "Quarterly" | "Annual" | "Custom";
 export type BudgetLineType = "Income" | "Expense";
 
 export interface BudgetLine {
-  category: string;
+  budgetHead: string;
+  headKey?: string;
   type: BudgetLineType;
   expected: string;
   description: string;
@@ -19,8 +20,10 @@ export function parseBudgetLines(value: string | undefined): BudgetLine[] {
       if (!item || typeof item !== "object" || Array.isArray(item)) return [];
       const line = item as Record<string, unknown>;
       const type = line.type === "Income" ? "Income" : "Expense";
+      const budgetHead = typeof line.budgetHead === "string" ? line.budgetHead : typeof line.category === "string" ? line.category : "";
       return [{
-        category: typeof line.category === "string" ? line.category : "",
+        budgetHead,
+        headKey: typeof line.headKey === "string" ? line.headKey : "",
         type,
         expected: typeof line.expected === "string" || typeof line.expected === "number" ? String(line.expected) : "0",
         description: typeof line.description === "string" ? line.description : "",
@@ -48,25 +51,25 @@ export function recordsWithinBudgetDates(records: BookkeepingRecord[], startDate
 }
 
 export function budgetActual(line: BudgetLine, records: BookkeepingRecord[]) {
-  const category = line.category.trim().toLocaleLowerCase();
-  if (!category) return 0;
+  const budgetHead = line.budgetHead.trim().toLocaleLowerCase();
+  if (!budgetHead) return 0;
 
   if (line.type === "Income") {
     return records
       .filter((record) => {
         if (record.kind !== "invoices" || ["Draft", "Cancelled"].includes(record.data.status ?? "")) return false;
-        const allSales = ["sales", "income", "revenue", "all sales"].includes(category) || category.includes("sales") || category.includes("revenue");
-        return allSales || record.data.category?.trim().toLocaleLowerCase() === category || record.data.customer?.trim().toLocaleLowerCase() === category;
+        const allSales = ["sales", "income", "revenue", "all sales"].includes(budgetHead) || budgetHead.includes("sales") || budgetHead.includes("revenue");
+        return allSales || record.data.category?.trim().toLocaleLowerCase() === budgetHead || record.data.customer?.trim().toLocaleLowerCase() === budgetHead;
       })
       .reduce((sum, record) => sum + Math.max(0, (Number(record.data.amount) || 0) - (Number(record.data.creditApplied) || 0)), 0);
   }
 
-  const allCosts = ["expenses", "all expenses", "operating expenses", "all costs"].includes(category);
+  const allCosts = ["expenses", "all expenses", "operating expenses", "all costs"].includes(budgetHead);
   return records
     .filter((record) => {
       if (record.kind !== "expenses" && record.kind !== "bills") return false;
       if (record.data.status === "Cancelled") return false;
-      return allCosts || record.data.category?.trim().toLocaleLowerCase() === category;
+      return allCosts || record.data.category?.trim().toLocaleLowerCase() === budgetHead;
     })
     .reduce((sum, record) => sum + (Number(record.data.amount) || 0), 0);
 }

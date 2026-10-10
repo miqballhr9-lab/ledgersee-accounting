@@ -33,12 +33,13 @@ export default async function SectionPage({ params }: SectionPageProps) {
   }
 
   if (section === "budgets") {
-    const groups = await listBookkeepingRecordGroups(["budgets", "invoices", "bills", "expenses", "settings"]);
+    const groups = await listBookkeepingRecordGroups(["budgets", "invoices", "bills", "expenses", "settings", "accounts"]);
     const records = [...(groups.invoices ?? []), ...(groups.bills ?? []), ...(groups.expenses ?? [])];
     return (
       <BudgetPlannerWorkspace
         budgets={groups.budgets ?? []}
         financialRecords={records}
+        accounts={groups.accounts ?? []}
         currency={groups.settings?.[0]?.data.currency || "USD"}
         asOfDate={new Date().toISOString().slice(0, 10)}
       />
