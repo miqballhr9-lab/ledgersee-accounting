@@ -6,6 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import {
   ArrowLeft,
   ArrowLeftRight,
+  Banknote,
   BarChart3,
   BookOpenCheck,
   Building2,
@@ -76,6 +77,7 @@ const icons: Record<string, LucideIcon> = {
   BookOpenCheck,
   Percent,
   BarChart3,
+  Banknote,
   ShieldCheck,
   Settings,
 };

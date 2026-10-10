@@ -380,6 +380,7 @@ export const navigationGroups: NavigationGroup[] = [
   {
     label: "Organization",
     items: [
+      { slug: "payroll", label: "Payroll", icon: "Banknote" },
       { slug: "team-members", label: "Users & roles", icon: "ShieldCheck" },
       { slug: "settings", label: "Settings", icon: "Settings2" },
     ],

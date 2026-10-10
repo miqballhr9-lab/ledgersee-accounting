@@ -5,6 +5,7 @@ import { listAllBookkeepingRecords, listBookkeepingRecordGroups } from "@/app/ac
 import ChartOfAccountsWorkspace from "@/components/bookkeeping/ChartOfAccountsWorkspace";
 import BudgetPlannerWorkspace from "@/components/bookkeeping/BudgetPlannerWorkspace";
 import ModuleWorkspace from "@/components/bookkeeping/ModuleWorkspace";
+import PayrollWorkspace from "@/components/bookkeeping/PayrollWorkspace";
 import ReportsWorkspace from "@/components/bookkeeping/ReportsWorkspace";
 import { moduleBySlug } from "@/lib/bookkeeping-config";
 import type { RecordKind } from "@/lib/bookkeeping-types";
@@ -16,11 +17,16 @@ interface SectionPageProps {
 export async function generateMetadata({ params }: SectionPageProps): Promise<Metadata> {
   const { section } = await params;
   const module = moduleBySlug(section);
-  return { title: module?.plural ?? (section === "reports" ? "Reports" : "Workspace") };
+  return { title: module?.plural ?? (section === "reports" ? "Reports" : section === "payroll" ? "Payroll" : "Workspace") };
 }
 
 export default async function SectionPage({ params }: SectionPageProps) {
   const { section } = await params;
+  if (section === "payroll") {
+    const groups = await listBookkeepingRecordGroups(["payroll"]);
+    return <PayrollWorkspace records={groups.payroll ?? []} asOfDate={new Date().toISOString().slice(0, 10)} />;
+  }
+
   if (section === "reports") {
     const records = await listAllBookkeepingRecords();
     return <ReportsWorkspace records={records} asOfDate={new Date().toISOString().slice(0, 10)} />;
