@@ -12,6 +12,7 @@ import { createUploadUrl } from "@/lib/storage";
 import { dueDateForTerms, parseInvoiceLines } from "@/lib/invoice-utils";
 import { siteUrl } from "@/lib/site";
 import { isRecordKind, type BookkeepingRecord, type RecordKind } from "@/lib/bookkeeping-types";
+import { paymentAccountType } from "@/lib/payment-accounts";
 
 const convertTargets: Partial<Record<RecordKind, RecordKind>> = {
   estimates: "invoices",
@@ -187,12 +188,25 @@ export async function saveBookkeepingRecord(
     data = { ...data, paymentTerms, dueDate: calculatedDueDate };
   }
   if (!id && (kind === "invoices" || kind === "bills")) {
-    const paymentMethod = data.paymentMethod || "Credit";
-    if (!["Cash", "Bank", "Credit"].includes(paymentMethod)) throw new Error("Choose Cash, Bank, or Credit as the payment method.");
+    const selectedAccountId = data.paymentMethod || "Credit";
+    let paymentMethod = "Credit";
+    if (selectedAccountId !== "Credit") {
+      const [paymentAccount] = await db
+        .select()
+        .from(bookkeepingRecord)
+        .where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "accounts"), eq(bookkeepingRecord.id, selectedAccountId)))
+        .limit(1);
+      const accountType = paymentAccount ? paymentAccountType({ kind: "accounts", data: paymentAccount.data }) : null;
+      if (!paymentAccount || !accountType) throw new Error("Choose a Cash, Bank, or Credit card account from Chart of Accounts.");
+      paymentMethod = accountType;
+      data = { ...data, paymentAccountId: paymentAccount.id, paymentAccountName: paymentAccount.data.name || paymentAccount.data.code || "Account" };
+    } else {
+      data = { ...data, paymentAccountId: "", paymentAccountName: "" };
+    }
     data = { ...data, paymentMethod };
     if (paymentMethod !== "Credit") {
       const amount = Number(data.amount);
-      if (!Number.isFinite(amount) || amount <= 0) throw new Error("Enter an amount greater than zero for a Cash or Bank transaction.");
+      if (!Number.isFinite(amount) || amount <= 0) throw new Error("Enter an amount greater than zero for a paid transaction.");
       data = { ...data, paidAmount: amount.toFixed(2), status: "Paid" };
     }
   }
@@ -387,6 +401,8 @@ export async function saveBookkeepingRecord(
         amount: data.amount ?? "0",
         paymentDate: data.issueDate || new Date().toISOString().slice(0, 10),
         method: data.paymentMethod,
+        paymentAccountId: data.paymentAccountId ?? "",
+        paymentAccountName: data.paymentAccountName ?? "",
       },
     });
   }
@@ -461,11 +477,19 @@ export async function recordInvoicePayment(
   id: string,
   amountInput: string,
   paymentDate: string,
-  method: string,
+  accountId: string,
 ): Promise<void> {
   const me = await requireUser();
   const amount = Number(amountInput);
   if (!Number.isFinite(amount) || amount <= 0) throw new Error("Enter a payment amount greater than zero.");
+
+  const [paymentAccount] = await db
+    .select()
+    .from(bookkeepingRecord)
+    .where(and(eq(bookkeepingRecord.id, accountId), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "accounts")))
+    .limit(1);
+  const method = paymentAccount ? paymentAccountType({ kind: "accounts", data: paymentAccount.data }) : null;
+  if (!paymentAccount || !method) throw new Error("Choose a Cash, Bank, or Credit card account from Chart of Accounts.");
 
   const [invoice] = await db
     .select()
@@ -500,6 +524,8 @@ export async function recordInvoicePayment(
       amount: amount.toFixed(2),
       paymentDate,
       method,
+      paymentAccountId: paymentAccount.id,
+      paymentAccountName: paymentAccount.data.name || paymentAccount.data.code || "Account",
     },
   });
   revalidatePath("/app", "layout");

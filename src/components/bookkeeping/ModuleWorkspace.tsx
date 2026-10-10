@@ -27,6 +27,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { type ModuleDefinition } from "@/lib/bookkeeping-config";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
+import { paymentAccountLabel, paymentAccountType } from "@/lib/payment-accounts";
 import JournalEntryEditor from "@/components/bookkeeping/JournalEntryEditor";
 import RecordEditor from "@/components/bookkeeping/RecordEditor";
 import RecordTable, { type RecordActionKind } from "@/components/bookkeeping/RecordTable";
@@ -149,8 +150,9 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
   const [paymentRecord, setPaymentRecord] = useState<BookkeepingRecord | null>(null);
   const [paymentAmount, setPaymentAmount] = useState("");
   const [paymentDate, setPaymentDate] = useState("");
-  const [paymentMethod, setPaymentMethod] = useState("Bank transfer");
+  const [paymentMethod, setPaymentMethod] = useState("");
   const [paymentError, setPaymentError] = useState("");
+  const paymentAccounts = accounts.filter((account) => paymentAccountType(account));
 
   useEffect(() => setRecords(initialRecords), [initialRecords]);
 
@@ -246,6 +248,7 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
       setPaymentRecord(record);
       setPaymentAmount(remaining.toFixed(2));
       setPaymentDate(dateString(new Date()));
+      setPaymentMethod(paymentAccounts[0]?.id ?? "");
       setPaymentError("");
       return;
     }
@@ -425,6 +428,7 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
           customers={customers}
           vendors={vendors}
           items={items}
+          accounts={accounts}
           defaults={defaults}
           open={editorOpen}
           onOpenChange={setEditorOpen}
@@ -443,17 +447,18 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
             <div className="space-y-2"><Label htmlFor="payment-amount">Amount received</Label><Input id="payment-amount" type="number" min="0.01" step="0.01" value={paymentAmount} onChange={(event) => setPaymentAmount(event.target.value)} required /></div>
             <div className="space-y-2"><Label htmlFor="payment-date">Payment date</Label><Input id="payment-date" type="date" value={paymentDate} onChange={(event) => setPaymentDate(event.target.value)} required /></div>
             <div className="space-y-2">
-              <Label htmlFor="payment-method">Payment method</Label>
-              <Select value={paymentMethod} onValueChange={(value) => setPaymentMethod(value ?? "Bank transfer")}>
-                <SelectTrigger id="payment-method" className="w-full"><SelectValue /></SelectTrigger>
-                <SelectContent>{["Bank transfer", "Cash", "Card", "Cheque", "Other"].map((method) => <SelectItem key={method} value={method}>{method}</SelectItem>)}</SelectContent>
+              <Label htmlFor="payment-method">Deposit to account</Label>
+              <Select value={paymentMethod || undefined} onValueChange={(value) => setPaymentMethod(value ?? "")}>
+                <SelectTrigger id="payment-method" className="w-full"><SelectValue placeholder="Choose a payment account" /></SelectTrigger>
+                <SelectContent>{paymentAccounts.map((account) => <SelectItem key={account.id} value={account.id}>{paymentAccountLabel(account)}</SelectItem>)}</SelectContent>
               </Select>
+              {!paymentAccounts.length ? <p className="text-xs leading-5 text-muted-foreground">Add a Cash, Bank, or Credit card account in Chart of accounts before recording payments.</p> : null}
             </div>
             {paymentError ? <p role="alert" className="text-sm text-destructive">{paymentError}</p> : null}
           </form>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => setPaymentRecord(null)}>Cancel</Button>
-            <Button type="submit" form="invoice-payment-form" disabled={pendingAction}>{pendingAction ? "Recording…" : "Record payment"}</Button>
+            <Button type="submit" form="invoice-payment-form" disabled={pendingAction || !paymentMethod}>{pendingAction ? "Recording…" : "Record payment"}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

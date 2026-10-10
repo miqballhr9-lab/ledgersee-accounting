@@ -82,7 +82,7 @@ export const modules: readonly ModuleDefinition[] = [
       { key: "invoiceNumber", label: "Invoice number", required: true },
       { key: "customer", label: "Customer", required: true },
       { key: "paymentTerms", label: "Payment terms", type: "select", required: true, options: ["Due on receipt", "15 days", "30 days", "60 days"] },
-      { key: "paymentMethod", label: "Payment method", type: "select", options: ["Cash", "Bank", "Credit"], help: "Cash or Bank marks the invoice paid; Credit keeps it outstanding." },
+      { key: "paymentMethod", label: "Payment account", type: "select", options: ["Credit"], help: "Choose a Cash, Bank, or Credit card account from your Chart of Accounts, or leave it unpaid on credit." },
       { key: "issueDate", label: "Issue date", type: "date" },
       { key: "dueDate", label: "Due date", type: "date" },
       { key: "currency", label: "Currency", type: "currency" },
@@ -171,7 +171,7 @@ export const modules: readonly ModuleDefinition[] = [
     fields: [
       { key: "billNumber", label: "Bill number", required: true },
       { key: "vendor", label: "Vendor", required: true },
-      { key: "paymentMethod", label: "Payment method", type: "select", options: ["Cash", "Bank", "Credit"], help: "Cash or Bank marks the bill paid; Credit keeps it outstanding." },
+      { key: "paymentMethod", label: "Payment account", type: "select", options: ["Credit"], help: "Choose a Cash, Bank, or Credit card account from your Chart of Accounts, or leave it unpaid on credit." },
       { key: "billDate", label: "Bill date", type: "date" },
       { key: "dueDate", label: "Due date", type: "date" },
       { key: "category", label: "Category" },

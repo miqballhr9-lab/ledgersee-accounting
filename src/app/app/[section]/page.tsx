@@ -37,7 +37,7 @@ export default async function SectionPage({ params }: SectionPageProps) {
   const kinds = new Set<RecordKind>([module.kind, "settings"]);
   if (module.fields.some((field) => field.key === "customer")) kinds.add("customers");
   if (module.fields.some((field) => field.key === "vendor")) kinds.add("vendors");
-  if (module.kind === "journals") kinds.add("accounts");
+  if (["invoices", "bills", "journals"].includes(module.kind)) kinds.add("accounts");
   if (module.fields.some((field) => field.key === "lineItems")) kinds.add("items");
   const groups = await listBookkeepingRecordGroups([...kinds]);
   const records = groups[module.kind] ?? [];

@@ -24,6 +24,7 @@ import { CurrencyPicker } from "@/components/bookkeeping/CurrencyPicker";
 import type { ModuleDefinition } from "@/lib/bookkeeping-config";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
 import { currencyAmount, dueDateForTerms, invoiceSubtotal, parseInvoiceLines } from "@/lib/invoice-utils";
+import { paymentAccountLabel, paymentAccountType } from "@/lib/payment-accounts";
 
 interface RecordEditorProps {
   module: ModuleDefinition;
@@ -31,6 +32,7 @@ interface RecordEditorProps {
   customers: BookkeepingRecord[];
   vendors: BookkeepingRecord[];
   items: BookkeepingRecord[];
+  accounts: BookkeepingRecord[];
   defaults: Record<string, string>;
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -60,6 +62,9 @@ function getInitialValues(module: ModuleDefinition, record: BookkeepingRecord | 
   if (module.kind === "invoices") {
     values.paymentTerms = record?.data.paymentTerms || "30 days";
     values.dueDate = dueDateForTerms(values.issueDate, values.paymentTerms) || values.dueDate;
+  }
+  if (module.kind === "invoices" || module.kind === "bills") {
+    values.paymentMethod = record?.data.paymentAccountId || record?.data.paymentMethod || "Credit";
   }
   return values;
 }
@@ -100,10 +105,11 @@ function selectedCatalogItemLabel(items: BookkeepingRecord[], itemId: string, cu
   return item ? catalogItemLabel(item, currency) : fallbackName || undefined;
 }
 
-export default function RecordEditor({ module, record, customers, vendors, items, defaults, open, onOpenChange, onSaved, onSaveComplete }: RecordEditorProps) {
+export default function RecordEditor({ module, record, customers, vendors, items, accounts, defaults, open, onOpenChange, onSaved, onSaveComplete }: RecordEditorProps) {
   const [values, setValues] = useState<Record<string, string>>(() => getInitialValues(module, record, defaults));
   const [invoiceLines, setInvoiceLines] = useState<InvoiceLine[]>(() => readInvoiceLines(record?.data.lineItems ?? "", items));
   const availableItems = items.filter((item) => item.data.name?.trim());
+  const paymentAccounts = accounts.filter((account) => paymentAccountType(account));
   const [savedRecordId, setSavedRecordId] = useState<string | null>(record?.id ?? null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -571,9 +577,27 @@ export default function RecordEditor({ module, record, customers, vendors, items
                     </>
                   ) : null}
 
-                  {field.type === "select" ? (
+                  {field.type === "select" && field.key === "paymentMethod" && (module.kind === "invoices" || module.kind === "bills") ? (
+                    <>
+                      <Select value={value || "Credit"} onValueChange={(nextValue) => changeValue(field.key, nextValue ?? "Credit")}>
+                        <SelectTrigger id={`field-${field.key}`} className="w-full" disabled={Boolean(record)}>
+                          <SelectValue placeholder="Choose a payment account" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="Credit">Credit · unpaid</SelectItem>
+                          {paymentAccounts.map((account) => <SelectItem key={account.id} value={account.id}>{paymentAccountLabel(account)}</SelectItem>)}
+                          {record && !record.data.paymentAccountId && value !== "Credit" ? (
+                            <SelectItem value={value}>{value} · previously saved</SelectItem>
+                          ) : null}
+                        </SelectContent>
+                      </Select>
+                      {!paymentAccounts.length && !record ? <p className="text-xs leading-5 text-muted-foreground">Add a Cash, Bank, or Credit card account in Chart of accounts to record a paid sale or purchase.</p> : null}
+                    </>
+                  ) : null}
+
+                  {field.type === "select" && !(field.key === "paymentMethod" && (module.kind === "invoices" || module.kind === "bills")) ? (
                     <Select value={value || undefined} onValueChange={(nextValue) => changeValue(field.key, nextValue ?? "")}>
-                      <SelectTrigger id={`field-${field.key}`} className="w-full" disabled={field.key === "paymentMethod" && Boolean(record)}>
+                      <SelectTrigger id={`field-${field.key}`} className="w-full">
                         <SelectValue placeholder="Choose an option" />
                       </SelectTrigger>
                       <SelectContent>

@@ -35,7 +35,7 @@ const columnLabels: Record<string, string> = {
   dueDate: "Due date",
   amount: "Amount",
   paidAmount: "Paid",
-  paymentMethod: "Payment method",
+  paymentMethod: "Payment account",
   status: "Status",
   estimateNumber: "Estimate",
   date: "Date",
@@ -79,7 +79,9 @@ const columnLabels: Record<string, string> = {
 };
 
 function displayValue(record: BookkeepingRecord, key: string) {
-  const value = record.data[key] ?? "";
+  const value = key === "paymentMethod" && record.data.paymentAccountName
+    ? `${record.data.paymentMethod} · ${record.data.paymentAccountName}`
+    : record.data[key] ?? "";
   if (!value) return <span className="text-muted-foreground/60">—</span>;
   if (key === "status") {
     const tone = value === "Paid" || value === "Accepted" || value === "Applied" || value === "Converted"
