@@ -780,6 +780,37 @@ export async function deleteBookkeepingRecord(kind: string, id: string): Promise
   const me = await requireUser();
   if (!isRecordKind(kind)) throw new Error("That section isn’t available.");
   if (kind === "reconciliations") throw new Error("Completed reconciliations can’t be deleted.");
+  if (kind === "bills" || kind === "expenses") {
+    await db.transaction(async (transaction) => {
+      const [record] = await transaction
+        .select()
+        .from(bookkeepingRecord)
+        .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, kind)))
+        .for("update")
+        .limit(1);
+      if (!record) throw new Error("We couldn’t find that record. Refresh and try again.");
+
+      if (record.data.sourcePurchaseOrderId) {
+        const [order] = await transaction
+          .select()
+          .from(bookkeepingRecord)
+          .where(and(eq(bookkeepingRecord.id, record.data.sourcePurchaseOrderId), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "purchase-orders")))
+          .for("update")
+          .limit(1);
+        if (order?.data.convertedRecordId === record.id) {
+          const { convertedKind: _convertedKind, convertedRecordId: _convertedRecordId, convertedAt: _convertedAt, ...orderData } = order.data;
+          await transaction.update(bookkeepingRecord)
+            .set({ data: orderData, updatedAt: new Date() })
+            .where(and(eq(bookkeepingRecord.id, order.id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "purchase-orders")));
+        }
+      }
+
+      await transaction.delete(bookkeepingRecord)
+        .where(and(eq(bookkeepingRecord.id, record.id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, kind)));
+    });
+    revalidatePath("/app", "layout");
+    return;
+  }
   if (kind === "purchase-orders") {
     const [order] = await db
       .select()
@@ -919,8 +950,13 @@ export async function convertBookkeepingRecord(id: string): Promise<void> {
     const sourceKind = source.kind as RecordKind;
     const targetKind = convertTargets[sourceKind];
     if (!targetKind) throw new Error("This record can’t be converted.");
-    if (sourceKind === "purchase-orders" && source.data.status !== "Received") {
-      throw new Error(source.data.status === "Converted" ? "This purchase order already has a bill." : "Receive this purchase order before creating its bill.");
+    if (sourceKind === "purchase-orders") {
+      if (source.data.convertedRecordId || source.data.convertedKind) {
+        throw new Error("This purchase order has already been recorded as a bill or expense.");
+      }
+      if (!(["Purchase Order", "Received"].includes(source.data.status || ""))) {
+        throw new Error("Confirm this purchase order before creating its bill.");
+      }
     }
 
     const today = new Date().toISOString().slice(0, 10);
@@ -944,11 +980,103 @@ export async function convertBookkeepingRecord(id: string): Promise<void> {
             status: "Open",
           }),
     }, targetKind);
-    await transaction.insert(bookkeepingRecord).values({ userId: me.id, kind: targetKind, data: targetData });
+    const [created] = await transaction.insert(bookkeepingRecord)
+      .values({ userId: me.id, kind: targetKind, data: sourceKind === "purchase-orders" ? { ...targetData, sourcePurchaseOrderId: source.id, sourcePurchaseOrderNumber: sourceData.poNumber || "" } : targetData })
+      .returning({ id: bookkeepingRecord.id });
+    const updatedSourceData = sourceKind === "purchase-orders"
+      ? { ...sourceData, convertedKind: targetKind, convertedRecordId: created.id, convertedAt: new Date().toISOString() }
+      : { ...sourceData, status: "Converted" };
     await transaction
       .update(bookkeepingRecord)
-      .set({ data: { ...sourceData, status: "Converted" }, updatedAt: new Date() })
+      .set({ data: updatedSourceData, updatedAt: new Date() })
       .where(and(eq(bookkeepingRecord.id, source.id), eq(bookkeepingRecord.userId, me.id)));
+  });
+  revalidatePath("/app", "layout");
+}
+
+export async function convertPurchaseOrderToExpense(
+  id: string,
+  expenseAccountId: string,
+  paymentAccountId?: string,
+): Promise<void> {
+  const me = await requireUser();
+  await db.transaction(async (transaction) => {
+    const [order] = await transaction
+      .select()
+      .from(bookkeepingRecord)
+      .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "purchase-orders")))
+      .for("update")
+      .limit(1);
+    if (!order) throw new Error("We couldn’t find that purchase order. Refresh and try again.");
+    if (!["Purchase Order", "Received"].includes(order.data.status || "")) {
+      throw new Error("Confirm this purchase order before recording it as an expense.");
+    }
+    if (order.data.convertedRecordId || order.data.convertedKind) {
+      throw new Error("This purchase order has already been recorded as a bill or expense.");
+    }
+
+    const [expenseAccount] = await transaction
+      .select()
+      .from(bookkeepingRecord)
+      .where(and(eq(bookkeepingRecord.id, expenseAccountId), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "accounts")))
+      .limit(1);
+    if (!expenseAccount || expenseAccount.data.type !== "Expense" || expenseAccount.data.locked === "true") {
+      throw new Error("Choose an available Expense category from Chart of Accounts.");
+    }
+
+    let paymentAccountData = { paymentAccountId: "", paymentAccountName: "", paymentMethod: "" };
+    if (paymentAccountId) {
+      const [paymentAccount] = await transaction
+        .select()
+        .from(bookkeepingRecord)
+        .where(and(eq(bookkeepingRecord.id, paymentAccountId), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "accounts")))
+        .limit(1);
+      const accountType = paymentAccount ? paymentAccountType({ kind: "accounts", data: paymentAccount.data }) : null;
+      if (!paymentAccount || !accountType) throw new Error("Choose an available Cash, Bank, or Credit card account.");
+      paymentAccountData = {
+        paymentAccountId: paymentAccount.id,
+        paymentAccountName: paymentAccount.data.name || paymentAccount.data.code || "Account",
+        paymentMethod: accountType === "Bank" ? "Bank transfer" : accountType,
+      };
+    }
+
+    const lines = parseInvoiceLines(order.data.lineItems || "");
+    const orderAmount = Number(order.data.amount);
+    if (!lines.length || !Number.isFinite(orderAmount) || orderAmount <= 0) {
+      throw new Error("Add valid items and an amount to this purchase order before recording it as an expense.");
+    }
+    const lineSummary = lines
+      .map((line) => [line.name, line.description].filter(Boolean).join(" — "))
+      .join(", ")
+      .slice(0, 240);
+    const today = new Date().toISOString().slice(0, 10);
+    const expenseData = amountFromLineItems({
+      payee: order.data.vendor || "",
+      expenseDate: order.data.date || today,
+      currency: order.data.currency || "USD",
+      lineItems: JSON.stringify([{
+        itemId: "",
+        name: expenseAccount.data.name || expenseAccount.data.code || "Expense",
+        description: `${order.data.poNumber || "Purchase order"}${lineSummary ? ` · ${lineSummary}` : ""}`,
+        quantity: "1",
+        rate: orderAmount.toFixed(2),
+      }]),
+      expenseCategoryAccountId: expenseAccount.id,
+      memo: order.data.memo || `Recorded from ${order.data.poNumber || "purchase order"}`,
+      sourcePurchaseOrderId: order.id,
+      sourcePurchaseOrderNumber: order.data.poNumber || "",
+      ...paymentAccountData,
+    }, "expenses");
+    const [created] = await transaction.insert(bookkeepingRecord)
+      .values({ userId: me.id, kind: "expenses", data: expenseData })
+      .returning({ id: bookkeepingRecord.id });
+    await transaction
+      .update(bookkeepingRecord)
+      .set({
+        data: { ...order.data, convertedKind: "expenses", convertedRecordId: created.id, convertedAt: new Date().toISOString() },
+        updatedAt: new Date(),
+      })
+      .where(and(eq(bookkeepingRecord.id, order.id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "purchase-orders")));
   });
   revalidatePath("/app", "layout");
 }
@@ -1062,7 +1190,13 @@ export async function advancePurchaseOrder(
       return "Received";
     }
 
-    if (!["Draft", "RFQ Sent", "Purchase Order"].includes(status)) throw new Error("This purchase order can no longer be cancelled.");
+    if (![
+      "Draft",
+      "RFQ Sent",
+      "Purchase Order",
+    ].includes(status) || lockedOrder.data.convertedRecordId || lockedOrder.data.convertedKind) {
+      throw new Error("This purchase order can no longer be cancelled.");
+    }
     await transaction.update(bookkeepingRecord)
       .set({ data: { ...lockedOrder.data, status: "Cancelled", cancelledAt: updatedAt.toISOString() }, updatedAt })
       .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "purchase-orders")));

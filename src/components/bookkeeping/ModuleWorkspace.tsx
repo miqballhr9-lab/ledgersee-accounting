@@ -8,6 +8,7 @@ import { ArrowDownToLine, Plus, Search } from "lucide-react";
 import {
   advancePurchaseOrder,
   convertBookkeepingRecord,
+  convertPurchaseOrderToExpense,
   createCustomerDocumentShareLink,
   createInvoiceShareLink,
   deleteBookkeepingRecord,
@@ -168,7 +169,12 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
   const [paymentDate, setPaymentDate] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("");
   const [paymentError, setPaymentError] = useState("");
+  const [expenseConversionRecord, setExpenseConversionRecord] = useState<BookkeepingRecord | null>(null);
+  const [expenseCategoryId, setExpenseCategoryId] = useState("");
+  const [expensePaymentAccountId, setExpensePaymentAccountId] = useState("");
+  const [expenseConversionError, setExpenseConversionError] = useState("");
   const paymentAccounts = accounts.filter((account) => paymentAccountType(account));
+  const expenseAccounts = accounts.filter((account) => account.kind === "accounts" && account.data.type === "Expense" && account.data.locked !== "true");
 
   useEffect(() => setRecords(initialRecords), [initialRecords]);
 
@@ -189,7 +195,9 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
     return records.filter((record) => {
       const matchesSearch = !normalizedSearch || Object.values(record.data).some((value) => value.toLowerCase().includes(normalizedSearch));
       const matchesFilter = module.kind === "purchase-orders" && filter.startsWith("po:")
-        ? purchaseOrderStage(record.data.status) === filter.slice(3)
+        ? filter === "po:accounted"
+          ? Boolean(record.data.convertedRecordId || record.data.convertedKind) || record.data.status === "Converted"
+          : purchaseOrderStage(record.data.status) === filter.slice(3)
         : filter === "all" || !filterKey || record.data[filterKey] === filter;
       const matchesDateRange = !sourceFilter || recordsWithinBudgetDates([record], sourceFilter.startDate, sourceFilter.endDate).length > 0;
       const matchesBudgetHead = !budgetLine || budgetActualRecords(budgetLine, [record]).length > 0;
@@ -213,8 +221,8 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
     { id: "po:draft", label: "RFQ drafts", count: records.filter((record) => purchaseOrderStage(record.data.status) === "draft").length },
     { id: "po:sent", label: "Awaiting response", count: records.filter((record) => purchaseOrderStage(record.data.status) === "sent").length },
     { id: "po:confirmed", label: "To receive", count: records.filter((record) => purchaseOrderStage(record.data.status) === "confirmed").length },
-    { id: "po:received", label: "To bill", count: records.filter((record) => purchaseOrderStage(record.data.status) === "received").length },
-    { id: "po:billed", label: "Billed", count: records.filter((record) => purchaseOrderStage(record.data.status) === "billed").length },
+    { id: "po:received", label: "Ready to record", count: records.filter((record) => purchaseOrderStage(record.data.status) === "received" && !record.data.convertedRecordId && !record.data.convertedKind).length },
+    { id: "po:accounted", label: "Accounted", count: records.filter((record) => Boolean(record.data.convertedRecordId || record.data.convertedKind) || record.data.status === "Converted").length },
     { id: "po:cancelled", label: "Cancelled", count: records.filter((record) => purchaseOrderStage(record.data.status) === "cancelled").length },
   ];
 
@@ -279,6 +287,16 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
 
   async function handleAction(kind: RecordActionKind, record: BookkeepingRecord) {
     setActionMessage("");
+    if (kind === "convert-expense") {
+      const vendor = vendors.find((item) => item.id === record.data.vendorId || item.id === record.data.vendor)
+        ?? vendors.find((item) => item.data.name?.trim().toLowerCase() === record.data.vendor?.trim().toLowerCase());
+      const preferredCategory = expenseAccounts.find((account) => account.id === vendor?.data.defaultExpenseAccount);
+      setExpenseConversionRecord(record);
+      setExpenseCategoryId(preferredCategory?.id ?? expenseAccounts[0]?.id ?? "");
+      setExpensePaymentAccountId("");
+      setExpenseConversionError("");
+      return;
+    }
     if (kind === "payment") {
       const remaining = Math.max(0, Number(record.data.amount || 0) - Number(record.data.paidAmount || 0) - Number(record.data.creditApplied || 0));
       setPaymentRecord(record);
@@ -371,6 +389,26 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
       router.refresh();
     } catch (error) {
       setPaymentError(error instanceof Error ? error.message : "We couldn’t record the payment.");
+    } finally {
+      setPendingAction(false);
+    }
+  }
+
+  async function submitExpenseConversion(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!expenseConversionRecord || !expenseCategoryId) {
+      setExpenseConversionError("Choose an expense category to continue.");
+      return;
+    }
+    setPendingAction(true);
+    setExpenseConversionError("");
+    try {
+      await convertPurchaseOrderToExpense(expenseConversionRecord.id, expenseCategoryId, expensePaymentAccountId || undefined);
+      setExpenseConversionRecord(null);
+      setActionMessage("Purchase order recorded as an expense.");
+      router.refresh();
+    } catch (error) {
+      setExpenseConversionError(error instanceof Error ? error.message : "We couldn’t record this purchase order as an expense.");
     } finally {
       setPendingAction(false);
     }
@@ -526,6 +564,42 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => setPaymentRecord(null)}>Cancel</Button>
             <Button type="submit" form="invoice-payment-form" disabled={pendingAction || !paymentMethod}>{pendingAction ? "Recording…" : "Record payment"}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(expenseConversionRecord)} onOpenChange={(open) => { if (!open) setExpenseConversionRecord(null); }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Record purchase as expense</DialogTitle>
+            <DialogDescription>
+              {expenseConversionRecord?.data.poNumber} · {expenseConversionRecord?.data.vendor} · {formatCurrency(Number(expenseConversionRecord?.data.amount || 0), expenseConversionRecord?.data.currency || defaultCurrency)}
+            </DialogDescription>
+          </DialogHeader>
+          <form id="purchase-order-expense-form" onSubmit={submitExpenseConversion} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="purchase-order-expense-category">Expense category</Label>
+              <Select value={expenseCategoryId || undefined} onValueChange={(value) => setExpenseCategoryId(value ?? "")}>
+                <SelectTrigger id="purchase-order-expense-category" className="w-full"><SelectValue placeholder="Choose a category" /></SelectTrigger>
+                <SelectContent>{expenseAccounts.map((account) => <SelectItem key={account.id} value={account.id}>{account.data.name || account.data.code || "Expense account"}</SelectItem>)}</SelectContent>
+              </Select>
+              {!expenseAccounts.length ? <p className="text-xs leading-5 text-muted-foreground">Add an Expense category in Chart of Accounts before recording this expense.</p> : null}
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="purchase-order-expense-payment">Paid from (optional)</Label>
+              <Select value={expensePaymentAccountId || "none"} onValueChange={(value) => setExpensePaymentAccountId(value === "none" ? "" : value ?? "")}>
+                <SelectTrigger id="purchase-order-expense-payment" className="w-full"><SelectValue placeholder="Choose a payment account" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Not paid yet</SelectItem>
+                  {paymentAccounts.map((account) => <SelectItem key={account.id} value={account.id}>{paymentAccountLabel(account)}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            {expenseConversionError ? <p role="alert" className="text-sm text-destructive">{expenseConversionError}</p> : null}
+          </form>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setExpenseConversionRecord(null)}>Cancel</Button>
+            <Button type="submit" form="purchase-order-expense-form" disabled={pendingAction || !expenseCategoryId}>{pendingAction ? "Recording…" : "Record expense"}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

@@ -8,7 +8,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import type { ModuleDefinition } from "@/lib/bookkeeping-config";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
 
-export type RecordActionKind = "convert" | "payment" | "send" | "send-rfq" | "confirm-order" | "receive-order" | "cancel-order" | "mark-paid" | "match" | "apply-credit" | "generate" | "duplicate" | "share" | "print";
+export type RecordActionKind = "convert" | "convert-expense" | "payment" | "send" | "send-rfq" | "confirm-order" | "receive-order" | "cancel-order" | "mark-paid" | "match" | "apply-credit" | "generate" | "duplicate" | "share" | "print";
 
 interface RecordTableProps {
   module: ModuleDefinition;
@@ -84,6 +84,15 @@ function displayValue(record: BookkeepingRecord, key: string) {
     : record.data[key] ?? "";
   if (!value) return <span className="text-muted-foreground/60">—</span>;
   if (key === "status") {
+    if (record.kind === "purchase-orders" && record.data.convertedKind) {
+      const conversionLabel = record.data.convertedKind === "expenses" ? "Expense recorded" : "Bill created";
+      return (
+        <span className="flex flex-col items-start gap-1">
+          <span className="inline-flex max-w-full truncate rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground ring-1 ring-inset ring-border">{value}</span>
+          <span className="text-[10px] font-medium text-primary">{conversionLabel}</span>
+        </span>
+      );
+    }
     const tone = value === "Paid" || value === "Accepted" || value === "Applied" || value === "Converted"
       ? "bg-accent text-accent-foreground ring-border"
       : value === "Overdue" || value === "Declined" || value === "Cancelled"
@@ -117,13 +126,15 @@ function displayValue(record: BookkeepingRecord, key: string) {
 function rowActions(module: ModuleDefinition, record: BookkeepingRecord, onAction: RecordTableProps["onAction"]) {
   const actions: { kind: RecordActionKind; label: string; icon: typeof ArrowRightLeft }[] = [];
   const purchaseStatus = record.data.status === "Sent" ? "RFQ Sent" : record.data.status || "Draft";
-  const canCancelPurchaseOrder = module.kind === "purchase-orders" && ["Draft", "RFQ Sent", "Purchase Order"].includes(purchaseStatus);
+  const hasAccountingRecord = Boolean(record.data.convertedRecordId || record.data.convertedKind);
+  const canCancelPurchaseOrder = module.kind === "purchase-orders" && ["Draft", "RFQ Sent", "Purchase Order"].includes(purchaseStatus) && !hasAccountingRecord;
+  const canConvertPurchaseOrder = module.kind === "purchase-orders" && ["Purchase Order", "Received"].includes(purchaseStatus) && !hasAccountingRecord;
   if (module.kind === "purchase-orders") {
     const status = record.data.status === "Sent" ? "RFQ Sent" : record.data.status || "Draft";
     if (status === "Draft") actions.push({ kind: "send-rfq", label: "Send RFQ", icon: Mail });
     else if (status === "RFQ Sent") actions.push({ kind: "confirm-order", label: "Confirm", icon: BadgeCheck });
     else if (status === "Purchase Order") actions.push({ kind: "receive-order", label: "Receive", icon: PackageCheck });
-    else if (status === "Received") actions.push({ kind: "convert", label: "Create bill", icon: ArrowRightLeft });
+    else if (status === "Received" && canConvertPurchaseOrder) actions.push({ kind: "convert", label: "Create bill", icon: ArrowRightLeft });
   } else if (["estimates", "sales-orders"].includes(module.kind)) actions.push({ kind: "convert", label: "Convert", icon: ArrowRightLeft });
   if (module.kind === "invoices") actions.push({ kind: "payment", label: "Record payment", icon: CircleDollarSign }, { kind: "send", label: "Send invoice", icon: Mail });
   if (["estimates", "sales-orders", "credit-notes"].includes(module.kind)) actions.push({ kind: "send", label: `Send ${module.label.toLowerCase()}`, icon: Mail });
@@ -139,11 +150,17 @@ function rowActions(module: ModuleDefinition, record: BookkeepingRecord, onActio
           <Icon size={13} />{label}
         </Button>
       ))}
-      {canCancelPurchaseOrder ? (
+      {module.kind === "purchase-orders" && (canCancelPurchaseOrder || canConvertPurchaseOrder) ? (
         <DropdownMenu>
           <DropdownMenuTrigger render={<Button type="button" variant="outline" size="icon-sm" aria-label="More purchase order actions"><Ellipsis size={15} /></Button>} />
           <DropdownMenuContent align="end">
-            <DropdownMenuItem className="text-destructive focus:text-destructive" onClick={() => onAction("cancel-order", record)}><Ban size={14} />Cancel purchase order</DropdownMenuItem>
+            {canConvertPurchaseOrder ? (
+              <>
+                {purchaseStatus === "Purchase Order" ? <DropdownMenuItem onClick={() => onAction("convert", record)}><ArrowRightLeft size={14} />Create bill</DropdownMenuItem> : null}
+                <DropdownMenuItem onClick={() => onAction("convert-expense", record)}><CircleDollarSign size={14} />Record as expense</DropdownMenuItem>
+              </>
+            ) : null}
+            {canCancelPurchaseOrder ? <DropdownMenuItem className="text-destructive focus:text-destructive" onClick={() => onAction("cancel-order", record)}><Ban size={14} />Cancel purchase order</DropdownMenuItem> : null}
           </DropdownMenuContent>
         </DropdownMenu>
       ) : ["invoices", "estimates", "sales-orders", "credit-notes"].includes(module.kind) ? (

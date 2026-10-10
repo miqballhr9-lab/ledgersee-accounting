@@ -224,7 +224,7 @@ export const modules: readonly ModuleDefinition[] = [
   },
   {
     slug: "purchase-orders", kind: "purchase-orders", label: "Purchase order", plural: "Purchase orders",
-    description: "Send vendor RFQs, confirm orders, receive products, and create bills.", titleKey: "poNumber",
+    description: "Confirm vendor orders, receive products, and record purchases as bills or expenses.", titleKey: "poNumber",
     columns: ["poNumber", "vendor", "date", "expectedDate", "amount", "status"],
     fields: [
       { key: "poNumber", label: "PO number", required: true },
