@@ -24,7 +24,7 @@ import {
 } from "@/app/actions";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuLabel, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuGroup, DropdownMenuLabel, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -571,17 +571,19 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
                 <DropdownMenu>
                   <DropdownMenuTrigger render={<Button type="button" variant="outline" className="gap-2"><SlidersHorizontal size={15} />Columns</Button>} />
                   <DropdownMenuContent align="end" className="min-w-48">
-                    <DropdownMenuLabel>Show columns</DropdownMenuLabel>
-                    {CUSTOMER_COLUMN_OPTIONS.map((column) => (
-                      <DropdownMenuCheckboxItem
-                        key={column.key}
-                        checked={customerPreferences.columns.includes(column.key)}
-                        disabled={column.key === "name"}
-                        onCheckedChange={(checked) => updateCustomerColumn(column.key, checked === true)}
-                      >
-                        {column.label}
-                      </DropdownMenuCheckboxItem>
-                    ))}
+                    <DropdownMenuGroup>
+                      <DropdownMenuLabel>Show columns</DropdownMenuLabel>
+                      {CUSTOMER_COLUMN_OPTIONS.map((column) => (
+                        <DropdownMenuCheckboxItem
+                          key={column.key}
+                          checked={customerPreferences.columns.includes(column.key)}
+                          disabled={column.key === "name"}
+                          onCheckedChange={(checked) => updateCustomerColumn(column.key, checked === true)}
+                        >
+                          {column.label}
+                        </DropdownMenuCheckboxItem>
+                      ))}
+                    </DropdownMenuGroup>
                   </DropdownMenuContent>
                 </DropdownMenu>
                 <Select
