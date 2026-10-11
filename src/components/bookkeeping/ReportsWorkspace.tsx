@@ -87,7 +87,7 @@ function csvCell(value: string | number) {
 function groupTotals(records: BookkeepingRecord[], groupKey: string) {
   const grouped = new Map<string, { count: number; amount: number }>();
   records.forEach((record) => {
-    const categories = groupKey === "category" && record.kind === "expenses"
+    const categories = groupKey === "category" && (record.kind === "expenses" || record.kind === "bills")
       ? expenseLinesFromData(record.data).map((line) => ({ name: line.category || "Uncategorized", amount: line.amount }))
       : [{ name: record.data[groupKey] || "Uncategorized", amount: rowAmount(record) }];
     categories.forEach(({ name, amount }) => {
@@ -106,12 +106,9 @@ function buildReport(key: ReportKey, records: BookkeepingRecord[], asOfDate: str
   if (key === "profit-loss") {
     const income = invoices.reduce((sum, invoice) => sum + Math.max(0, rowAmount(invoice) - rowAmount(invoice, "creditApplied")), 0);
     const expenseTotal = [...bills, ...expenses].reduce((sum, expense) => sum + rowAmount(expense), 0);
-    const billCostOfSales = bills
-      .filter((record) => {
-        const category = record.data.category?.toLowerCase() ?? "";
-        return category.includes("cost") || category.includes("direct");
-      })
-      .reduce((sum, record) => sum + rowAmount(record), 0);
+    const billCostOfSales = bills.reduce((sum, record) => sum + expenseLinesFromData(record.data)
+      .filter((line) => line.category.toLowerCase().includes("cost") || line.category.toLowerCase().includes("direct"))
+      .reduce((lineSum, line) => lineSum + line.amount, 0), 0);
     const expenseCostOfSales = expenses.reduce((sum, record) => sum + expenseLinesFromData(record.data)
       .filter((line) => line.category.toLowerCase().includes("cost") || line.category.toLowerCase().includes("direct"))
       .reduce((lineSum, line) => lineSum + line.amount, 0), 0);

@@ -14,6 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { moduleBySlug, type ModuleDefinition } from "@/lib/bookkeeping-config";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
+import { expenseCategoryLabel, expenseLinesFromData } from "@/lib/expense-utils";
 
 interface BillsWorkspaceProps {
   records: BookkeepingRecord[];
@@ -79,26 +80,21 @@ export default function BillsWorkspace({ records: initialRecords, vendors, accou
 
   const categories = useMemo(() => [...new Set([
     ...accounts.filter((account) => account.kind === "accounts" && account.data.type === "Expense" && account.data.locked !== "true").map((account) => account.data.name),
-    ...records.map((record) => record.data.category),
+    ...records.flatMap((record) => expenseLinesFromData(record.data).map((line) => line.category)),
   ].filter((name): name is string => Boolean(name?.trim())))].sort((left, right) => left.localeCompare(right)), [accounts, records]);
 
   const editorModule = useMemo(() => {
     const baseModule = moduleBySlug("bills");
     if (!baseModule) return null;
-    const fields = baseModule.fields.map((field) => field.key === "category"
-      ? { ...field, type: "select" as const, options: categories }
-      : field);
-    const fieldOrder = ["vendor", "billNumber", "billDate", "dueDate", "category", "amount", "paymentMethod", "description", "status"];
-    fields.sort((left, right) => fieldOrder.indexOf(left.key) - fieldOrder.indexOf(right.key));
-    return { ...baseModule, fields };
-  }, [categories]);
+    return baseModule;
+  }, []);
 
   const filteredRecords = useMemo(() => {
     const normalizedSearch = search.trim().toLocaleLowerCase();
     return records.filter((record) => {
       const status = billStatus(record, asOfDate);
       const matchesStatus = statusFilter === "all" || (statusFilter === "open" ? ["Open", "Partially Paid", "Overdue"].includes(status) : status.toLowerCase() === statusFilter);
-      const matchesCategory = categoryFilter === "all" || record.data.category === categoryFilter;
+      const matchesCategory = categoryFilter === "all" || expenseLinesFromData(record.data).some((line) => line.category === categoryFilter);
       const matchesSearch = !normalizedSearch || [record.data.billNumber, record.data.vendor, record.data.description, record.data.category]
         .some((value) => value?.toLocaleLowerCase().includes(normalizedSearch));
       return matchesStatus && matchesCategory && matchesSearch;
@@ -117,6 +113,7 @@ export default function BillsWorkspace({ records: initialRecords, vendors, accou
       billNumber: `BILL-${String(records.length + 1).padStart(4, "0")}`,
       billDate: asOfDate,
       dueDate: dueDate.toISOString().slice(0, 10),
+      paymentTerms: "30 days",
       paymentMethod: "Credit",
       paidAmount: "0",
       status: "Open",
@@ -176,7 +173,7 @@ export default function BillsWorkspace({ records: initialRecords, vendors, accou
       record.data.vendor || "",
       record.data.billDate || "",
       record.data.dueDate || "",
-      record.data.category || "",
+      expenseCategoryLabel(record.data),
       record.data.amount || "0",
       record.data.paidAmount || "0",
       amountDue(record).toFixed(2),
@@ -271,7 +268,7 @@ export default function BillsWorkspace({ records: initialRecords, vendors, accou
                     <TableCell className="whitespace-nowrap text-[13px] text-muted-foreground">{record.data.billNumber || "—"}</TableCell>
                     <TableCell className="whitespace-nowrap text-[13px]">{formatDate(record.data.billDate || "")}</TableCell>
                     <TableCell className={`whitespace-nowrap text-[13px] ${status === "Overdue" ? "font-medium text-destructive" : ""}`}>{formatDate(record.data.dueDate || "")}</TableCell>
-                    <TableCell className="max-w-[170px] truncate text-[13px] text-muted-foreground" title={record.data.category || ""}>{record.data.category || "—"}</TableCell>
+                    <TableCell className="max-w-[170px] truncate text-[13px] text-muted-foreground" title={expenseCategoryLabel(record.data)}>{expenseCategoryLabel(record.data) || "—"}</TableCell>
                     <TableCell className="whitespace-nowrap text-right text-[13px] tabular-nums">{formatMoney(Number(record.data.amount || 0), currency)}</TableCell>
                     <TableCell className="whitespace-nowrap text-right text-[13px] font-medium tabular-nums">{formatMoney(amountDue(record), currency)}</TableCell>
                     <TableCell className="whitespace-nowrap"><span className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium ${statusClass(status)}`}>{status}</span></TableCell>

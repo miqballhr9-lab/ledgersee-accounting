@@ -86,9 +86,7 @@ export function budgetActualRecords(line: BudgetLine, records: BookkeepingRecord
       if (record.kind !== "expenses" && record.kind !== "bills") return false;
       if (record.data.status === "Cancelled") return false;
       if (allCosts) return true;
-      return record.kind === "expenses"
-        ? expenseLinesFromData(record.data).some((expenseLine) => expenseLine.category.toLocaleLowerCase() === budgetHead)
-        : record.data.category?.trim().toLocaleLowerCase() === budgetHead;
+      return expenseLinesFromData(record.data).some((expenseLine) => expenseLine.category.toLocaleLowerCase() === budgetHead);
     });
 }
 
@@ -96,7 +94,7 @@ export function budgetActual(line: BudgetLine, records: BookkeepingRecord[]) {
   return budgetActualRecords(line, records).reduce((sum, record) => {
     if (record.kind === "payroll") return sum + (Number(record.data.grossSalary) || 0);
     if (record.kind === "invoices") return sum + Math.max(0, (Number(record.data.amount) || 0) - (Number(record.data.creditApplied) || 0));
-    if (record.kind === "expenses") {
+    if (record.kind === "expenses" || record.kind === "bills") {
       const budgetHead = line.budgetHead.trim().toLocaleLowerCase();
       const allCosts = ["expenses", "all expenses", "operating expenses", "all costs"].includes(budgetHead);
       return sum + expenseLinesFromData(record.data)

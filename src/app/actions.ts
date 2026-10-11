@@ -1,6 +1,6 @@
 "use server";
 
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { randomBytes } from "node:crypto";
 import { revalidatePath } from "next/cache";
 
@@ -98,20 +98,21 @@ function sanitizePayload(input: Record<string, string>): Record<string, string> 
 }
 
 function amountFromLineItems(data: Record<string, string>, kind: string): Record<string, string> {
-  if (kind === "expenses" && !data.lineItems?.trim()) throw new Error("Add at least one expense line with a category and amount.");
+  const categoryLines = kind === "expenses" || kind === "bills";
+  if (categoryLines && !data.lineItems?.trim()) throw new Error(`Add at least one ${kind === "bills" ? "bill" : "expense"} line with a category and amount.`);
   if (!data.lineItems?.trim()) return data;
 
   const lines = parseInvoiceLines(data.lineItems);
   if (lines.length === 0 || lines.some((line) => {
     const quantity = Number(line.quantity);
     const rate = Number(line.rate);
-    return !line.name.trim() || !Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(rate) || rate < (kind === "expenses" ? Number.EPSILON : 0);
+    return !line.name.trim() || !Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(rate) || rate < (categoryLines ? Number.EPSILON : 0);
   })) {
-    throw new Error(kind === "expenses" ? "Each expense line needs a category and an amount greater than zero." : "Check that each item has a name, quantity, and non-negative rate.");
+    throw new Error(categoryLines ? "Each line needs a category and an amount greater than zero." : "Check that each item has a name, quantity, and non-negative rate.");
   }
 
   const subtotal = lines.reduce((total, line) => total + Number(line.quantity) * Number(line.rate), 0);
-  if (kind === "expenses") return { ...data, subtotal: subtotal.toFixed(2), amount: subtotal.toFixed(2) };
+  if (categoryLines) return { ...data, subtotal: subtotal.toFixed(2), amount: subtotal.toFixed(2) };
   const taxRate = Math.max(0, Number(data.taxRate) || 0);
   const discount = Math.max(0, Number(data.discount) || 0);
   if (taxRate > 100) throw new Error("Tax rate can’t be greater than 100%.");
@@ -284,6 +285,7 @@ export async function saveBookkeepingRecord(
     if (!calculatedDueDate) throw new Error("Choose an issue date and valid payment terms.");
     data = { ...data, paymentTerms, dueDate: calculatedDueDate };
   }
+  if (!id && kind === "bills" && !data.status) data = { ...data, status: "Open" };
   if (!id && (kind === "invoices" || kind === "bills")) {
     const selectedAccountId = data.paymentMethod || "Credit";
     let paymentMethod = "Credit";
@@ -1062,7 +1064,7 @@ export async function convertBookkeepingRecord(id: string): Promise<void> {
 
     const today = new Date().toISOString().slice(0, 10);
     const sourceData = source.data;
-    const targetData = amountFromLineItems({
+    let targetData = amountFromLineItems({
       ...sourceData,
       ...(targetKind === "invoices"
         ? {
@@ -1080,7 +1082,34 @@ export async function convertBookkeepingRecord(id: string): Promise<void> {
             paidAmount: "0",
             status: "Open",
           }),
-    }, targetKind);
+    }, sourceKind === "purchase-orders" ? sourceKind : targetKind);
+    if (sourceKind === "purchase-orders") {
+      // Bills record spending by category, not product lines: the purchase order
+      // total (tax and discount included) becomes one line under the supplier's
+      // default expense category, or Cost of goods sold.
+      const [vendor] = sourceData.vendor
+        ? await transaction.select().from(bookkeepingRecord)
+          .where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "vendors"), sql`${bookkeepingRecord.data}->>'name' = ${sourceData.vendor}`))
+          .limit(1)
+        : [];
+      const [defaultAccount] = vendor?.data.defaultExpenseAccount
+        ? await transaction.select().from(bookkeepingRecord)
+          .where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "accounts"), eq(bookkeepingRecord.id, vendor.data.defaultExpenseAccount)))
+          .limit(1)
+        : [];
+      const category = defaultAccount?.data.name?.trim() || "Cost of goods sold";
+      const products = parseInvoiceLines(sourceData.lineItems ?? "").map((line) => `${line.name} × ${line.quantity}`).join(", ");
+      const description = `Purchase order ${sourceData.poNumber || ""}${products ? `: ${products}` : ""}`.trim().slice(0, 400);
+      targetData = {
+        ...targetData,
+        purchaseLineItems: sourceData.lineItems ?? "",
+        lineItems: JSON.stringify([{ itemId: "", name: category, description, quantity: "1", rate: targetData.amount || "0" }]),
+        category,
+        description,
+        paymentTerms: "30 days",
+        dueDate: dueDateForTerms(today, "30 days"),
+      };
+    }
     const [created] = await transaction.insert(bookkeepingRecord)
       .values({ userId: me.id, kind: targetKind, data: sourceKind === "purchase-orders" ? { ...targetData, sourcePurchaseOrderId: source.id, sourcePurchaseOrderNumber: sourceData.poNumber || "" } : targetData })
       .returning({ id: bookkeepingRecord.id });

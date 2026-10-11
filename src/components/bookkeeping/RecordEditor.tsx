@@ -64,6 +64,8 @@ interface ExpenseEntryLine {
 
 const structuredLineKinds = new Set(["invoices", "estimates", "sales-orders", "credit-notes", "recurring-invoices", "purchase-orders"]);
 const shareableDocumentKinds = new Set(["invoices", "estimates", "sales-orders", "credit-notes"]);
+/** Expenses and bills share the category · description · amount line editor. */
+const categoryLineKinds = new Set(["expenses", "bills"]);
 
 function getInitialValues(module: ModuleDefinition, record: BookkeepingRecord | null, defaults: Record<string, string>, customers: BookkeepingRecord[]) {
   const values: Record<string, string> = {
@@ -196,6 +198,9 @@ export default function RecordEditor({ module, record, customers, vendors, items
       if (module.kind === "invoices" && (key === "issueDate" || key === "paymentTerms")) {
         next.dueDate = dueDateForTerms(next.issueDate ?? "", next.paymentTerms ?? "30 days");
       }
+      if (module.kind === "bills" && (key === "billDate" || key === "paymentTerms") && next.paymentTerms) {
+        next.dueDate = dueDateForTerms(next.billDate ?? "", next.paymentTerms) || next.dueDate;
+      }
       return next;
     });
   }
@@ -292,7 +297,7 @@ export default function RecordEditor({ module, record, customers, vendors, items
         return;
       }
     }
-    if (module.kind === "expenses") {
+    if (categoryLineKinds.has(module.kind)) {
       const enteredLines = expenseLines.filter((line) => line.category.trim() || line.description.trim() || line.amount.trim());
       const invalidLine = enteredLines.findIndex((line) => !line.category.trim() || !Number.isFinite(Number(line.amount)) || Number(line.amount) <= 0);
       if (!enteredLines.length || invalidLine !== -1) {
@@ -351,7 +356,7 @@ export default function RecordEditor({ module, record, customers, vendors, items
             ...normalizedValues,
             displayName: normalizedValues.name?.trim() || normalizedValues.company?.trim() || "",
           }
-        : module.kind === "expenses"
+        : categoryLineKinds.has(module.kind)
         ? {
             ...normalizedValues,
             category: expenseCategories.length > 1 ? "Multiple categories" : expenseCategories[0] ?? "",
@@ -469,14 +474,14 @@ export default function RecordEditor({ module, record, customers, vendors, items
                     </div>
                   ) : (
                     <Label
-                      id={(hasStructuredLines || module.kind === "expenses") && field.key === "lineItems" ? `${module.kind}-line-items-label` : undefined}
+                      id={(hasStructuredLines || categoryLineKinds.has(module.kind)) && field.key === "lineItems" ? `${module.kind}-line-items-label` : undefined}
                       htmlFor={`field-${field.key}`}
                     >
                       {field.label}{field.required ? <span className="ml-1 text-destructive">*</span> : null}
                     </Label>
                   )}
 
-                  {field.type === "textarea" && !(hasStructuredLines && field.key === "lineItems") && !(module.kind === "expenses" && field.key === "lineItems") ? (
+                  {field.type === "textarea" && !(hasStructuredLines && field.key === "lineItems") && !(categoryLineKinds.has(module.kind) && field.key === "lineItems") ? (
                     <Textarea
                       id={`field-${field.key}`}
                       value={value}
@@ -658,7 +663,15 @@ export default function RecordEditor({ module, record, customers, vendors, items
                             changeValue(field.key, vendor.data.name);
                             if (module.kind === "bills" && vendor.data.defaultExpenseAccount) {
                               const expenseAccount = expenseAccounts.find((account) => account.id === vendor.data.defaultExpenseAccount);
-                              if (expenseAccount?.data.name) changeValue("category", expenseAccount.data.name);
+                              const categoryName = expenseAccount?.data.name?.trim();
+                              if (categoryName) {
+                                // Prefill the first empty bill line with the supplier's default category.
+                                setExpenseLines((current) => {
+                                  const target = current.findIndex((line) => !line.category.trim());
+                                  if (target === -1) return current;
+                                  return current.map((line, index) => index === target ? { ...line, category: categoryName } : line);
+                                });
+                              }
                             }
                           }
                         }}
@@ -691,8 +704,8 @@ export default function RecordEditor({ module, record, customers, vendors, items
                     </Select>
                   ) : null}
 
-                  {module.kind === "expenses" && field.key === "lineItems" ? (
-                    <div className="space-y-3" role="group" aria-labelledby="expenses-line-items-label">
+                  {categoryLineKinds.has(module.kind) && field.key === "lineItems" ? (
+                    <div className="space-y-3" role="group" aria-labelledby={`${module.kind}-line-items-label`}>
                       <div className="space-y-3">
                         {expenseLines.map((line, index) => {
                           const selectedAccount = expenseCategories.find((account) => account.data.name === line.category);
@@ -843,7 +856,7 @@ export default function RecordEditor({ module, record, customers, vendors, items
                   ) : null}
                   {module.kind === "expenses" && field.key === "payee" ? <datalist id="expense-payees">{vendorOptions.map((vendor) => <option value={vendor.data.name} key={vendor.id} />)}</datalist> : null}
 
-                  {field.help && field.type !== "file" && field.type !== "checkbox" && !(field.key === "paymentMethod" && !paymentAccounts.length && !record) && !(hasStructuredLines && field.key === "lineItems") && !(module.kind === "expenses" && field.key === "lineItems") ? <p className="text-xs leading-5 text-muted-foreground">{field.help}</p> : null}
+                  {field.help && field.type !== "file" && field.type !== "checkbox" && !(field.key === "paymentMethod" && !paymentAccounts.length && !record) && !(hasStructuredLines && field.key === "lineItems") && !(categoryLineKinds.has(module.kind) && field.key === "lineItems") ? <p className="text-xs leading-5 text-muted-foreground">{field.help}</p> : null}
                 </div>
                 </Fragment>
               );

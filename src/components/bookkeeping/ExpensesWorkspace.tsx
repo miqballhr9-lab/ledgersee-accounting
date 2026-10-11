@@ -16,6 +16,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { moduleBySlug, type ModuleDefinition } from "@/lib/bookkeeping-config";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
 import { expenseCategoryLabel, expenseLinesFromData } from "@/lib/expense-utils";
+import { dueDateForTerms } from "@/lib/invoice-utils";
 import { paymentAccountLabel, paymentAccountType } from "@/lib/payment-accounts";
 
 interface ExpensesWorkspaceProps {
@@ -81,6 +82,8 @@ function createDefaults(kind: "bills" | "expenses", records: BookkeepingRecord[]
     const nextNumber = records.filter((record) => record.kind === "bills").length + 1;
     values.billNumber = `BILL-${String(nextNumber).padStart(4, "0")}`;
     values.billDate = asOfDate;
+    values.paymentTerms = "30 days";
+    values.dueDate = dueDateForTerms(asOfDate, "30 days");
     values.paymentMethod = "Credit";
     values.paidAmount = "0";
     values.status = "Open";
@@ -110,9 +113,7 @@ export default function ExpensesWorkspace({ expenses: initialExpenses, bills: in
   const pageSize = 10;
   const expenseCategories = accounts.filter((account) => account.kind === "accounts" && account.data.type === "Expense" && account.data.locked !== "true");
   const paymentAccounts = accounts.filter((account) => paymentAccountType(account));
-  const transactionCategories = [...new Set(records.flatMap((record) => record.kind === "expenses"
-    ? expenseLinesFromData(record.data).map((line) => line.category).filter(Boolean)
-    : record.data.category ? [record.data.category] : []))].sort((left, right) => left.localeCompare(right));
+  const transactionCategories = [...new Set(records.flatMap((record) => expenseLinesFromData(record.data).map((line) => line.category).filter(Boolean)))].sort((left, right) => left.localeCompare(right));
   const statuses = [...new Set(records.map((record) => record.data.status).filter((status): status is string => Boolean(status)))].sort();
   const cutoff = dateCutoff(datePreset, asOfDate);
 
@@ -127,9 +128,7 @@ export default function ExpensesWorkspace({ expenses: initialExpenses, bills: in
         const matchesDate = datePreset === "custom"
           ? (!customStart || date >= customStart) && (!customEnd || date <= customEnd)
           : !cutoff || date >= cutoff;
-        const matchesCategory = categoryFilter === "all" || (record.kind === "expenses"
-          ? expenseLinesFromData(record.data).some((line) => line.category === categoryFilter)
-          : record.data.category === categoryFilter);
+        const matchesCategory = categoryFilter === "all" || expenseLinesFromData(record.data).some((line) => line.category === categoryFilter);
         const matchesStatus = statusFilter === "all" || record.data.status === statusFilter;
         const matchesSearch = !normalizedSearch || Object.values(record.data).some((value) => value.toLocaleLowerCase().includes(normalizedSearch));
         return matchesType && matchesDate && matchesCategory && matchesStatus && matchesSearch;
@@ -236,7 +235,7 @@ export default function ExpensesWorkspace({ expenses: initialExpenses, bills: in
       record.kind === "bills" ? "Bill" : "Expense",
       record.kind === "bills" ? record.data.billNumber || record.data.description || "" : record.data.description || "",
       record.kind === "bills" ? record.data.vendor || "" : record.data.payee || "",
-      record.kind === "expenses" ? expenseCategoryLabel(record.data) : record.data.category || "",
+      expenseCategoryLabel(record.data),
       record.kind === "bills" ? record.data.paymentAccountName || record.data.paymentMethod || "" : record.data.paymentAccount || "",
       record.data.amount || "",
       record.data.status || "",
@@ -345,7 +344,7 @@ export default function ExpensesWorkspace({ expenses: initialExpenses, bills: in
                     <TableCell className="text-[13px]">{isBill ? "Bill" : "Expense"}</TableCell>
                     <TableCell className="max-w-[240px] text-[13px] font-medium"><span className="block truncate" title={title || ""}>{title || "—"}</span></TableCell>
                     <TableCell className="max-w-[180px] text-[13px]"><span className="block truncate" title={payee || ""}>{payee || "—"}</span></TableCell>
-                    <TableCell className="max-w-[200px] text-[13px]"><span className="block truncate" title={record.kind === "expenses" ? expenseCategoryLabel(record.data) : record.data.category || ""}>{(record.kind === "expenses" ? expenseCategoryLabel(record.data) : record.data.category) || "—"}</span></TableCell>
+                    <TableCell className="max-w-[200px] text-[13px]"><span className="block truncate" title={expenseCategoryLabel(record.data)}>{expenseCategoryLabel(record.data) || "—"}</span></TableCell>
                     <TableCell className="max-w-[200px] text-[13px]"><span className="block truncate" title={payment || ""}>{payment || "—"}</span></TableCell>
                     <TableCell className="text-right text-[13px] font-medium tabular-nums">{formatMoney(record.data.amount || "", currency)}</TableCell>
                     <TableCell className="text-[13px]">
