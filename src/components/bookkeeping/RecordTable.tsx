@@ -86,6 +86,7 @@ const columnLabels: Record<string, string> = {
   department: "Department",
   joiningDate: "Joined",
   baseSalary: "Base salary",
+  mobile: "Mobile",
   creditAccount: "Credit",
   reference: "Reference",
   memo: "Memo",

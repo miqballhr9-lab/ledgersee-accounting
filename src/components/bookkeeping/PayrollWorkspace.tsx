@@ -179,6 +179,7 @@ export default function PayrollWorkspace({ records, accounts, employees = [], as
       designation: employee.data.designation || previous.designation,
       joiningDate: employee.data.joiningDate || previous.joiningDate,
       baseSalary: employee.data.baseSalary || previous.baseSalary,
+      paymentAccountId: accounts.some((account) => account.id === employee.data.paymentAccountId) ? employee.data.paymentAccountId : previous.paymentAccountId,
     }));
   }
 
@@ -482,7 +483,7 @@ export default function PayrollWorkspace({ records, accounts, employees = [], as
               <div className="grid gap-4 sm:grid-cols-2">{employeeFields.map(renderInputField)}</div>
               <div className="space-y-1.5">
                 <Label htmlFor="payroll-payment-account">Salary payment account</Label>
-                <Select value={values.paymentAccountId || undefined} onValueChange={(value) => updateField("paymentAccountId", value ?? "")}>
+                <Select value={values.paymentAccountId || null} onValueChange={(value) => updateField("paymentAccountId", value ?? "")}>
                   <SelectTrigger id="payroll-payment-account" className="w-full">
                     <SelectValue placeholder={paymentAccounts.length ? "Choose a Cash, Bank, or Credit card account" : "Add an account in Chart of Accounts first"} />
                   </SelectTrigger>

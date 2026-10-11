@@ -815,7 +815,20 @@ export default function RecordEditor({ module, record, customers, vendors, items
                     </>
                   ) : null}
 
-                  {field.type === "select" && field.key !== "defaultExpenseAccount" && !(field.key === "paymentMethod" && (module.kind === "invoices" || module.kind === "bills")) ? (
+                  {module.kind === "employees" && field.key === "paymentAccountId" ? (
+                    <>
+                      <Select value={value || null} onValueChange={(nextValue) => changeValue(field.key, nextValue ?? "")}>
+                        <SelectTrigger id={`field-${field.key}`} className="w-full">
+                          <SelectValue placeholder={paymentAccounts.length ? "Choose a Cash, Bank, or Credit card account" : "Add an account in Chart of Accounts first"} />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {paymentAccounts.map((account) => <SelectItem key={account.id} value={account.id}>{paymentAccountLabel(account)}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </>
+                  ) : null}
+
+                  {field.type === "select" && field.key !== "defaultExpenseAccount" && !(module.kind === "employees" && field.key === "paymentAccountId") && !(field.key === "paymentMethod" && (module.kind === "invoices" || module.kind === "bills")) ? (
                     <Select value={value || undefined} onValueChange={(nextValue) => changeValue(field.key, nextValue ?? "")}>
                       <SelectTrigger id={`field-${field.key}`} className="w-full">
                         <SelectValue placeholder="Choose an option" />
