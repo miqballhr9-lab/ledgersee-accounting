@@ -878,7 +878,7 @@ export async function sendBudgetSummary(id: string, recipient: string): Promise<
   const sourceRows = await db
     .select()
     .from(bookkeepingRecord)
-    .where(and(eq(bookkeepingRecord.userId, me.id), inArray(bookkeepingRecord.kind, ["invoices", "bills", "expenses", "settings"])));
+    .where(and(eq(bookkeepingRecord.userId, me.id), inArray(bookkeepingRecord.kind, ["invoices", "bills", "expenses", "payroll", "settings"])));
   const records = sourceRows.map(serializeRow);
   const budgetData = recordsWithinBudgetDates(records, budget.data.startDate ?? "", budget.data.endDate ?? "");
   const lines = parseBudgetLines(budget.data.lines);
