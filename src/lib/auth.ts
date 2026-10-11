@@ -49,7 +49,25 @@ const authHosts = (process.env.IMAGINE_AUTH_HOSTS ?? "")
   .map((h) => h.trim())
   .filter(Boolean);
 
-const staticBaseURL = process.env.BETTER_AUTH_URL ?? process.env.NEXT_PUBLIC_SITE_URL;
+/**
+ * On Vercel the same deployment answers on its production domain, its branch URL
+ * and its own deployment URL. Vercel injects each exact hostname, so they are
+ * pinned here rather than matched with a broad wildcard.
+ */
+const vercelHosts = [
+  process.env.VERCEL_PROJECT_PRODUCTION_URL,
+  process.env.VERCEL_BRANCH_URL,
+  process.env.VERCEL_URL,
+].filter((h): h is string => Boolean(h));
+
+const allowedHosts = authHosts.length > 0 ? authHosts : vercelHosts;
+
+const staticBaseURL =
+  process.env.BETTER_AUTH_URL ??
+  process.env.NEXT_PUBLIC_SITE_URL ??
+  (process.env.VERCEL_PROJECT_PRODUCTION_URL
+    ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
+    : undefined);
 
 /**
  * Make the session cookie usable when this app is shown inside an iframe.
@@ -155,13 +173,13 @@ export const auth = betterAuth({
     ? { advanced: { defaultCookieAttributes: framedCookieAttributes } }
     : {}),
   baseURL:
-    authHosts.length > 0
+    allowedHosts.length > 0
       ? {
-          allowedHosts: authHosts,
+          allowedHosts,
           protocol: "https" as const,
           // Used when the Host is absent or unrecognised — e.g. a background job
           // with no request in hand. Without it Better Auth throws instead.
-          fallback: staticBaseURL ?? `https://${authHosts[0].replace(/^\*\./, "")}`,
+          fallback: staticBaseURL ?? `https://${allowedHosts[0].replace(/^\*\./, "")}`,
         }
       : // No host list (an app built before this, or a plain local run): keep the
         // previous single-origin behaviour rather than changing it silently.

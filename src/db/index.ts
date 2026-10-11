@@ -59,7 +59,14 @@ const globalForDatabase = globalThis as typeof globalThis & { __mikledgerDatabas
  * it with the conventional variable set.
  */
 function connectionUrl(): string | undefined {
-  return process.env.IMAGINE_DATABASE_URL ?? process.env.DATABASE_URL;
+  return (
+    process.env.IMAGINE_DATABASE_URL ??
+    process.env.DATABASE_URL ??
+    // Vercel's Neon integration, connected with the custom prefix `DATABASE`.
+    process.env.DATABASE_DATABASE_URL ??
+    process.env.DATABASE_POSTGRES_URL ??
+    process.env.POSTGRES_URL
+  );
 }
 
 function connect(): Database {
@@ -117,6 +124,9 @@ export const hasDatabase = (): boolean => Boolean(connectionUrl());
 export const directUrl = (): string =>
   process.env.IMAGINE_DATABASE_URL_UNPOOLED ??
   process.env.DATABASE_URL_UNPOOLED ??
+  process.env.DATABASE_DATABASE_URL_UNPOOLED ??
+  process.env.DATABASE_POSTGRES_URL_NON_POOLING ??
+  process.env.POSTGRES_URL_NON_POOLING ??
   connectionUrl() ??
   "";
 

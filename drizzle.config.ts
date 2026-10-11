@@ -18,8 +18,15 @@ export default {
     url:
       process.env.IMAGINE_DATABASE_URL_UNPOOLED ??
       process.env.DATABASE_URL_UNPOOLED ??
+      // Vercel's Neon integration, connected with the custom prefix `DATABASE`.
+      process.env.DATABASE_DATABASE_URL_UNPOOLED ??
+      process.env.DATABASE_POSTGRES_URL_NON_POOLING ??
+      process.env.POSTGRES_URL_NON_POOLING ??
       process.env.IMAGINE_DATABASE_URL ??
       process.env.DATABASE_URL ??
+      process.env.DATABASE_DATABASE_URL ??
+      process.env.DATABASE_POSTGRES_URL ??
+      process.env.POSTGRES_URL ??
       "",
   },
   // Never touch anything the app did not define. The database is shared with the

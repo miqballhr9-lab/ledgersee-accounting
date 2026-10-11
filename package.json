@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "vercel-build": "drizzle-kit push --force && next build",
     "start": "next start",
     "lint": "eslint",
     "db:push": "drizzle-kit push",
