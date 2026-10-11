@@ -283,6 +283,18 @@ export async function saveBookkeepingRecord(
       row.data.employeeId?.toLowerCase() === data.employeeId.toLowerCase(),
     );
     if (duplicate) throw new ActionError("That employee already has a payroll entry for this month.");
+    // Editing a paid salary keeps its payment; Undo payment is how it becomes unpaid again.
+    const existing = id ? payrollRows.find((row) => row.id === id) : undefined;
+    if (existing?.data.status === "Paid") {
+      data = {
+        ...data,
+        status: "Paid",
+        paidDate: existing.data.paidDate || "",
+        paymentAccountId: existing.data.paymentAccountId || "",
+        paymentAccountName: existing.data.paymentAccountName || "",
+        paymentMethod: existing.data.paymentMethod || "",
+      };
+    }
   }
   if (kind === "invoices") {
     const paymentTerms = data.paymentTerms || "30 days";
@@ -776,11 +788,15 @@ export async function importPayrollCsv(input: string): Promise<{ created: number
   let created = 0;
   let updated = 0;
 
-  for (const data of imported) {
+  for (let data of imported) {
     const existing = payrollRows.find((row) =>
       row.data.month === data.month && row.data.employeeId?.toLowerCase() === data.employeeId.toLowerCase(),
     );
     if (existing) {
+      // A re-imported salary that was already paid keeps its payment.
+      if (existing.data.status === "Paid") {
+        data = { ...data, status: "Paid", paidDate: existing.data.paidDate || "", paymentAccountId: existing.data.paymentAccountId || "", paymentAccountName: existing.data.paymentAccountName || "", paymentMethod: existing.data.paymentMethod || "" };
+      }
       await db
         .update(bookkeepingRecord)
         .set({ data, updatedAt: new Date() })
@@ -1149,6 +1165,41 @@ export async function recordExpensePayment(id: string, paymentDate: string, acco
   await db
     .update(bookkeepingRecord)
     .set({ data: { ...expense.data, status: "Paid", paymentAccount: `${method} · ${name}`, paymentAccountId: account.id, paymentDate }, updatedAt: new Date() })
+    .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id)));
+  revalidatePath("/app", "layout");
+}
+
+/** Records a salary as paid from a Cash, Bank or Credit card account. */
+export async function recordPayrollPayment(id: string, paymentDate: string, accountId: string): Promise<void> {
+  const me = await requireUser();
+  if (!isPaymentDate(paymentDate)) throw new ActionError("Choose a payment date.");
+  const { account, method, name } = await findPaymentAccount(me.id, accountId);
+  const [entry] = await db
+    .select()
+    .from(bookkeepingRecord)
+    .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "payroll")))
+    .limit(1);
+  if (!entry) throw new ActionError("We couldn’t find that payroll entry. Refresh and try again.");
+  if (entry.data.status === "Paid") throw new ActionError(`${entry.data.employeeName || "This salary"} is already paid.`);
+  await db
+    .update(bookkeepingRecord)
+    .set({ data: { ...entry.data, status: "Paid", paidDate: paymentDate, paymentAccountId: account.id, paymentAccountName: name, paymentMethod: method }, updatedAt: new Date() })
+    .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id)));
+  revalidatePath("/app", "layout");
+}
+
+/** Clears the payment recorded on a salary so it shows as unpaid again. */
+export async function undoPayrollPayment(id: string): Promise<void> {
+  const me = await requireUser();
+  const [entry] = await db
+    .select()
+    .from(bookkeepingRecord)
+    .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "payroll")))
+    .limit(1);
+  if (!entry) throw new ActionError("We couldn’t find that payroll entry. Refresh and try again.");
+  await db
+    .update(bookkeepingRecord)
+    .set({ data: { ...entry.data, status: "Unpaid", paidDate: "" }, updatedAt: new Date() })
     .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id)));
   revalidatePath("/app", "layout");
 }

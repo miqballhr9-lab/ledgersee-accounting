@@ -2,14 +2,16 @@
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
+import PaymentDialog from "@/components/bookkeeping/PaymentDialog";
 import PayrollSheet from "@/components/bookkeeping/PayrollSheet";
+import { paymentAccountType } from "@/lib/payment-accounts";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowDownToLine, ArrowUpDown, Banknote, CalendarDays, ChevronDown, CircleDollarSign, Copy, FileSpreadsheet, FileText, FileUp, Mail, Pencil, Plus, Printer, SlidersHorizontal, Trash2, Users } from "lucide-react";
+import { ArrowDownToLine, ArrowUpDown, Banknote, CalendarDays, ChevronDown, CircleDollarSign, Copy, FileSpreadsheet, FileText, FileUp, ListChecks, Mail, Pencil, Plus, Printer, SlidersHorizontal, Trash2, Undo2, Users } from "lucide-react";
 import { toast } from "sonner";
 import { readableError } from "@/lib/action-error";
 
-import { deleteBookkeepingRecord, importPayrollCsv, sendPayrollSlip } from "@/app/actions";
+import { deleteBookkeepingRecord, importPayrollCsv, recordPayrollPayment, sendPayrollSlip, undoPayrollPayment } from "@/app/actions";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -22,6 +24,7 @@ import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
 
 interface PayrollWorkspaceProps {
   records: BookkeepingRecord[];
+  accounts: BookkeepingRecord[];
   /** Saved employees, offered as a picker that fills in the employee details. */
   employees?: BookkeepingRecord[];
   asOfDate: string;
@@ -70,7 +73,7 @@ interface PayrollColumn {
 }
 
 const PAYROLL_COLUMNS_KEY = "mikledger:payroll-columns:v1";
-const DEFAULT_PAYROLL_COLUMNS = ["reference", "employee", "designation", "days", "paymentAccount", "grossSalary", "tax", "otherDeductions", "payable", "description"];
+const DEFAULT_PAYROLL_COLUMNS = ["reference", "employee", "designation", "days", "paymentAccount", "grossSalary", "tax", "otherDeductions", "payable", "status", "description"];
 
 function payrollColumns(): PayrollColumn[] {
   const money = (value: string | undefined) => formatRupees(Number(value || 0));
@@ -109,13 +112,20 @@ function payrollColumns(): PayrollColumn[] {
     { key: "tax", label: "Tax", align: "right", render: (record) => money(record.data.taxDeduction) },
     { key: "otherDeductions", label: "Other deductions", align: "right", render: (record) => formatRupees(Math.max(0, Number(record.data.totalDeductions || 0) - Number(record.data.taxDeduction || 0))) },
     { key: "payable", label: "Payable", align: "right", render: (record) => <span className="font-semibold">{money(record.data.payableSalary)}</span> },
+    {
+      key: "status",
+      label: "Status",
+      render: (record) => record.data.status === "Paid"
+        ? <span className="inline-flex flex-col"><span className="inline-flex w-fit rounded-full bg-accent px-2 py-0.5 text-[11px] font-medium text-accent-foreground">Paid</span>{record.data.paidDate ? <span className="mt-0.5 text-[11px] text-muted-foreground">{record.data.paidDate}</span> : null}</span>
+        : <span className="inline-flex rounded-full bg-secondary px-2 py-0.5 text-[11px] font-medium text-secondary-foreground">Unpaid</span>,
+    },
     { key: "description", label: "Description", render: (record) => <span className="block max-w-56 truncate text-muted-foreground">{record.data.description || "—"}</span> },
   ];
 }
 
 const PAYROLL_COLUMNS = payrollColumns();
 
-export default function PayrollWorkspace({ records, employees = [], asOfDate, dateRange }: PayrollWorkspaceProps) {
+export default function PayrollWorkspace({ records, accounts, employees = [], asOfDate, dateRange }: PayrollWorkspaceProps) {
   const router = useRouter();
   const uploadRef = useRef<HTMLInputElement>(null);
   const currentMonth = asOfDate.slice(0, 7);
@@ -126,6 +136,9 @@ export default function PayrollWorkspace({ records, employees = [], asOfDate, da
   const [search, setSearch] = useState("");
   const sheetCount = useRef(0);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
+  const [paymentTargets, setPaymentTargets] = useState<BookkeepingRecord[] | null>(null);
+  const [isPaying, setIsPaying] = useState(false);
+  const paymentAccounts = accounts.filter((account) => paymentAccountType(account));
   const [sheet, setSheet] = useState<{ key: number; month: string; copyFrom?: BookkeepingRecord } | null>(null);
   const [isDeleting, setIsDeleting] = useState("");
   const [isSending, setIsSending] = useState("");
@@ -237,6 +250,57 @@ export default function PayrollWorkspace({ records, employees = [], asOfDate, da
   const visibleIds = filteredRecords.map((record) => record.id);
   const selectedRecords = filteredRecords.filter((record) => selectedIds.has(record.id));
   const allSelected = visibleIds.length > 0 && visibleIds.every((id) => selectedIds.has(id));
+
+  function startPayment() {
+    const unpaid = selectedRecords.filter((record) => record.data.status !== "Paid");
+    if (!selectedRecords.length) toast.info("Select payroll rows with the checkboxes first.");
+    else if (!unpaid.length) toast.info("The selected salaries are already paid.");
+    else setPaymentTargets(unpaid);
+  }
+
+  async function payTargets(date: string, accountId: string) {
+    const targets = paymentTargets ?? [];
+    setIsPaying(true);
+    let paid = 0;
+    const account = paymentAccounts.find((item) => item.id === accountId);
+    const paidData = { status: "Paid", paidDate: date, paymentAccountId: accountId, paymentAccountName: account?.data.name || account?.data.code || "Account", paymentMethod: account ? paymentAccountType(account) ?? "" : "" };
+    for (const record of targets) {
+      try {
+        await recordPayrollPayment(record.id, date, accountId);
+        setSavedRecords((previous) => previous.map((item) => (item.id === record.id ? { ...item, data: { ...item.data, ...paidData } } : item)));
+        paid += 1;
+      } catch (error) {
+        toast.error(`${record.data.employeeName || "Salary"}: ${errorMessage(error)}`);
+      }
+    }
+    setIsPaying(false);
+    setPaymentTargets(null);
+    setSelectedIds(new Set());
+    if (paid) toast.success(`Recorded payment for ${paid} ${paid === 1 ? "salary" : "salaries"}.`);
+    router.refresh();
+  }
+
+  async function undoSelectedPayments() {
+    const paid = selectedRecords.filter((record) => record.data.status === "Paid");
+    if (!paid.length) {
+      toast.info("None of the selected salaries are marked paid.");
+      return;
+    }
+    if (!window.confirm(`Remove the payment on ${paid.length} ${paid.length === 1 ? "salary" : "salaries"}? They will show as unpaid again.`)) return;
+    setIsPaying(true);
+    for (const record of paid) {
+      try {
+        await undoPayrollPayment(record.id);
+        setSavedRecords((previous) => previous.map((item) => (item.id === record.id ? { ...item, data: { ...item.data, status: "Unpaid", paidDate: "" } } : item)));
+      } catch (error) {
+        toast.error(`${record.data.employeeName || "Salary"}: ${errorMessage(error)}`);
+      }
+    }
+    setIsPaying(false);
+    setSelectedIds(new Set());
+    toast.success("Payment removed.");
+    router.refresh();
+  }
 
   async function deleteSelected() {
     if (!selectedRecords.length) {
@@ -370,10 +434,15 @@ export default function PayrollWorkspace({ records, employees = [], asOfDate, da
                   <DropdownMenuItem onClick={() => void exportPayrollExcel()}><FileSpreadsheet size={15} />Excel (.xlsx)</DropdownMenuItem>
                   <DropdownMenuItem onClick={() => window.print()}><Printer size={15} />Print or save as PDF</DropdownMenuItem>
                 </DropdownMenuGroup>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <DropdownMenu>
+              <DropdownMenuTrigger render={<Button type="button" variant="outline" className="gap-2" disabled={!selectedRecords.length || isPaying || isDeleting === "bulk"} title={selectedRecords.length ? undefined : "Select payroll rows with the checkboxes first"}><ListChecks size={15} />{isPaying ? "Working…" : `Actions${selectedRecords.length ? ` (${selectedRecords.length})` : ""}`}<ChevronDown size={14} /></Button>} />
+              <DropdownMenuContent align="end" className="min-w-48">
+                <DropdownMenuItem onClick={startPayment}><CircleDollarSign size={15} />Record payment</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => void undoSelectedPayments()}><Undo2 size={15} />Undo payment</DropdownMenuItem>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem variant="destructive" disabled={!selectedRecords.length || isDeleting === "bulk"} onClick={() => void deleteSelected()}>
-                  <Trash2 size={15} />{selectedRecords.length ? `Delete selected (${selectedRecords.length})` : "Delete selected"}
-                </DropdownMenuItem>
+                <DropdownMenuItem variant="destructive" onClick={() => void deleteSelected()}><Trash2 size={15} />Delete</DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
@@ -438,6 +507,18 @@ export default function PayrollWorkspace({ records, employees = [], asOfDate, da
       </section>
 
       <p className="text-xs leading-5 text-muted-foreground">Tax is estimated from Pakistan’s Tax Year 2027 salaried-income slabs using annualized monthly gross pay, assuming salary is more than 75% of taxable income. Review exemptions, benefits, and final withholding with your tax adviser.</p>
+
+      <PaymentDialog
+        open={paymentTargets !== null}
+        onOpenChange={(next) => { if (!next) setPaymentTargets(null); }}
+        title="Record salary payment"
+        description={paymentTargets?.length === 1 ? `Pay ${paymentTargets[0].data.employeeName || "this employee"}’s salary for ${monthLabel(paymentTargets[0].data.month || selectedMonth)}.` : `Pay ${paymentTargets?.length ?? 0} selected salaries from one account.`}
+        accountLabel="Paid from (Bank, Cash or Credit card)"
+        submitLabel="Record payment"
+        paymentAccounts={paymentAccounts}
+        pending={isPaying}
+        onSubmit={(date, accountId) => void payTargets(date, accountId)}
+      />
 
       {sheet ? (
         <PayrollSheet
