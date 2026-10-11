@@ -450,7 +450,7 @@ export default function PayrollWorkspace({ records, accounts, employees = [], as
       <p className="text-xs leading-5 text-muted-foreground">Tax is estimated from Pakistan’s Tax Year 2027 salaried-income slabs using annualized monthly gross pay, assuming salary is more than 75% of taxable income. Review exemptions, benefits, and final withholding with your tax adviser.</p>
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-[680px]">
+        <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-[min(980px,calc(100vw-3rem))]">
           <DialogHeader className="pr-8">
             <DialogTitle>{editingId ? "Edit payroll entry" : "Add payroll entry"}</DialogTitle>
             <DialogDescription>Enter the employee’s salary and attendance. Gross pay, estimated tax, deductions, and payable salary update below.</DialogDescription>
@@ -480,7 +480,7 @@ export default function PayrollWorkspace({ records, accounts, employees = [], as
                   Fills in the details below from the <Link href="/app/employees" className="text-primary underline-offset-4 hover:underline">Employees</Link> list. You can still change them for this month.
                 </p>
               </div>
-              <div className="grid gap-x-6 gap-y-4 sm:grid-cols-2">{employeeFields.map(renderInputField)}</div>
+              <div className="grid gap-x-6 gap-y-4 sm:grid-cols-2 md:grid-cols-3">{employeeFields.map(renderInputField)}</div>
               <div className="space-y-1.5">
                 <Label htmlFor="payroll-payment-account">Salary payment account</Label>
                 <Select value={values.paymentAccountId || null} onValueChange={(value) => updateField("paymentAccountId", value ?? "")}>
@@ -515,7 +515,7 @@ export default function PayrollWorkspace({ records, accounts, employees = [], as
 
             <section className="space-y-4">
               <h3 className="border-b border-border pb-2 pt-1 text-sm font-semibold">Earnings</h3>
-              <div className="grid gap-x-6 gap-y-4 sm:grid-cols-2">{earningsFields.map(renderInputField)}</div>
+              <div className="grid gap-x-6 gap-y-4 sm:grid-cols-2 md:grid-cols-3">{earningsFields.map(renderInputField)}</div>
               <div className="grid gap-4 rounded-lg border border-border bg-muted/40 p-4 sm:grid-cols-3">
                 <div><p className="text-xs text-muted-foreground">After increment</p><p className="mt-1 font-semibold tabular-nums">{formatRupees(totals.revisedSalary)}</p></div>
                 <div><p className="text-xs text-muted-foreground">Attendance-adjusted basic</p><p className="mt-1 font-semibold tabular-nums">{formatRupees(totals.proratedSalary)}</p></div>
@@ -525,7 +525,7 @@ export default function PayrollWorkspace({ records, accounts, employees = [], as
 
             <section className="space-y-4">
               <h3 className="border-b border-border pb-2 pt-1 text-sm font-semibold">Tax and deductions</h3>
-              <div className="grid gap-x-6 gap-y-4 sm:grid-cols-2">
+              <div className="grid gap-x-6 gap-y-4 sm:grid-cols-2 md:grid-cols-3">
                 <div className="space-y-1.5">
                   <div className="flex items-center justify-between gap-2">
                     <Label htmlFor="payroll-tax">Income tax (PKR)</Label>
