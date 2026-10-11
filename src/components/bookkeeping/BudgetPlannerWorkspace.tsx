@@ -13,7 +13,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectSeparator, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { budgetActual, budgetActualRecords, budgetExpectedTotal, budgetPresetRange, budgetVariance, csvCell, parseBudgetLines, parseCsv, recordsWithinBudgetDates, type BudgetCategory, type BudgetLine, type BudgetPeriod } from "@/lib/budget-utils";
+import { budgetActual, budgetActualRecords, budgetExpectedTotal, budgetPresetRange, budgetVariance, csvCell, parseBudgetLines, payrollBudgetHeads, parseCsv, recordsWithinBudgetDates, type BudgetCategory, type BudgetLine, type BudgetPeriod } from "@/lib/budget-utils";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
 
 interface BudgetPlannerWorkspaceProps {
@@ -160,13 +160,13 @@ export default function BudgetPlannerWorkspace({ budgets, financialRecords, acco
     category: "Sales",
     type: "Income",
   }];
-  const payrollHeads: BudgetHeadOption[] = [{
-    value: "payroll:gross-salary",
-    label: "Gross Salary",
-    budgetHead: "Gross Salary",
+  const payrollHeads: BudgetHeadOption[] = payrollBudgetHeads.map((item) => ({
+    value: `payroll:${item.head.toLocaleLowerCase().replace(/[^a-z0-9]+/g, "-")}`,
+    label: item.head,
+    budgetHead: item.head,
     category: "Payroll",
     type: "Expense",
-  }];
+  }));
   const knownHeadSignatures = new Set([...accountHeads, ...salesHeads, ...payrollHeads].map((option) => `${option.category}:${option.budgetHead.toLocaleLowerCase()}`));
   const savedHeadMap = new Map<string, BudgetHeadOption>();
   savedBudgets.flatMap((budget) => parseBudgetLines(budget.data.lines)).forEach((line) => {

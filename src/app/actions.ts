@@ -16,7 +16,7 @@ import { isRecordKind, type BookkeepingRecord, type RecordKind } from "@/lib/boo
 import { paymentAccountType } from "@/lib/payment-accounts";
 import { accountCategoryForType, accountDetailsForType } from "@/lib/account-types";
 import { standardAccounts } from "@/lib/standard-accounts";
-import { budgetActual, budgetExpectedTotal, budgetVariance, parseBudgetLines, parseCsv, recordsWithinBudgetDates, type BudgetCategory, type BudgetLine, type BudgetLineType, type BudgetPeriod } from "@/lib/budget-utils";
+import { budgetActual, budgetExpectedTotal, payrollBudgetHead, budgetVariance, parseBudgetLines, parseCsv, recordsWithinBudgetDates, type BudgetCategory, type BudgetLine, type BudgetLineType, type BudgetPeriod } from "@/lib/budget-utils";
 import { calculatePayroll, payrollCsvFields, serializePayroll, type PayrollValues } from "@/lib/payroll-utils";
 import { MAX_ITEM_IMPORT_ROWS, type ItemImportData, type ItemImportRow } from "@/lib/item-import";
 import { MAX_INVENTORY_COUNT_ROWS, type InventoryCountRow } from "@/lib/inventory-import";
@@ -710,7 +710,7 @@ export async function saveBudgetPlan(input: unknown, id?: string): Promise<Bookk
     const type: BudgetLineType = category === "Sales" ? "Income" : "Expense";
     const amount = typeof line.expected === "string" || typeof line.expected === "number" ? Number(line.expected) : Number.NaN;
     if (!budgetHead) throw new ActionError(`Choose a budget head for line ${index + 1}.`);
-    if (category === "Payroll" && budgetHead.toLocaleLowerCase() !== "gross salary") throw new ActionError(`Choose Gross Salary for payroll line ${index + 1}.`);
+    if (category === "Payroll" && !payrollBudgetHead(budgetHead)) throw new ActionError(`Choose one of the payroll heads for line ${index + 1}.`);
     if (!Number.isFinite(amount) || amount < 0 || amount > 1_000_000_000_000) throw new ActionError(`Enter a valid expected amount for line ${index + 1}.`);
     return { category, budgetHead, type, expected: (Math.round(amount * 100) / 100).toFixed(2), description: descriptionText };
   });

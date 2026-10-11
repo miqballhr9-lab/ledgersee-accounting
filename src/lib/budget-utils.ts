@@ -63,6 +63,29 @@ export function recordsWithinBudgetDates(records: BookkeepingRecord[], startDate
   });
 }
 
+/** Payroll budget heads and the payroll entry fields whose total is each head's actual. */
+export const payrollBudgetHeads = [
+  { head: "Base Salary", fields: ["baseSalary"] },
+  { head: "Increment", fields: ["increment"] },
+  { head: "Incentive", fields: ["incentive"] },
+  { head: "Overtime", fields: ["overtimeAllowance"] },
+  { head: "Gym Allowance", fields: ["gymAllowance"] },
+  { head: "Medical Allowance", fields: ["medicalAllowance"] },
+  { head: "Other Allowance", fields: ["otherAllowance"] },
+  { head: "Total Allowances", fields: ["incentive", "overtimeAllowance", "gymAllowance", "medicalAllowance", "otherAllowance"] },
+  { head: "Gross Salary", fields: ["grossSalary"] },
+  { head: "Tax", fields: ["taxDeduction"] },
+  { head: "Advance / Loan", fields: ["advanceDeduction", "loanDeduction"] },
+  { head: "Fine", fields: ["fineDeduction"] },
+  { head: "Other Adjustment", fields: ["adjustment"] },
+  { head: "Payable Salary", fields: ["payableSalary"] },
+] as const;
+
+export function payrollBudgetHead(name: string) {
+  const key = name.trim().toLocaleLowerCase();
+  return payrollBudgetHeads.find((item) => item.head.toLocaleLowerCase() === key);
+}
+
 export function budgetActualRecords(line: BudgetLine, records: BookkeepingRecord[]) {
   const budgetHead = line.budgetHead.trim().toLocaleLowerCase();
   if (!budgetHead) return [];
@@ -92,7 +115,10 @@ export function budgetActualRecords(line: BudgetLine, records: BookkeepingRecord
 
 export function budgetActual(line: BudgetLine, records: BookkeepingRecord[]) {
   return budgetActualRecords(line, records).reduce((sum, record) => {
-    if (record.kind === "payroll") return sum + (Number(record.data.grossSalary) || 0);
+    if (record.kind === "payroll") {
+      const fields: readonly string[] = payrollBudgetHead(line.budgetHead)?.fields ?? ["grossSalary"];
+      return sum + fields.reduce((fieldTotal, field) => fieldTotal + (Number(record.data[field]) || 0), 0);
+    }
     if (record.kind === "invoices") return sum + Math.max(0, (Number(record.data.amount) || 0) - (Number(record.data.creditApplied) || 0));
     if (record.kind === "expenses" || record.kind === "bills") {
       const budgetHead = line.budgetHead.trim().toLocaleLowerCase();
