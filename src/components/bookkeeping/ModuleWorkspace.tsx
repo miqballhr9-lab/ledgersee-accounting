@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import Image from "next/image";
-import { ArrowDownToLine, ArrowRightLeft, BadgeCheck, ChevronDown, CircleDollarSign, ClipboardList, FileCheck2, FileText, ListChecks, Plus, Search, SlidersHorizontal, Trash2, Undo2, WalletCards } from "lucide-react";
+import { ArrowDownToLine, ArrowRightLeft, BadgeCheck, ChevronDown, CircleDollarSign, ClipboardList, FileCheck2, FileText, ListChecks, Plus, Printer, Search, Share, SlidersHorizontal, Trash2, Undo2, WalletCards } from "lucide-react";
 import { readableError } from "@/lib/action-error";
 
 import {
@@ -29,7 +29,7 @@ import {
 } from "@/app/actions";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -58,29 +58,103 @@ interface ModuleWorkspaceProps {
 }
 
 const DEFAULT_PAGE_SIZE = 10;
-const CUSTOMER_PAGE_SIZES = [50, 75, 100, 150, 300] as const;
-type CustomerPageSize = (typeof CUSTOMER_PAGE_SIZES)[number];
-
-const CUSTOMER_COLUMN_OPTIONS = [
-  { key: "name", label: "Name" },
-  { key: "company", label: "Company" },
-  { key: "email", label: "Email" },
-  { key: "phone", label: "Phone" },
-  { key: "address", label: "Address" },
-  { key: "openingBalance", label: "Opening balance" },
-] as const;
-type CustomerListColumn = (typeof CUSTOMER_COLUMN_OPTIONS)[number]["key"];
-
-const DEFAULT_CUSTOMER_COLUMNS: CustomerListColumn[] = ["name", "company", "email", "phone", "openingBalance"];
-const CUSTOMER_PREFERENCES_KEY = "mikledger:customer-list-preferences:v1";
-
-interface CustomerListPreferences {
-  columns: CustomerListColumn[];
-  pageSize: CustomerPageSize;
+interface ListColumnOption {
+  key: string;
+  label: string;
 }
 
-function isCustomerListColumn(value: unknown): value is CustomerListColumn {
-  return CUSTOMER_COLUMN_OPTIONS.some((column) => column.key === value);
+/** A list whose columns and page size each viewer can choose; the choice is kept in this browser. */
+interface ListCustomization {
+  storageKey: string;
+  options: readonly ListColumnOption[];
+  defaultColumns: readonly string[];
+  requiredColumn: string;
+  pageSizes: readonly number[];
+  defaultPageSize: number;
+}
+
+interface ListPreferences {
+  columns: string[];
+  pageSize: number;
+}
+
+const LIST_CUSTOMIZATIONS: Partial<Record<string, ListCustomization>> = {
+  customers: {
+    storageKey: "mikledger:customer-list-preferences:v1",
+    options: [
+      { key: "name", label: "Name" },
+      { key: "company", label: "Company" },
+      { key: "email", label: "Email" },
+      { key: "phone", label: "Phone" },
+      { key: "address", label: "Address" },
+      { key: "openingBalance", label: "Opening balance" },
+    ],
+    defaultColumns: ["name", "company", "email", "phone", "openingBalance"],
+    requiredColumn: "name",
+    pageSizes: [50, 75, 100, 150, 300],
+    defaultPageSize: 50,
+  },
+  journals: {
+    storageKey: "mikledger:journal-list-preferences:v1",
+    options: [
+      { key: "date", label: "Date" },
+      { key: "entryType", label: "Type" },
+      { key: "reference", label: "Ref no." },
+      { key: "contact", label: "Contact" },
+      { key: "dueDate", label: "Due date" },
+      { key: "balance", label: "Balance" },
+      { key: "amount", label: "Amount" },
+      { key: "memo", label: "Memo/Description" },
+      { key: "debitAccount", label: "Debit account" },
+      { key: "creditAccount", label: "Credit account" },
+      { key: "lastModified", label: "Last modified date" },
+      { key: "status", label: "Status" },
+    ],
+    defaultColumns: ["date", "entryType", "reference", "contact", "dueDate", "balance", "amount", "memo", "lastModified", "status"],
+    requiredColumn: "reference",
+    pageSizes: [10, 25, 50, 100],
+    defaultPageSize: 25,
+  },
+};
+
+function readListPreferences(customization: ListCustomization): ListPreferences | null {
+  try {
+    const stored = window.localStorage.getItem(customization.storageKey);
+    if (!stored) return null;
+    const parsed: unknown = JSON.parse(stored);
+    if (typeof parsed !== "object" || parsed === null) return null;
+    const preferences = parsed as Record<string, unknown>;
+    const columns = Array.isArray(preferences.columns)
+      ? customization.options.map((option) => option.key).filter((key) => (preferences.columns as unknown[]).includes(key))
+      : [...customization.defaultColumns];
+    if (!columns.includes(customization.requiredColumn)) columns.unshift(customization.requiredColumn);
+    const pageSize = customization.pageSizes.find((size) => size === preferences.pageSize) ?? customization.defaultPageSize;
+    return { columns, pageSize };
+  } catch {
+    return null;
+  }
+}
+
+/** Journals store their lines as JSON; the list shows a few values worked out from them. */
+function withJournalListFields(record: BookkeepingRecord): BookkeepingRecord {
+  let names: string[] = [];
+  try {
+    const lines: unknown = JSON.parse(record.data.lines || "[]");
+    if (Array.isArray(lines)) names = lines.map((line) => (typeof line?.name === "string" ? line.name.trim() : "")).filter(Boolean);
+  } catch {
+    names = [];
+  }
+  return {
+    ...record,
+    data: {
+      ...record.data,
+      entryType: "Journal",
+      contact: [...new Set(names)].join(", "),
+      balance: "0",
+      lastModified: record.updatedAt ? record.updatedAt.replace("T", " ").slice(0, 16) : "",
+      status: record.data.status || "Posted",
+    },
+  };
 }
 
 function dateString(date: Date) {
@@ -187,8 +261,7 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("all");
   const [page, setPage] = useState(1);
-  const [customerPreferences, setCustomerPreferences] = useState<CustomerListPreferences>({ columns: DEFAULT_CUSTOMER_COLUMNS, pageSize: 50 });
-  const [customerPreferencesReady, setCustomerPreferencesReady] = useState(false);
+  const [storedListPreferences, setStoredListPreferences] = useState<ListPreferences | null>(null);
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingRecord, setEditingRecord] = useState<BookkeepingRecord | null>(null);
   const [defaults, setDefaults] = useState<Record<string, string>>({});
@@ -207,45 +280,23 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
   const [expenseConversionError, setExpenseConversionError] = useState("");
   const paymentAccounts = accounts.filter((account) => paymentAccountType(account));
   const expenseAccounts = accounts.filter((account) => account.kind === "accounts" && account.data.type === "Expense" && account.data.locked !== "true");
-  const pageSize = module.kind === "customers" ? customerPreferences.pageSize : DEFAULT_PAGE_SIZE;
+  const customization = LIST_CUSTOMIZATIONS[module.kind];
+  const listPreferences = customization ? storedListPreferences ?? { columns: [...customization.defaultColumns], pageSize: customization.defaultPageSize } : null;
+  const pageSize = listPreferences?.pageSize ?? DEFAULT_PAGE_SIZE;
 
   useEffect(() => setRecords(initialRecords), [initialRecords]);
 
   useEffect(() => {
-    if (module.kind !== "customers") return;
-    try {
-      const storedPreferences = window.localStorage.getItem(CUSTOMER_PREFERENCES_KEY);
-      if (storedPreferences) {
-        const parsed: unknown = JSON.parse(storedPreferences);
-        if (typeof parsed === "object" && parsed !== null) {
-          const preferences = parsed as Record<string, unknown>;
-          const storedColumns = Array.isArray(preferences.columns)
-            ? Array.from(new Set(preferences.columns.filter(isCustomerListColumn)))
-            : [...DEFAULT_CUSTOMER_COLUMNS];
-          if (!storedColumns.includes("name")) storedColumns.unshift("name");
-          const storedPageSize = CUSTOMER_PAGE_SIZES.find((size) => size === preferences.pageSize) ?? 50;
-          setCustomerPreferences({ columns: storedColumns, pageSize: storedPageSize });
-        }
-      }
-    } catch {
-      setCustomerPreferences({ columns: DEFAULT_CUSTOMER_COLUMNS, pageSize: 50 });
-    }
-    setCustomerPreferencesReady(true);
+    const current = LIST_CUSTOMIZATIONS[module.kind];
+    setStoredListPreferences(current ? readListPreferences(current) : null);
   }, [module.kind]);
-
-  useEffect(() => {
-    if (module.kind !== "customers" || !customerPreferencesReady) return;
-    try {
-      window.localStorage.setItem(CUSTOMER_PREFERENCES_KEY, JSON.stringify(customerPreferences));
-    } catch {
-      return;
-    }
-  }, [customerPreferences, customerPreferencesReady, module.kind]);
 
   const filterKey = ["status", "category", "type", "role", "accountType", "enabled"].find((key) => records.some((record) => record.data[key]));
   const filterOptions = filterKey
     ? [...new Set(records.map((record) => record.data[filterKey]).filter((value): value is string => Boolean(value)))].sort()
     : [];
+
+  const listRecords = useMemo(() => (module.kind === "journals" ? records.map(withJournalListFields) : records), [module.kind, records]);
 
   const filteredRecords = useMemo(() => {
     const normalizedSearch = search.trim().toLowerCase();
@@ -256,14 +307,14 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
       expected: "0",
       description: "",
     } : null;
-    return records.filter((record) => {
+    return listRecords.filter((record) => {
       const matchesSearch = !normalizedSearch || Object.values(record.data).some((value) => value.toLowerCase().includes(normalizedSearch));
       const matchesFilter = filter === "all" || !filterKey || record.data[filterKey] === filter;
       const matchesDateRange = !sourceFilter || recordsWithinBudgetDates([record], sourceFilter.startDate, sourceFilter.endDate).length > 0;
       const matchesBudgetHead = !budgetLine || budgetActualRecords(budgetLine, [record]).length > 0;
       return matchesSearch && matchesFilter && matchesDateRange && matchesBudgetHead;
     });
-  }, [filter, filterKey, module.kind, records, search, sourceFilter]);
+  }, [filter, filterKey, listRecords, module.kind, search, sourceFilter]);
 
   const pageCount = Math.max(1, Math.ceil(filteredRecords.length / pageSize));
   const visibleRecords = filteredRecords.slice((page - 1) * pageSize, page * pageSize);
@@ -274,21 +325,30 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
         return customer?.data.name ? { ...record, data: { ...record.data, customer: customer.data.name } } : record;
       })
     : visibleRecords;
-  const visibleColumns = module.kind === "customers" ? customerPreferences.columns : module.columns;
+  const visibleColumns = listPreferences?.columns ?? module.columns;
+  const listColumnLabels = customization ? Object.fromEntries(customization.options.map((option) => [option.key, option.label])) : undefined;
   const canExport = module.kind !== "settings";
   const currency = records.find((record) => record.data.currency)?.data.currency || "USD";
 
   useEffect(() => setPage(1), [search, filter]);
 
-  function updateCustomerColumn(column: CustomerListColumn, visible: boolean) {
-    setCustomerPreferences((current) => {
-      if (column === "name" && !visible) return current;
-      const columns = visible
-        ? [...new Set([...current.columns, column])]
-        : current.columns.filter((currentColumn) => currentColumn !== column);
-      return { ...current, columns };
-    });
+  function saveListPreferences(next: ListPreferences) {
+    if (!customization) return;
+    setStoredListPreferences(next);
     setPage(1);
+    try {
+      window.localStorage.setItem(customization.storageKey, JSON.stringify(next));
+    } catch {
+      // Private windows can refuse storage; the choice still applies until the page reloads.
+    }
+  }
+
+  function updateListColumn(column: string, visible: boolean) {
+    if (!customization || !listPreferences || (column === customization.requiredColumn && !visible)) return;
+    const chosen = new Set(listPreferences.columns);
+    if (visible) chosen.add(column);
+    else chosen.delete(column);
+    saveListPreferences({ ...listPreferences, columns: customization.options.map((option) => option.key).filter((key) => chosen.has(key)) });
   }
 
   function openNewRecord() {
@@ -647,7 +707,7 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
   }
 
   function exportCsv() {
-    const rows = [visibleColumns, ...filteredRecords.map((record) => visibleColumns.map((key) => key === "address" ? formatCustomerAddress(record.data).replaceAll("\n", ", ") : record.data[key] ?? ""))];
+    const rows = [visibleColumns.map((key) => listColumnLabels?.[key] ?? key), ...filteredRecords.map((record) => visibleColumns.map((key) => key === "address" ? formatCustomerAddress(record.data).replaceAll("\n", ", ") : record.data[key] ?? ""))];
     const csv = rows.map((row) => row.map(toCsvValue).join(",")).join("\r\n");
     const objectUrl = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
     const anchor = document.createElement("a");
@@ -746,19 +806,19 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
                 </SelectContent>
               </Select>
             ) : null}
-            {module.kind === "customers" ? (
+            {module.kind === "customers" && customization && listPreferences ? (
               <>
                 <DropdownMenu>
                   <DropdownMenuTrigger render={<Button type="button" variant="outline" className="gap-2"><SlidersHorizontal size={15} />Columns</Button>} />
                   <DropdownMenuContent align="end" className="min-w-48">
                     <DropdownMenuGroup>
                       <DropdownMenuLabel>Show columns</DropdownMenuLabel>
-                      {CUSTOMER_COLUMN_OPTIONS.map((column) => (
+                      {customization.options.map((column) => (
                         <DropdownMenuCheckboxItem
                           key={column.key}
-                          checked={customerPreferences.columns.includes(column.key)}
-                          disabled={column.key === "name"}
-                          onCheckedChange={(checked) => updateCustomerColumn(column.key, checked === true)}
+                          checked={listPreferences.columns.includes(column.key)}
+                          disabled={column.key === customization.requiredColumn}
+                          onCheckedChange={(checked) => updateListColumn(column.key, checked === true)}
                         >
                           {column.label}
                         </DropdownMenuCheckboxItem>
@@ -767,21 +827,56 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
                   </DropdownMenuContent>
                 </DropdownMenu>
                 <Select
-                  value={String(customerPreferences.pageSize)}
+                  value={String(listPreferences.pageSize)}
                   onValueChange={(value) => {
-                    const nextPageSize = CUSTOMER_PAGE_SIZES.find((size) => String(size) === value);
-                    if (nextPageSize) {
-                      setCustomerPreferences((current) => ({ ...current, pageSize: nextPageSize }));
-                      setPage(1);
-                    }
+                    const nextPageSize = customization.pageSizes.find((size) => String(size) === value);
+                    if (nextPageSize) saveListPreferences({ ...listPreferences, pageSize: nextPageSize });
                   }}
                 >
                   <SelectTrigger className="w-[128px]" aria-label="Customers per page"><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    {CUSTOMER_PAGE_SIZES.map((size) => <SelectItem key={size} value={String(size)}>{size} per page</SelectItem>)}
+                    {customization.pageSizes.map((size) => <SelectItem key={size} value={String(size)}>{size} per page</SelectItem>)}
                   </SelectContent>
                 </Select>
               </>
+            ) : module.kind === "journals" && customization && listPreferences ? (
+              <div className="flex items-center gap-1">
+                <Button type="button" variant="ghost" size="icon" aria-label="Print list" title="Print" onClick={() => window.print()}><Printer size={17} /></Button>
+                <Button type="button" variant="ghost" size="icon" aria-label="Export list as CSV" title="Export" onClick={exportCsv}><Share size={17} /></Button>
+                <DropdownMenu>
+                  <DropdownMenuTrigger render={<Button type="button" variant="ghost" className="gap-2"><SlidersHorizontal size={16} />Customise</Button>} />
+                  <DropdownMenuContent align="end" className="min-w-56">
+                    <DropdownMenuGroup>
+                      <DropdownMenuLabel>Columns</DropdownMenuLabel>
+                      {customization.options.map((column) => (
+                        <DropdownMenuCheckboxItem
+                          key={column.key}
+                          checked={listPreferences.columns.includes(column.key)}
+                          disabled={column.key === customization.requiredColumn}
+                          onCheckedChange={(checked) => updateListColumn(column.key, checked === true)}
+                        >
+                          {column.label}
+                        </DropdownMenuCheckboxItem>
+                      ))}
+                    </DropdownMenuGroup>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuGroup>
+                      <DropdownMenuLabel>Rows per page</DropdownMenuLabel>
+                      <DropdownMenuRadioGroup
+                        value={String(listPreferences.pageSize)}
+                        onValueChange={(value) => {
+                          const nextPageSize = customization.pageSizes.find((size) => String(size) === value);
+                          if (nextPageSize) saveListPreferences({ ...listPreferences, pageSize: nextPageSize });
+                        }}
+                      >
+                        {customization.pageSizes.map((size) => <DropdownMenuRadioItem key={size} value={String(size)}>{size}</DropdownMenuRadioItem>)}
+                      </DropdownMenuRadioGroup>
+                    </DropdownMenuGroup>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onClick={() => saveListPreferences({ columns: [...customization.defaultColumns], pageSize: customization.defaultPageSize })}>Reset to default</DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
             ) : null}
           </div>
         </div>
@@ -790,6 +885,7 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
           module={module}
           records={tableRecords}
           columns={visibleColumns}
+          columnLabels={listColumnLabels}
           onEdit={openEditRecord}
           onDelete={(record) => void handleDelete(record)}
           onAction={(kind, record) => void handleAction(kind, record)}

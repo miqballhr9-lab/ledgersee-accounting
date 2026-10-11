@@ -16,6 +16,8 @@ interface RecordTableProps {
   module: ModuleDefinition;
   records: BookkeepingRecord[];
   columns?: readonly string[];
+  /** Header names that replace the usual ones for this list. */
+  columnLabels?: Record<string, string>;
   onEdit: (record: BookkeepingRecord) => void;
   onDelete: (record: BookkeepingRecord) => void;
   onAction: (kind: RecordActionKind, record: BookkeepingRecord) => void;
@@ -120,7 +122,7 @@ function displayValue(record: BookkeepingRecord, key: string) {
     const active = value === "true";
     return <span className={`inline-flex items-center gap-1.5 text-xs ${active ? "text-primary" : "text-muted-foreground"}`}><span className={`size-1.5 rounded-full ${active ? "bg-primary" : "bg-muted-foreground/40"}`} />{active ? key === "matched" ? "Matched" : "On" : key === "matched" ? "To match" : "Off"}</span>;
   }
-  if (["amount", "paidAmount", "openingBalance", "rate"].includes(key)) {
+  if (["amount", "balance", "paidAmount", "openingBalance", "rate"].includes(key)) {
     const number = Number(value);
     if (Number.isFinite(number)) {
       const currency = record.data.currency || "USD";
@@ -211,7 +213,7 @@ function rowActions(
   );
 }
 
-export default function RecordTable({ module, records, columns = module.columns, onEdit, onDelete, onAction, selection }: RecordTableProps) {
+export default function RecordTable({ module, records, columns = module.columns, columnLabels: headerLabels, onEdit, onDelete, onAction, selection }: RecordTableProps) {
   const allSelected = Boolean(selection) && records.length > 0 && records.every((record) => selection?.selectedIds.has(record.id));
   const someSelected = Boolean(selection) && records.some((record) => selection?.selectedIds.has(record.id));
   if (records.length === 0) {
@@ -240,7 +242,7 @@ export default function RecordTable({ module, records, columns = module.columns,
                 />
               </TableHead>
             ) : null}
-            {columns.map((key) => <TableHead key={key} className="whitespace-nowrap text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">{columnLabels[key] ?? key}</TableHead>)}
+            {columns.map((key) => <TableHead key={key} className="whitespace-nowrap text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">{headerLabels?.[key] ?? columnLabels[key] ?? key}</TableHead>)}
             <TableHead className="w-[170px] text-right text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">Actions</TableHead>
           </TableRow>
         </TableHeader>

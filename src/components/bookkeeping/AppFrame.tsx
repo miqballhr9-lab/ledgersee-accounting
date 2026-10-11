@@ -180,7 +180,7 @@ export default function AppFrame({ userName, userEmail, children }: AppFrameProp
   return (
     <div className="flex h-dvh min-h-[560px] overflow-hidden bg-background text-foreground">
       {menuOpen ? <button type="button" aria-label="Close navigation" className="fixed inset-0 z-30 bg-foreground/30 md:hidden" onClick={() => setMenuOpen(false)} /> : null}
-      <aside className={`fixed inset-y-0 left-0 z-40 flex w-[276px] shrink-0 flex-col bg-sidebar text-sidebar-foreground transition-transform duration-200 ease-out md:static md:translate-x-0 ${menuOpen ? "translate-x-0" : "-translate-x-full"}`}>
+      <aside className={`print:hidden fixed inset-y-0 left-0 z-40 flex w-[276px] shrink-0 flex-col bg-sidebar text-sidebar-foreground transition-transform duration-200 ease-out md:static md:translate-x-0 ${menuOpen ? "translate-x-0" : "-translate-x-full"}`}>
         <div className="flex h-[68px] items-center justify-between border-b border-sidebar-border px-5">
           <Link href="/app" className="brand-lockup group flex min-w-0 items-center" onClick={() => setMenuOpen(false)}>
             <BrandWordmark />
@@ -254,7 +254,7 @@ export default function AppFrame({ userName, userEmail, children }: AppFrameProp
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex h-[68px] shrink-0 items-center justify-between border-b border-border bg-card px-4 sm:px-7">
+        <header className="print:hidden flex h-[68px] shrink-0 items-center justify-between border-b border-border bg-card px-4 sm:px-7">
           <div className="flex min-w-0 items-center gap-3">
             <Button variant="ghost" size="icon" className="-ml-2 md:hidden" onClick={() => setMenuOpen(true)} aria-label="Open navigation">
               <Menu size={19} />
