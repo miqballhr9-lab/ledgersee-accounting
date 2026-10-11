@@ -27,6 +27,8 @@ Open your own file for exactly what you do and what you may write.
 3. You cannot call another agent. Need something outside your job? Tell the user in plain words — they route it.
 4. Keep the product consistent — obey `.project/DESIGN_SYSTEM.md`; don't invent a second look.
 5. Git history is the changelog — one small commit per change.
+6. **Work on the `main` branch.** Commit there and push with `git push -u origin main`.
+   Don't create or push other branches unless the user asks for that specific change.
 
 ## What is already installed (don't rebuild it)
 - Next.js App Router + React 19 + TypeScript strict + Tailwind v4. **Exact versions are
