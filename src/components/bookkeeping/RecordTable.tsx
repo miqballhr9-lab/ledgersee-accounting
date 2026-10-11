@@ -19,6 +19,8 @@ interface RecordTableProps {
   /** Header names that replace the usual ones for this list. */
   columnLabels?: Record<string, string>;
   onEdit: (record: BookkeepingRecord) => void;
+  /** When true, clicking anywhere on a row (outside its buttons and checkbox) opens it with onEdit. */
+  openOnRowClick?: boolean;
   onDelete: (record: BookkeepingRecord) => void;
   onAction: (kind: RecordActionKind, record: BookkeepingRecord) => void;
   /** When given, each row gets a checkbox for actions on several records at once. */
@@ -213,7 +215,7 @@ function rowActions(
   );
 }
 
-export default function RecordTable({ module, records, columns = module.columns, columnLabels: headerLabels, onEdit, onDelete, onAction, selection }: RecordTableProps) {
+export default function RecordTable({ module, records, columns = module.columns, columnLabels: headerLabels, onEdit, openOnRowClick = false, onDelete, onAction, selection }: RecordTableProps) {
   const allSelected = Boolean(selection) && records.length > 0 && records.every((record) => selection?.selectedIds.has(record.id));
   const someSelected = Boolean(selection) && records.some((record) => selection?.selectedIds.has(record.id));
   if (records.length === 0) {
@@ -249,7 +251,15 @@ export default function RecordTable({ module, records, columns = module.columns,
         <TableBody>
           {records.map((record) => {
             return (
-              <TableRow key={record.id} className="group" data-state={selection?.selectedIds.has(record.id) ? "selected" : undefined}>
+              <TableRow
+                key={record.id}
+                className={`group ${openOnRowClick ? "cursor-pointer" : ""}`}
+                data-state={selection?.selectedIds.has(record.id) ? "selected" : undefined}
+                onClick={openOnRowClick ? (event) => {
+                  if ((event.target as HTMLElement).closest("button, a, input, [role=checkbox], [role=menuitem]")) return;
+                  onEdit(record);
+                } : undefined}
+              >
                 {selection ? (
                   <TableCell className="w-10">
                     <Checkbox

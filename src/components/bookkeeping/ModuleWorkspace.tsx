@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import Image from "next/image";
-import { ArrowDownToLine, ArrowRightLeft, BadgeCheck, ChevronDown, CircleDollarSign, ClipboardList, FileCheck2, FileText, ListChecks, Plus, Printer, Search, Share, SlidersHorizontal, Trash2, Undo2, WalletCards } from "lucide-react";
+import { ArrowDownToLine, ArrowRightLeft, BadgeCheck, ChevronDown, CircleDollarSign, ClipboardList, FileCheck2, FileText, FolderOpen, ListChecks, Plus, Printer, Search, Share, SlidersHorizontal, Trash2, Undo2, WalletCards } from "lucide-react";
 import { readableError } from "@/lib/action-error";
 
 import {
@@ -413,7 +413,7 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
   }
 
   // Actions on several checked records at once, offered from the toolbar menu.
-  type BulkAction = "estimates" | "sales-orders" | "invoices" | "expense" | "pay" | "undo-payment" | "apply-credit" | "refund" | "delete";
+  type BulkAction = "estimates" | "sales-orders" | "invoices" | "expense" | "pay" | "undo-payment" | "apply-credit" | "refund" | "open" | "delete";
   const bulkMenu: { label: string; items: { action: BulkAction; label: string }[] } | null = module.kind === "sales-orders"
     ? { label: "Convert", items: [{ action: "estimates", label: "Convert to estimate" }, { action: "invoices", label: "Convert to invoice" }] }
     : module.kind === "estimates"
@@ -427,7 +427,7 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
           : module.kind === "supplier-credits"
             ? { label: "Actions", items: [{ action: "refund", label: "Record refund" }] }
             : module.kind === "journals"
-              ? { label: "Actions", items: [] }
+              ? { label: "Actions", items: [{ action: "open", label: "Open" }] }
               : null;
   const supportsBulkActions = Boolean(bulkMenu);
   const [bulkPaymentOpen, setBulkPaymentOpen] = useState(false);
@@ -478,6 +478,11 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
 
   async function runBulkAction(action: BulkAction) {
     if (!selectedRecords.length) return;
+    if (action === "open") {
+      if (selectedRecords.length > 1) toast.info(`Opening ${selectedRecords[0].data[module.titleKey] || module.label.toLowerCase()}, the first one selected.`);
+      openEditRecord(selectedRecords[0]);
+      return;
+    }
     if (action === "pay" && !bulkPaymentOpen) {
       openBulkPayment();
       return;
@@ -537,6 +542,7 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
       "undo-payment": "reopened as unpaid",
       "apply-credit": "applied",
       refund: "refunded",
+      open: "opened",
       delete: "deleted",
     };
     if (done.length) toast.success(`${done.length} ${done.length === 1 ? module.label.toLowerCase() : module.plural.toLowerCase()} ${verbs[action]}.`);
@@ -793,6 +799,7 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
                           : item.action === "pay" ? CircleDollarSign
                             : item.action === "undo-payment" ? Undo2
                               : item.action === "refund" ? CircleDollarSign
+                              : item.action === "open" ? FolderOpen
                               : BadgeCheck;
                     return <DropdownMenuItem key={item.action} onClick={() => void runBulkAction(item.action)}><Icon size={15} />{item.label}</DropdownMenuItem>;
                   })}
@@ -891,6 +898,7 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
           columns={visibleColumns}
           columnLabels={listColumnLabels}
           onEdit={openEditRecord}
+          openOnRowClick={module.kind === "journals"}
           onDelete={(record) => void handleDelete(record)}
           onAction={(kind, record) => void handleAction(kind, record)}
           selection={supportsBulkActions ? {
