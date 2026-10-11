@@ -1,4 +1,6 @@
 export interface PayrollValues {
+  /** Payroll reference, shared by a month's salary sheet (e.g. SAL-2026-10), used to find it later. */
+  reference: string;
   employeeId: string;
   employeeName: string;
   employeeEmail: string;
@@ -37,7 +39,7 @@ export interface PayrollTotals {
 }
 
 export const payrollCsvFields = [
-  "employeeId", "employeeName", "employeeEmail", "cnic", "designation", "joiningDate", "month", "paymentAccountName", "paymentMethod", "baseSalary", "increment",
+  "reference", "employeeId", "employeeName", "employeeEmail", "cnic", "designation", "joiningDate", "month", "paymentAccountName", "paymentMethod", "baseSalary", "increment",
   "workingDays", "workedDays", "incentive", "overtimeAllowance", "gymAllowance", "medicalAllowance", "otherAllowance",
   "taxDeduction", "advanceDeduction", "loanDeduction", "fineDeduction", "adjustment", "description",
 ] as const satisfies readonly (keyof PayrollValues)[];
@@ -99,6 +101,7 @@ export function calculatePayroll(values: Pick<PayrollValues,
 
 export function emptyPayrollValues(month: string): PayrollValues {
   return {
+    reference: "",
     employeeId: "",
     employeeName: "",
     employeeEmail: "",

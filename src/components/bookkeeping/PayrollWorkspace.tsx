@@ -71,11 +71,12 @@ interface PayrollColumn {
 }
 
 const PAYROLL_COLUMNS_KEY = "mikledger:payroll-columns:v1";
-const DEFAULT_PAYROLL_COLUMNS = ["employee", "designation", "days", "paymentAccount", "grossSalary", "tax", "otherDeductions", "payable", "description"];
+const DEFAULT_PAYROLL_COLUMNS = ["reference", "employee", "designation", "days", "paymentAccount", "grossSalary", "tax", "otherDeductions", "payable", "description"];
 
 function payrollColumns(): PayrollColumn[] {
   const money = (value: string | undefined) => formatRupees(Number(value || 0));
   return [
+    { key: "reference", label: "Ref no.", render: (record) => <span className="font-medium">{record.data.reference || "—"}</span> },
     {
       key: "employee",
       label: "Employee",
@@ -161,9 +162,10 @@ export default function PayrollWorkspace({ records, accounts, employees = [], as
   const filteredRecords = useMemo(() => {
     const query = search.trim().toLowerCase();
     if (!query) return periodRecords;
-    return periodRecords.filter((record) => [record.data.employeeId, record.data.employeeName, record.data.employeeEmail, record.data.designation, record.data.cnic]
+    // A search looks across every month, so a salary can be found by its reference no.
+    return savedRecords.filter((record) => [record.data.reference, record.data.employeeId, record.data.employeeName, record.data.employeeEmail, record.data.designation, record.data.cnic]
       .some((value) => value?.toLowerCase().includes(query)));
-  }, [periodRecords, search]);
+  }, [periodRecords, savedRecords, search]);
   const monthTotals = useMemo(() => periodRecords.reduce((summary, record) => ({
     gross: summary.gross + Number(record.data.grossSalary || 0),
     payable: summary.payable + Number(record.data.payableSalary || 0),
@@ -309,7 +311,7 @@ export default function PayrollWorkspace({ records, accounts, employees = [], as
                 </div>
               </PopoverContent>
             </Popover>
-            <Input aria-label="Search payroll" placeholder="Search employee…" value={search} onChange={(event) => setSearch(event.target.value)} className="sm:w-56" />
+            <Input aria-label="Search payroll" placeholder="Search ref no. or employee…" value={search} onChange={(event) => setSearch(event.target.value)} className="sm:w-56" />
             <DropdownMenu>
               <DropdownMenuTrigger render={<Button type="button" variant="ghost" className="gap-2"><SlidersHorizontal size={16} />Customise</Button>} />
               <DropdownMenuContent align="end" className="min-w-56">

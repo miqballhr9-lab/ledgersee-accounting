@@ -134,6 +134,7 @@ function amountFromLineItems(data: Record<string, string>, kind: string): Record
 
 function normalizePayrollData(data: Record<string, string>): Record<string, string> {
   const values: PayrollValues = {
+    reference: (data.reference || "").slice(0, 60),
     employeeId: data.employeeId || "",
     employeeName: data.employeeName || "",
     employeeEmail: data.employeeEmail || "",

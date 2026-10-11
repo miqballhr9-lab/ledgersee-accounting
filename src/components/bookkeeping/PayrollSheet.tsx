@@ -143,6 +143,10 @@ function startingRows(month: string, entries: BookkeepingRecord[], activeEmploye
   return rows.map((row, index) => ({ ...row, id: index + 1 }));
 }
 
+function defaultReference(month: string) {
+  return month ? `SAL-${month}` : "SAL";
+}
+
 function rupees(value: number) {
   return `Rs ${value.toLocaleString("en-PK", { maximumFractionDigits: 0 })}`;
 }
@@ -152,6 +156,7 @@ export default function PayrollSheet({ open, onOpenChange, month: initialMonth, 
   const activeEmployees = employees.filter((employee) => employee.data.name?.trim() && employee.data.status !== "Inactive");
   const monthEntries = existingRecords.filter((entry) => entry.data.month === initialMonth);
   const [month, setMonth] = useState(initialMonth);
+  const [reference, setReference] = useState(() => (copyFrom ? "" : monthEntries.find((entry) => entry.data.reference)?.data.reference) || defaultReference(initialMonth));
   const [workingDays, setWorkingDays] = useState(() => (copyFrom ?? monthEntries[0])?.data.workingDays || "26");
   const [paymentAccountId, setPaymentAccountId] = useState("");
   const [rows, setRows] = useState<SheetRow[]>(() => startingRows(initialMonth, existingRecords, activeEmployees, employees, (copyFrom ?? monthEntries[0])?.data.workingDays || "26", copyFrom));
@@ -186,6 +191,7 @@ export default function PayrollSheet({ open, onOpenChange, month: initialMonth, 
       taxDeduction: row.taxDeduction,
       workingDays: workingDays || "0",
       workedDays: row.workedDays || "0",
+      reference: reference.trim(),
       description: row.description,
     };
   }
@@ -198,6 +204,12 @@ export default function PayrollSheet({ open, onOpenChange, month: initialMonth, 
       const employee = employees.find((item) => item.id === value);
       return { ...row, personKey: value, baseSalary: row.baseSalary || employee?.data.baseSalary || "" };
     }));
+  }
+
+  function changeMonth(value: string) {
+    // Keep the reference in step with the month unless it was typed in by hand.
+    if (reference === defaultReference(month)) setReference(defaultReference(value));
+    setMonth(value);
   }
 
   function changeWorkingDays(value: string) {
@@ -311,10 +323,14 @@ export default function PayrollSheet({ open, onOpenChange, month: initialMonth, 
         </DialogHeader>
 
         <form id="payroll-sheet-form" onSubmit={submit} className="min-w-0 space-y-5">
-          <div className="grid gap-4 sm:grid-cols-3">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="sheet-reference">Reference no. <span className="text-destructive">*</span></Label>
+              <Input id="sheet-reference" value={reference} onChange={(event) => setReference(event.target.value)} maxLength={60} required placeholder="SAL-2026-10" />
+            </div>
             <div className="space-y-1.5">
               <Label htmlFor="sheet-month">Payroll month <span className="text-destructive">*</span></Label>
-              <Input id="sheet-month" type="month" value={month} onChange={(event) => setMonth(event.target.value)} required />
+              <Input id="sheet-month" type="month" value={month} onChange={(event) => changeMonth(event.target.value)} required />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="sheet-working-days">Total working days</Label>

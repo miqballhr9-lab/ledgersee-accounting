@@ -64,6 +64,7 @@ export default async function PayrollSlipPage({ params }: PayrollSlipPageProps) 
             <p className="text-sm font-semibold text-primary">{companyName}</p>
             <h1 className="mt-2 text-2xl font-semibold tracking-tight">Salary slip</h1>
             <p className="mt-1 text-sm text-muted-foreground">Pay period: {employee.month || "—"}</p>
+            {employee.reference ? <p className="text-sm text-muted-foreground">Ref no.: {employee.reference}</p> : null}
           </div>
           <div className="text-right text-sm">
             <p className="font-semibold">{employee.employeeName || "Employee"}</p>
