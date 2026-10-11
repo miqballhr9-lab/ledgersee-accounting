@@ -450,15 +450,15 @@ export default function PayrollWorkspace({ records, accounts, employees = [], as
       <p className="text-xs leading-5 text-muted-foreground">Tax is estimated from Pakistan’s Tax Year 2027 salaried-income slabs using annualized monthly gross pay, assuming salary is more than 75% of taxable income. Review exemptions, benefits, and final withholding with your tax adviser.</p>
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="max-h-[92svh] max-w-4xl overflow-y-auto">
-          <DialogHeader>
+        <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-[680px]">
+          <DialogHeader className="pr-8">
             <DialogTitle>{editingId ? "Edit payroll entry" : "Add payroll entry"}</DialogTitle>
             <DialogDescription>Enter the employee’s salary and attendance. Gross pay, estimated tax, deductions, and payable salary update below.</DialogDescription>
           </DialogHeader>
           <form onSubmit={handleSave} className="space-y-6">
             <input type="hidden" name="month" value={values.month} />
-            <section className="space-y-3">
-              <h3 className="text-sm font-semibold">Employee details</h3>
+            <section className="space-y-4">
+              <h3 className="border-b border-border pb-2 pt-1 text-sm font-semibold">Employee details</h3>
               <div className="space-y-1.5">
                 <Label htmlFor="payroll-employee-picker">Choose employee</Label>
                 <Select
@@ -480,7 +480,7 @@ export default function PayrollWorkspace({ records, accounts, employees = [], as
                   Fills in the details below from the <Link href="/app/employees" className="text-primary underline-offset-4 hover:underline">Employees</Link> list. You can still change them for this month.
                 </p>
               </div>
-              <div className="grid gap-4 sm:grid-cols-2">{employeeFields.map(renderInputField)}</div>
+              <div className="grid gap-x-6 gap-y-4 sm:grid-cols-2">{employeeFields.map(renderInputField)}</div>
               <div className="space-y-1.5">
                 <Label htmlFor="payroll-payment-account">Salary payment account</Label>
                 <Select value={values.paymentAccountId || null} onValueChange={(value) => updateField("paymentAccountId", value ?? "")}>
@@ -493,7 +493,11 @@ export default function PayrollWorkspace({ records, accounts, employees = [], as
                 </Select>
                 {!paymentAccounts.length ? <p className="text-xs text-muted-foreground">Create a Cash, Bank, or Credit card account in Chart of Accounts to record how salary is paid.</p> : <p className="text-xs text-muted-foreground">Optional. Choose the account used to pay this employee.</p>}
               </div>
-              <div className="grid gap-4 sm:grid-cols-3">
+            </section>
+
+            <section className="space-y-4">
+              <h3 className="border-b border-border pb-2 pt-1 text-sm font-semibold">Payroll period</h3>
+              <div className="grid gap-x-6 gap-y-4 sm:grid-cols-3">
                 <div className="space-y-1.5">
                   <Label htmlFor="payroll-month">Payroll month</Label>
                   <Input id="payroll-month" type="month" value={values.month} onChange={(event) => updateField("month", event.target.value)} required />
@@ -509,9 +513,9 @@ export default function PayrollWorkspace({ records, accounts, employees = [], as
               </div>
             </section>
 
-            <section className="space-y-3 border-t border-border pt-5">
-              <h3 className="text-sm font-semibold">Earnings</h3>
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{earningsFields.map(renderInputField)}</div>
+            <section className="space-y-4">
+              <h3 className="border-b border-border pb-2 pt-1 text-sm font-semibold">Earnings</h3>
+              <div className="grid gap-x-6 gap-y-4 sm:grid-cols-2">{earningsFields.map(renderInputField)}</div>
               <div className="grid gap-4 rounded-lg border border-border bg-muted/40 p-4 sm:grid-cols-3">
                 <div><p className="text-xs text-muted-foreground">After increment</p><p className="mt-1 font-semibold tabular-nums">{formatRupees(totals.revisedSalary)}</p></div>
                 <div><p className="text-xs text-muted-foreground">Attendance-adjusted basic</p><p className="mt-1 font-semibold tabular-nums">{formatRupees(totals.proratedSalary)}</p></div>
@@ -519,9 +523,9 @@ export default function PayrollWorkspace({ records, accounts, employees = [], as
               </div>
             </section>
 
-            <section className="space-y-3 border-t border-border pt-5">
-              <h3 className="text-sm font-semibold">Tax and deductions</h3>
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <section className="space-y-4">
+              <h3 className="border-b border-border pb-2 pt-1 text-sm font-semibold">Tax and deductions</h3>
+              <div className="grid gap-x-6 gap-y-4 sm:grid-cols-2">
                 <div className="space-y-1.5">
                   <div className="flex items-center justify-between gap-2">
                     <Label htmlFor="payroll-tax">Income tax (PKR)</Label>
@@ -535,8 +539,8 @@ export default function PayrollWorkspace({ records, accounts, employees = [], as
               <p className="text-xs text-muted-foreground">Use a positive adjustment to add pay, or a negative value to reduce it.</p>
             </section>
 
-            <section className="space-y-3 border-t border-border pt-5">
-              <h3 className="text-sm font-semibold">Description</h3>
+            <section className="space-y-4">
+              <h3 className="border-b border-border pb-2 pt-1 text-sm font-semibold">Description</h3>
               <div className="space-y-1.5">
                 <Label htmlFor="payroll-description">Notes for this payroll entry</Label>
                 <Textarea id="payroll-description" rows={3} maxLength={1000} value={values.description} onChange={(event) => updateField("description", event.target.value)} placeholder="Add a note about attendance, incentive, or an adjustment" />
