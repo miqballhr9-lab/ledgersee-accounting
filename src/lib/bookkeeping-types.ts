@@ -6,6 +6,7 @@ export const recordKinds = [
   "estimates",
   "sales-orders",
   "credit-notes",
+  "supplier-credits",
   "recurring-invoices",
   "bills",
   "expenses",

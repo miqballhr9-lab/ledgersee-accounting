@@ -98,8 +98,8 @@ function sanitizePayload(input: Record<string, string>): Record<string, string> 
 }
 
 function amountFromLineItems(data: Record<string, string>, kind: string): Record<string, string> {
-  const categoryLines = kind === "expenses" || kind === "bills";
-  if (categoryLines && !data.lineItems?.trim()) throw new Error(`Add at least one ${kind === "bills" ? "bill" : "expense"} line with a category and amount.`);
+  const categoryLines = kind === "expenses" || kind === "bills" || kind === "supplier-credits";
+  if (categoryLines && !data.lineItems?.trim()) throw new Error(`Add at least one ${kind === "bills" ? "bill" : kind === "supplier-credits" ? "credit" : "expense"} line with a category and amount.`);
   if (!data.lineItems?.trim()) return data;
 
   const lines = parseInvoiceLines(data.lineItems);
@@ -284,7 +284,7 @@ export async function saveBookkeepingRecord(
     if (!calculatedDueDate) throw new Error("Choose an issue date and valid payment terms.");
     data = { ...data, paymentTerms, dueDate: calculatedDueDate };
   }
-  if (!id && kind === "bills" && !data.status) data = { ...data, status: "Open" };
+  if (!id && (kind === "bills" || kind === "supplier-credits") && !data.status) data = { ...data, status: "Open" };
   if (!id && (kind === "invoices" || kind === "bills")) {
     const selectedAccountId = data.paymentMethod || "Credit";
     let paymentMethod = "Credit";
@@ -1031,7 +1031,9 @@ export async function markRecordPaid(kind: string, id: string): Promise<void> {
     .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, kind)))
     .limit(1);
   if (!row) throw new Error("We couldn’t find that record. Refresh and try again.");
-  const data = { ...row.data, paidAmount: row.data.amount ?? "0", status: "Paid" };
+  // Pay what is left after any supplier or customer credit already applied.
+  const due = Math.max(0, (Number(row.data.amount) || 0) - (Number(row.data.creditApplied) || 0));
+  const data = { ...row.data, paidAmount: due.toFixed(2), status: "Paid" };
   await db
     .update(bookkeepingRecord)
     .set({ data, updatedAt: new Date() })
@@ -1626,6 +1628,51 @@ export async function applyCreditNote(id: string): Promise<void> {
     .update(bookkeepingRecord)
     .set({ data: { ...creditNote.data, appliedAmount: creditAmount.toFixed(2), status: "Applied" }, updatedAt: new Date() })
     .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id)));
+  revalidatePath("/app", "layout");
+}
+
+export async function applySupplierCredit(id: string): Promise<void> {
+  const me = await requireUser();
+  await db.transaction(async (transaction) => {
+    const [credit] = await transaction
+      .select()
+      .from(bookkeepingRecord)
+      .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "supplier-credits")))
+      .for("update")
+      .limit(1);
+    if (!credit) throw new Error("We couldn’t find that credit note. Refresh and try again.");
+    if (credit.data.status === "Applied") throw new Error("This credit note has already been applied.");
+    const billNumber = credit.data.billNumber?.trim();
+    if (!billNumber) throw new Error("Add the bill number this credit applies to, then try again.");
+
+    const bills = await transaction
+      .select()
+      .from(bookkeepingRecord)
+      .where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "bills")))
+      .for("update");
+    const vendor = credit.data.vendor?.trim().toLowerCase();
+    const bill = bills.find((row) => row.data.billNumber?.trim() === billNumber && (!vendor || row.data.vendor?.trim().toLowerCase() === vendor));
+    if (!bill) throw new Error(`We couldn’t find bill ${billNumber} from ${credit.data.vendor || "this supplier"}.`);
+    if (bill.data.status === "Cancelled") throw new Error("That bill is cancelled.");
+
+    const creditAmount = Number(credit.data.amount) || 0;
+    const paid = Number(bill.data.paidAmount) || 0;
+    const alreadyCredited = Number(bill.data.creditApplied) || 0;
+    const remaining = (Number(bill.data.amount) || 0) - paid - alreadyCredited;
+    if (!Number.isFinite(creditAmount) || creditAmount <= 0) throw new Error("This credit note needs an amount greater than zero.");
+    if (creditAmount > remaining + 0.005) throw new Error(`The credit is more than bill ${billNumber}’s remaining balance.`);
+
+    const newCredit = alreadyCredited + creditAmount;
+    const settled = paid + newCredit >= (Number(bill.data.amount) || 0) - 0.005;
+    await transaction
+      .update(bookkeepingRecord)
+      .set({ data: { ...bill.data, creditApplied: newCredit.toFixed(2), status: settled ? "Paid" : bill.data.status }, updatedAt: new Date() })
+      .where(and(eq(bookkeepingRecord.id, bill.id), eq(bookkeepingRecord.userId, me.id)));
+    await transaction
+      .update(bookkeepingRecord)
+      .set({ data: { ...credit.data, appliedAmount: creditAmount.toFixed(2), appliedBillId: bill.id, status: "Applied" }, updatedAt: new Date() })
+      .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id)));
+  });
   revalidatePath("/app", "layout");
 }
 

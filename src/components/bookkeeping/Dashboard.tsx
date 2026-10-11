@@ -44,7 +44,7 @@ export default function Dashboard({ records, setup, asOfDate }: DashboardProps) 
   const income = invoices.reduce((sum, record) => sum + invoiceNet(record), 0);
   const totalExpenses = expenses.reduce((sum, record) => sum + amount(record), 0) + bills.reduce((sum, record) => sum + amount(record), 0);
   const receivables = invoices.reduce((sum, record) => sum + Math.max(0, amount(record) - amount(record, "paidAmount") - amount(record, "creditApplied")), 0);
-  const payables = bills.reduce((sum, record) => sum + Math.max(0, amount(record) - amount(record, "paidAmount")), 0);
+  const payables = bills.reduce((sum, record) => sum + Math.max(0, amount(record) - amount(record, "paidAmount") - amount(record, "creditApplied")), 0);
   const netProfit = income - totalExpenses;
 
   const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -87,7 +87,7 @@ export default function Dashboard({ records, setup, asOfDate }: DashboardProps) 
   // Unpaid invoices past due, and bills overdue or due within a week, most urgent first.
   const attention = [
     ...invoices.map((record) => ({ record, balance: Math.max(0, amount(record) - amount(record, "paidAmount") - amount(record, "creditApplied")), href: "/app/invoices", label: `Invoice ${record.data.invoiceNumber || ""} · ${record.data.customer || "Customer"}` })),
-    ...bills.map((record) => ({ record, balance: Math.max(0, amount(record) - amount(record, "paidAmount")), href: "/app/bills", label: `Bill ${record.data.billNumber || ""} · ${record.data.vendor || "Supplier"}` })),
+    ...bills.map((record) => ({ record, balance: Math.max(0, amount(record) - amount(record, "paidAmount") - amount(record, "creditApplied")), href: "/app/bills", label: `Bill ${record.data.billNumber || ""} · ${record.data.vendor || "Supplier"}` })),
   ]
     .filter(({ record, balance }) => balance > 0 && record.data.status !== "Paid" && record.data.dueDate)
     .map((entry) => ({ ...entry, days: daysBetween(asOfDate, entry.record.data.dueDate ?? asOfDate) }))

@@ -65,7 +65,7 @@ interface ExpenseEntryLine {
 const structuredLineKinds = new Set(["invoices", "estimates", "sales-orders", "credit-notes", "recurring-invoices", "purchase-orders"]);
 const shareableDocumentKinds = new Set(["invoices", "estimates", "sales-orders", "credit-notes"]);
 /** Expenses and bills share the category · description · amount line editor. */
-const categoryLineKinds = new Set(["expenses", "bills"]);
+const categoryLineKinds = new Set(["expenses", "bills", "supplier-credits"]);
 
 function getInitialValues(module: ModuleDefinition, record: BookkeepingRecord | null, defaults: Record<string, string>, customers: BookkeepingRecord[]) {
   const values: Record<string, string> = {
@@ -675,7 +675,7 @@ export default function RecordEditor({ module, record, customers, vendors, items
                           const vendor = vendorOptions.find((option) => option.id === vendorId);
                           if (vendor?.data.name) {
                             changeValue(field.key, vendor.data.name);
-                            if (module.kind === "bills" && vendor.data.defaultExpenseAccount) {
+                            if ((module.kind === "bills" || module.kind === "supplier-credits") && vendor.data.defaultExpenseAccount) {
                               const expenseAccount = expenseAccounts.find((account) => account.id === vendor.data.defaultExpenseAccount);
                               const categoryName = expenseAccount?.data.name?.trim();
                               if (categoryName) {
@@ -751,7 +751,7 @@ export default function RecordEditor({ module, record, customers, vendors, items
                                   id={`expense-description-${line.id}`}
                                   value={line.description}
                                   onChange={(event) => setExpenseLines((current) => current.map((entry) => entry.id === line.id ? { ...entry, description: event.target.value } : entry))}
-                                  placeholder={module.kind === "bills" ? "What was this bill for?" : "What was this expense for?"}
+                                  placeholder={module.kind === "bills" ? "What was this bill for?" : module.kind === "supplier-credits" ? "What is this credit for?" : "What was this expense for?"}
                                 />
                               </div>
                               <div className="min-w-0 space-y-1.5">

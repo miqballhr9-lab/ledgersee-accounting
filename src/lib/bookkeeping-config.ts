@@ -256,6 +256,22 @@ export const modules: readonly ModuleDefinition[] = [
     ],
   },
   {
+    slug: "supplier-credits", kind: "supplier-credits", label: "Supplier credit note", plural: "Supplier credit notes",
+    description: "Record credits and refunds from suppliers and apply them to their bills.", titleKey: "creditNumber",
+    columns: ["creditNumber", "vendor", "date", "billNumber", "amount", "status"],
+    fields: [
+      { key: "vendor", label: "Supplier", required: true },
+      { key: "billNumber", label: "Apply to bill no.", help: "The supplier bill this credit reduces. Apply it from the list once saved." },
+      { key: "date", label: "Credit date", type: "date", required: true },
+      { key: "creditNumber", label: "Credit no.", required: true },
+      { ...expenseLineItemsField, label: "Credit lines" },
+      { key: "taxRate", label: "Tax rate (%)", type: "number" },
+      { key: "discount", label: "Discount amount", type: "number" },
+      { key: "memo", label: "Memo", type: "textarea" },
+      { key: "attachment", label: "Attachment", type: "file", help: "PDF, image, or CSV up to 10 MB." },
+    ],
+  },
+  {
     slug: "purchase-orders", kind: "purchase-orders", label: "Purchase order", plural: "Purchase orders",
     description: "Confirm supplier orders, receive products, and record purchases as bills or expenses.", titleKey: "poNumber",
     columns: ["poNumber", "vendor", "date", "expectedDate", "amount", "status"],
@@ -425,6 +441,7 @@ export const navigationGroups: NavigationGroup[] = [
       { slug: "bills", label: "Bills", icon: "Receipt" },
       { slug: "expenses", label: "Expenses", icon: "WalletCards" },
       { slug: "purchase-orders", label: "Purchase orders", icon: "ShoppingCart" },
+      { slug: "supplier-credits", label: "Credit notes", icon: "Undo2" },
     ],
   },
   {

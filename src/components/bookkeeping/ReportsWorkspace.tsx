@@ -105,7 +105,8 @@ function buildReport(key: ReportKey, records: BookkeepingRecord[], asOfDate: str
 
   if (key === "profit-loss") {
     const income = invoices.reduce((sum, invoice) => sum + Math.max(0, rowAmount(invoice) - rowAmount(invoice, "creditApplied")), 0);
-    const expenseTotal = [...bills, ...expenses].reduce((sum, expense) => sum + rowAmount(expense), 0);
+    // Supplier credits applied to bills reduce what the bills cost, as customer credits reduce income.
+    const expenseTotal = [...bills, ...expenses].reduce((sum, expense) => sum + Math.max(0, rowAmount(expense) - rowAmount(expense, "creditApplied")), 0);
     const billCostOfSales = bills.reduce((sum, record) => sum + expenseLinesFromData(record.data)
       .filter((line) => line.category.toLowerCase().includes("cost") || line.category.toLowerCase().includes("direct"))
       .reduce((lineSum, line) => lineSum + line.amount, 0), 0);

@@ -16,6 +16,7 @@ import {
   duplicateCustomerDocumentRecord,
   duplicateInvoiceRecord,
   applyCreditNote,
+  applySupplierCredit,
   generateRecurringInvoice,
   markRecordPaid,
   recordInvoicePayment,
@@ -128,6 +129,11 @@ function createDefaults(module: ModuleDefinition, records: BookkeepingRecord[], 
     values.currency = defaultCurrency;
     values.exchangeRate = "1";
     values.status = "Draft";
+  }
+  if (module.kind === "supplier-credits") {
+    values.creditNumber = `SC-${String(records.filter((record) => record.kind === "supplier-credits").length + 1).padStart(4, "0")}`;
+    values.date = dateString(today);
+    values.status = "Open";
   }
   if (module.kind === "bills") {
     values.billNumber = `BILL-${String(records.filter((record) => record.kind === "bills").length + 1).padStart(4, "0")}`;
@@ -433,6 +439,10 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
         const printWindow = window.open(printPath, "_blank");
         if (printWindow) printWindow.opener = null;
         else setActionMessage(`Allow pop-ups to open this ${module.label.toLowerCase()} for printing.`);
+      } else if (kind === "apply-credit" && module.kind === "supplier-credits") {
+        await applySupplierCredit(record.id);
+        setActionMessage("Credit applied to the supplier’s bill balance.");
+        toast.success(`Credit applied to bill ${record.data.billNumber}.`);
       } else if (kind === "apply-credit") {
         await applyCreditNote(record.id);
         setActionMessage("Credit applied to the matching invoice balance.");
