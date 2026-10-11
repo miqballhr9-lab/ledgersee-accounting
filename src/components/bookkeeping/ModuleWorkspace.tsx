@@ -121,7 +121,6 @@ function createDefaults(module: ModuleDefinition, records: BookkeepingRecord[], 
     values.status = "Draft";
   }
   if (module.kind === "purchase-orders") {
-    values.paymentMode = "On credit";
     values.poNumber = `PO-${String(records.filter((record) => record.kind === "purchase-orders").length + 1).padStart(4, "0")}`;
     values.date = dateString(today);
     values.currency = defaultCurrency;

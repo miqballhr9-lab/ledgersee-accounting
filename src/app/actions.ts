@@ -1142,6 +1142,41 @@ export async function undoBillPayments(id: string): Promise<void> {
   revalidatePath("/app", "layout");
 }
 
+/** Records which Cash, Bank or Credit card account paid an expense. */
+export async function recordExpensePayment(id: string, paymentDate: string, accountId: string): Promise<void> {
+  const me = await requireUser();
+  if (!isPaymentDate(paymentDate)) throw new Error("Choose a payment date.");
+  const { account, method, name } = await findPaymentAccount(me.id, accountId);
+  const [expense] = await db
+    .select()
+    .from(bookkeepingRecord)
+    .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "expenses")))
+    .limit(1);
+  if (!expense) throw new Error("We couldn’t find that expense. Refresh and try again.");
+  if (expense.data.status === "Paid") throw new Error(`${expense.data.description || "This expense"} is already paid.`);
+  await db
+    .update(bookkeepingRecord)
+    .set({ data: { ...expense.data, status: "Paid", paymentAccount: `${method} · ${name}`, paymentAccountId: account.id, paymentDate }, updatedAt: new Date() })
+    .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id)));
+  revalidatePath("/app", "layout");
+}
+
+/** Clears the payment recorded on an expense so it can be paid from another account. */
+export async function undoExpensePayment(id: string): Promise<void> {
+  const me = await requireUser();
+  const [expense] = await db
+    .select()
+    .from(bookkeepingRecord)
+    .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "expenses")))
+    .limit(1);
+  if (!expense) throw new Error("We couldn’t find that expense. Refresh and try again.");
+  await db
+    .update(bookkeepingRecord)
+    .set({ data: { ...expense.data, status: "Unpaid", paymentAccount: "", paymentAccountId: "", paymentDate: "" }, updatedAt: new Date() })
+    .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id)));
+  revalidatePath("/app", "layout");
+}
+
 /** Records a supplier credit note as refunded into a Cash, Bank or Credit card account. */
 export async function refundSupplierCredit(id: string, refundDate: string, accountId: string): Promise<void> {
   const me = await requireUser();

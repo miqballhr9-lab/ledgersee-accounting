@@ -226,7 +226,6 @@ export const modules: readonly ModuleDefinition[] = [
     columns: ["billNumber", "vendor", "billDate", "dueDate", "category", "amount", "paymentMethod", "status"],
     fields: [
       { key: "vendor", label: "Supplier", required: true },
-      { key: "paymentMethod", label: "Payment account", type: "select", options: ["Credit"], help: "Choose a Cash, Bank, or Credit card account from your Chart of Accounts, or leave it unpaid on credit." },
       { key: "billDate", label: "Bill date", type: "date", required: true },
       { key: "paymentTerms", label: "Terms", type: "select", options: ["Due on receipt", "15 days", "30 days", "60 days"] },
       { key: "billNumber", label: "Bill no.", required: true },
@@ -244,9 +243,7 @@ export const modules: readonly ModuleDefinition[] = [
     columns: ["expenseDate", "description", "payee", "category", "paymentAccount", "amount", "attachmentName"],
     fields: [
       { key: "payee", label: "Payee" },
-      { key: "paymentAccount", label: "Payment account" },
-      { key: "expenseDate", label: "Payment date", type: "date", required: true },
-      { key: "paymentMethod", label: "Payment method", type: "select", options: ["Cash", "Check", "Credit card", "Bank transfer", "Other"] },
+      { key: "expenseDate", label: "Expense date", type: "date", required: true },
       { key: "referenceNumber", label: "Ref. no." },
       expenseLineItemsField,
       { key: "taxRate", label: "Tax rate (%)", type: "number" },
@@ -274,14 +271,13 @@ export const modules: readonly ModuleDefinition[] = [
   {
     slug: "purchase-orders", kind: "purchase-orders", label: "Purchase order", plural: "Purchase orders",
     description: "Confirm supplier orders, receive products, and record purchases as bills or expenses.", titleKey: "poNumber",
-    columns: ["poNumber", "vendor", "date", "expectedDate", "amount", "paymentMode", "status"],
+    columns: ["poNumber", "vendor", "date", "expectedDate", "amount", "status"],
     fields: [
       { key: "vendor", label: "Supplier", required: true },
       { key: "currency", label: "Currency", type: "currency" },
       { key: "date", label: "PO date", type: "date", required: true },
       { key: "expectedDate", label: "Expected date", type: "date" },
       { key: "poNumber", label: "PO no.", required: true },
-      { key: "paymentMode", label: "Payment method", type: "select", options: ["On credit", "Cash", "Cheque", "Bank transfer", "Credit card"], help: "How you will pay this supplier." },
       { ...lineItemsField, label: "PO lines" },
       { key: "taxRate", label: "Tax rate (%)", type: "number" },
       { key: "discount", label: "Discount amount", type: "number" },

@@ -2,10 +2,10 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowDownToLine, CalendarDays, CircleDollarSign, Filter, MoreHorizontal, Pencil, Plus, Search, Trash2 } from "lucide-react";
+import { ArrowDownToLine, CalendarDays, CircleDollarSign, Undo2, Filter, MoreHorizontal, Pencil, Plus, Search, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
-import { deleteBookkeepingRecord, recordBillPayment } from "@/app/actions";
+import { deleteBookkeepingRecord, recordBillPayment, recordExpensePayment, undoBillPayments, undoExpensePayment } from "@/app/actions";
 import PaymentDialog from "@/components/bookkeeping/PaymentDialog";
 import RecordEditor from "@/components/bookkeeping/RecordEditor";
 import BulkActionsMenu from "@/components/bookkeeping/BulkActionsMenu";
@@ -225,11 +225,32 @@ export default function ExpensesWorkspace({ expenses: initialExpenses, bills: in
   const [paymentTargets, setPaymentTargets] = useState<BookkeepingRecord[] | null>(null);
   const billDue = (record: BookkeepingRecord) => Math.max(0, Number(record.data.amount || 0) - Number(record.data.paidAmount || 0) - Number(record.data.creditApplied || 0));
 
+  function isUnpaid(record: BookkeepingRecord) {
+    if (record.kind === "bills") return !["Paid", "Cancelled"].includes(record.data.status ?? "") && billDue(record) > 0;
+    return record.data.status !== "Paid" && !record.data.paymentAccount;
+  }
+
+  async function undoPayment(record: BookkeepingRecord) {
+    const title = record.kind === "bills" ? record.data.billNumber || "this bill" : record.data.description || "this expense";
+    if (!window.confirm(`Undo the payment on ${title}? You can then record it again from another account.`)) return;
+    setBulkPending(true);
+    try {
+      if (record.kind === "bills") await undoBillPayments(record.id);
+      else await undoExpensePayment(record.id);
+      toast.success(`Payment removed from ${title}.`);
+      router.refresh();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "We couldn’t undo that payment.");
+    } finally {
+      setBulkPending(false);
+    }
+  }
+
   async function runBulkAction(action: "pay" | "delete") {
     if (!selectedTransactions.length) return;
     if (action === "pay") {
-      const payable = selectedTransactions.filter((record) => record.kind === "bills" && !["Paid", "Cancelled"].includes(record.data.status ?? "") && billDue(record) > 0);
-      if (!payable.length) toast.info("Select at least one unpaid bill. Expenses are already paid.");
+      const payable = selectedTransactions.filter(isUnpaid);
+      if (!payable.length) toast.info("The selected transactions are already paid.");
       else setPaymentTargets(payable);
       return;
     }
@@ -247,7 +268,7 @@ export default function ExpensesWorkspace({ expenses: initialExpenses, bills: in
       const title = record.kind === "bills" ? record.data.billNumber || "Bill" : record.data.description || "Expense";
       try {
         if (action === "delete") await deleteBookkeepingRecord(record.kind, record.id);
-        else if (payment) await recordBillPayment(record.id, payment.date, payment.accountId);
+        else if (payment) await (record.kind === "bills" ? recordBillPayment(record.id, payment.date, payment.accountId) : recordExpensePayment(record.id, payment.date, payment.accountId));
         done.push(`${record.kind}-${record.id}`);
       } catch (error) {
         const message = error instanceof Error ? error.message : "it couldn’t be updated.";
@@ -258,7 +279,7 @@ export default function ExpensesWorkspace({ expenses: initialExpenses, bills: in
     setSelectedIds(new Set());
     setBulkPending(false);
     setPaymentTargets(null);
-    if (done.length) toast.success(action === "delete" ? `${done.length} ${done.length === 1 ? "transaction" : "transactions"} deleted.` : `${done.length} ${done.length === 1 ? "bill" : "bills"} paid.`);
+    if (done.length) toast.success(`${done.length} ${done.length === 1 ? "transaction" : "transactions"} ${action === "delete" ? "deleted" : "paid"}.`);
     if (failed.length) toast.error(failed.join(" "));
     router.refresh();
   }
@@ -359,7 +380,7 @@ export default function ExpensesWorkspace({ expenses: initialExpenses, bills: in
               count={selectedTransactions.length}
               pending={bulkPending}
               noun="transactions"
-              items={[{ key: "pay", label: "Record bill payment", icon: CircleDollarSign }, { key: "delete", label: "Delete", icon: Trash2, destructive: true }]}
+              items={[{ key: "pay", label: "Record payment", icon: CircleDollarSign }, { key: "delete", label: "Delete", icon: Trash2, destructive: true }]}
               onSelect={(action) => void runBulkAction(action)}
             />
             <Select value={typeFilter} onValueChange={(value) => setTypeFilter(value ?? "all")}>
@@ -426,7 +447,7 @@ export default function ExpensesWorkspace({ expenses: initialExpenses, bills: in
                     <TableCell className="max-w-[200px] text-[13px]"><span className="block truncate" title={payment || ""}>{payment || "—"}</span></TableCell>
                     <TableCell className="text-right text-[13px] font-medium tabular-nums">{formatMoney(record.data.amount || "", currency)}</TableCell>
                     <TableCell className="text-[13px]">
-                      {isBill && record.data.status ? <span className="inline-flex rounded-full bg-secondary px-2 py-0.5 text-[11px] font-medium text-secondary-foreground">{record.data.status}</span> : "—"}
+                      <span className="inline-flex rounded-full bg-secondary px-2 py-0.5 text-[11px] font-medium text-secondary-foreground">{record.data.status || (isUnpaid(record) ? "Unpaid" : "Paid")}</span>
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex items-center justify-end gap-1">
@@ -435,6 +456,9 @@ export default function ExpensesWorkspace({ expenses: initialExpenses, bills: in
                           <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" aria-label="More transaction actions"><MoreHorizontal size={15} /></Button>} />
                           <DropdownMenuContent align="end">
                             <DropdownMenuItem onClick={() => openEditTransaction(record)}><Pencil size={14} />Edit</DropdownMenuItem>
+                            {isUnpaid(record)
+                              ? <DropdownMenuItem disabled={bulkPending} onClick={() => setPaymentTargets([record])}><CircleDollarSign size={14} />Record payment</DropdownMenuItem>
+                              : <DropdownMenuItem disabled={bulkPending} onClick={() => void undoPayment(record)}><Undo2 size={14} />Undo payment</DropdownMenuItem>}
                             <DropdownMenuItem disabled={pendingDelete === record.id} onClick={() => void handleDelete(record)}>Delete</DropdownMenuItem>
                           </DropdownMenuContent>
                         </DropdownMenu>
@@ -518,8 +542,8 @@ export default function ExpensesWorkspace({ expenses: initialExpenses, bills: in
       <PaymentDialog
         open={Boolean(paymentTargets)}
         onOpenChange={(open) => { if (!open) setPaymentTargets(null); }}
-        title="Record bill payment"
-        description={`${paymentTargets?.length ?? 0} ${paymentTargets?.length === 1 ? "bill" : "bills"} · ${formatMoney(String((paymentTargets ?? []).reduce((sum, record) => sum + billDue(record), 0)), currency)} due`}
+        title="Record payment"
+        description={`${paymentTargets?.length ?? 0} ${paymentTargets?.length === 1 ? "transaction" : "transactions"} · ${formatMoney(String((paymentTargets ?? []).reduce((sum, record) => sum + (record.kind === "bills" ? billDue(record) : Number(record.data.amount || 0)), 0)), currency)} · paid from Bank, Cash or Credit card`}
         submitLabel="Record payment"
         paymentAccounts={paymentAccounts}
         pending={bulkPending}
