@@ -51,7 +51,6 @@ interface SheetRow {
   medicalAllowance: string;
   otherAllowance: string;
   taxDeduction: string;
-  advanceDeduction: string;
   loanDeduction: string;
   fineDeduction: string;
   adjustment: string;
@@ -67,8 +66,8 @@ const allowanceColumns = [
   { key: "otherAllowance", label: "Other allowance" },
 ] as const;
 const deductionColumns = [
-  { key: "advanceDeduction", label: "Advance" },
-  { key: "loanDeduction", label: "Loan deduction" },
+  // Advances and loans share one column; it saves to the loan deduction field.
+  { key: "loanDeduction", label: "Advance / loan" },
   { key: "fineDeduction", label: "Fine" },
   { key: "adjustment", label: "Other adjustment" },
 ] as const;
@@ -114,7 +113,7 @@ function blankRow(id: number, workingDays: string): SheetRow {
   return {
     id, personKey: "", workedDays: workingDays, baseSalary: "", increment: "",
     incentive: "", overtimeAllowance: "", gymAllowance: "", medicalAllowance: "", otherAllowance: "",
-    taxDeduction: "", advanceDeduction: "", loanDeduction: "", fineDeduction: "", adjustment: "", description: "",
+    taxDeduction: "", loanDeduction: "", fineDeduction: "", adjustment: "", description: "",
   };
 }
 
@@ -122,6 +121,8 @@ function rowFromEntry(id: number, entry: BookkeepingRecord, personKey: string): 
   const row: SheetRow = { ...blankRow(id, entry.data.workedDays || ""), personKey, description: entry.data.description || "" };
   for (const key of amountKeys) row[key] = savedAmount(entry.data[key]);
   row.taxDeduction = entry.data.taxDeduction || "";
+  const advanceAndLoan = (Number(entry.data.advanceDeduction) || 0) + (Number(entry.data.loanDeduction) || 0);
+  row.loanDeduction = advanceAndLoan ? String(Math.round(advanceAndLoan * 100) / 100) : "";
   return row;
 }
 
