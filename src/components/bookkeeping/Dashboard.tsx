@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { ArrowDownRight, ArrowRight, ArrowUpRight, Banknote, CircleDollarSign, FileText, Plus, ReceiptText, Wallet } from "lucide-react";
+import { AlarmClock, ArrowDownRight, ArrowRight, ArrowUpRight, Banknote, CircleCheck, CircleDollarSign, FileText, Plus, ReceiptText, Wallet } from "lucide-react";
 import {
   Bar,
   BarChart,
@@ -12,12 +12,18 @@ import {
   YAxis,
 } from "recharts";
 
+import SetupChecklist, { type SetupProgress } from "@/components/bookkeeping/SetupChecklist";
 import { Button } from "@/components/ui/button";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
 
 interface DashboardProps {
   records: BookkeepingRecord[];
+  setup: SetupProgress;
   asOfDate: string;
+}
+
+function daysBetween(from: string, to: string) {
+  return Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000);
 }
 
 function amount(record: BookkeepingRecord, key = "amount") {
@@ -29,7 +35,7 @@ function dateFor(record: BookkeepingRecord) {
   return record.data.issueDate || record.data.date || record.data.expenseDate || record.data.billDate || record.createdAt.slice(0, 10);
 }
 
-export default function Dashboard({ records, asOfDate }: DashboardProps) {
+export default function Dashboard({ records, setup, asOfDate }: DashboardProps) {
   const currency = records.find((record) => record.kind === "settings")?.data.currency || "USD";
   const invoices = records.filter((record) => record.kind === "invoices" && !["Draft", "Cancelled"].includes(record.data.status ?? ""));
   const expenses = records.filter((record) => record.kind === "expenses");
@@ -78,6 +84,16 @@ export default function Dashboard({ records, asOfDate }: DashboardProps) {
     .slice(0, 5);
   const hasChartData = chartData.some((month) => month.income > 0 || month.expenses > 0);
 
+  // Unpaid invoices past due, and bills overdue or due within a week, most urgent first.
+  const attention = [
+    ...invoices.map((record) => ({ record, balance: Math.max(0, amount(record) - amount(record, "paidAmount") - amount(record, "creditApplied")), href: "/app/invoices", label: `Invoice ${record.data.invoiceNumber || ""} · ${record.data.customer || "Customer"}` })),
+    ...bills.map((record) => ({ record, balance: Math.max(0, amount(record) - amount(record, "paidAmount")), href: "/app/bills", label: `Bill ${record.data.billNumber || ""} · ${record.data.vendor || "Supplier"}` })),
+  ]
+    .filter(({ record, balance }) => balance > 0 && record.data.status !== "Paid" && record.data.dueDate)
+    .map((entry) => ({ ...entry, days: daysBetween(asOfDate, entry.record.data.dueDate ?? asOfDate) }))
+    .filter(({ record, days }) => days < 0 || (record.kind === "bills" && days <= 7))
+    .sort((left, right) => left.days - right.days);
+
   return (
     <div className="mx-auto w-full max-w-[1440px] px-4 py-6 sm:px-7 sm:py-8">
       <section className="flex flex-wrap items-end justify-between gap-4">
@@ -91,6 +107,8 @@ export default function Dashboard({ records, asOfDate }: DashboardProps) {
           <Button nativeButton={false} render={<Link href="/app/invoices?new=1" />} className="gap-2"><Plus size={16} />New invoice</Button>
         </div>
       </section>
+
+      <SetupChecklist progress={setup} />
 
       <section aria-label="Financial summary" className="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
         {stats.map((stat) => {
@@ -167,14 +185,39 @@ export default function Dashboard({ records, asOfDate }: DashboardProps) {
         </article>
       </section>
 
-      <section className="mt-5 rounded-lg border border-border bg-card p-5">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div><h2 className="text-sm font-semibold">Keep your records moving</h2><p className="mt-1 text-xs text-muted-foreground">Start with a customer, or record a supplier bill.</p></div>
-          <div className="flex gap-2">
+      <section aria-labelledby="attention-heading" className="mt-5 rounded-lg border border-border bg-card">
+        <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border px-5 py-4">
+          <div>
+            <h2 id="attention-heading" className="text-sm font-semibold">Needs attention</h2>
+            <p className="mt-1 text-xs text-muted-foreground">Overdue invoices, and bills overdue or due in the next 7 days</p>
+          </div>
+          <div className="flex flex-wrap gap-2">
             <Button variant="outline" size="sm" nativeButton={false} render={<Link href="/app/customers?new=1" />}>Add customer</Button>
             <Button variant="outline" size="sm" nativeButton={false} render={<Link href="/app/bills?new=1" />}>Add a bill</Button>
           </div>
         </div>
+        {attention.length ? (
+          <div className="divide-y divide-border">
+            {attention.slice(0, 6).map(({ record, balance, href, label, days }) => (
+              <Link key={record.id} href={href} className="flex items-center gap-3 px-5 py-3 transition-colors hover:bg-muted/40">
+                <span className={`grid size-9 shrink-0 place-items-center rounded-lg ${days < 0 ? "bg-destructive/10 text-destructive" : "bg-muted text-muted-foreground"}`}><AlarmClock size={16} /></span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-medium">{label}</span>
+                  <span className={`mt-0.5 block text-xs ${days < 0 ? "text-destructive" : "text-muted-foreground"}`}>
+                    {days < 0 ? `${-days} day${days === -1 ? "" : "s"} overdue` : days === 0 ? "Due today" : `Due in ${days} day${days === 1 ? "" : "s"}`} · {record.data.dueDate}
+                  </span>
+                </span>
+                <span className="shrink-0 text-sm font-semibold tabular-nums">{formatMoney(balance)}</span>
+              </Link>
+            ))}
+            {attention.length > 6 ? <p className="px-5 py-3 text-xs text-muted-foreground">And {attention.length - 6} more.</p> : null}
+          </div>
+        ) : (
+          <div className="flex items-center gap-3 px-5 py-5 text-sm text-muted-foreground">
+            <CircleCheck size={18} className="shrink-0 text-primary" />
+            Nothing overdue. Invoices and bills that pass their due date will show here.
+          </div>
+        )}
       </section>
     </div>
   );
