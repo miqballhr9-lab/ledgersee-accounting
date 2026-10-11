@@ -9,6 +9,7 @@ import {
   Banknote,
   ChartNoAxesCombined,
   BarChart3,
+  Bot,
   Boxes,
   BookOpenCheck,
   Building2,
@@ -96,6 +97,7 @@ const icons: Record<string, LucideIcon> = {
   ShieldCheck,
   Settings,
   Settings2,
+  Bot,
 };
 
 const gearGroups = [

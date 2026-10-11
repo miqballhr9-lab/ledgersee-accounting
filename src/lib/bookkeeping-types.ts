@@ -25,6 +25,9 @@ export const recordKinds = [
   "settings",
   "payments",
   "reconciliations",
+  "automation-settings",
+  "automation-rules",
+  "automation-log",
 ] as const;
 
 export type RecordKind = (typeof recordKinds)[number];
