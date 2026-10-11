@@ -737,7 +737,7 @@ export default function RecordEditor({ module, record, customers, vendors, items
                                   id={`expense-description-${line.id}`}
                                   value={line.description}
                                   onChange={(event) => setExpenseLines((current) => current.map((entry) => entry.id === line.id ? { ...entry, description: event.target.value } : entry))}
-                                  placeholder="What was this expense for?"
+                                  placeholder={module.kind === "bills" ? "What was this bill for?" : "What was this expense for?"}
                                 />
                               </div>
                               <div className="min-w-0 space-y-1.5">
