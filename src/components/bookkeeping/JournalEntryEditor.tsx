@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectSeparator, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
 
@@ -19,6 +19,8 @@ interface JournalEntryEditorProps {
   record: BookkeepingRecord | null;
   defaults: Record<string, string>;
   currency: string;
+  customers: BookkeepingRecord[];
+  vendors: BookkeepingRecord[];
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSaved: (record: BookkeepingRecord) => void;
@@ -196,8 +198,13 @@ function moneyText(value: number, currency: string) {
 // Spreadsheet-style cells: no box until a cell is focused, like a ledger sheet.
 const cellInput = "h-11 w-full rounded-none border-0 bg-transparent px-2.5 shadow-none focus-visible:bg-card focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/60 dark:bg-transparent";
 const cellBorder = "border-r border-dashed border-border";
+const NO_NAME = "__none__";
 
-export default function JournalEntryEditor({ accounts, record, defaults, currency, open, onOpenChange, onSaved, onSaveAndNew }: JournalEntryEditorProps) {
+function contactNames(records: BookkeepingRecord[]) {
+  return [...new Set(records.map((record) => record.data.name?.trim() ?? "").filter(Boolean))].sort((a, b) => a.localeCompare(b));
+}
+
+export default function JournalEntryEditor({ accounts, record, defaults, currency, customers, vendors, open, onOpenChange, onSaved, onSaveAndNew }: JournalEntryEditorProps) {
   const [date, setDate] = useState(defaults.date ?? "");
   const [reference, setReference] = useState(defaults.reference ?? "");
   const [lines, setLines] = useState<JournalLine[]>(() => initialLines(record, accounts));
@@ -214,6 +221,8 @@ export default function JournalEntryEditor({ accounts, record, defaults, currenc
   const attachmentInputRef = useRef<HTMLInputElement>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
   const accountOptions = accounts.filter((account) => account.data.name?.trim());
+  const customerNames = useMemo(() => contactNames(customers), [customers]);
+  const supplierNames = useMemo(() => contactNames(vendors), [vendors]);
 
   useEffect(() => {
     const startingLines = initialLines(record, accounts);
@@ -479,7 +488,37 @@ export default function JournalEntryEditor({ accounts, record, defaults, currenc
                         <Input aria-label={`Description for line ${index + 1}`} value={line.description} onChange={(event) => updateLine(line.id, "description", event.target.value)} maxLength={300} className={cellInput} />
                       </td>
                       <td className={`p-0 ${cellBorder}`}>
-                        <Input aria-label={`Name for line ${index + 1}`} value={line.name} onChange={(event) => updateLine(line.id, "name", event.target.value)} maxLength={160} className={cellInput} />
+                        <Select
+                          value={line.name || null}
+                          onValueChange={(value) => updateLine(line.id, "name", !value || value === NO_NAME ? "" : value)}
+                        >
+                          <SelectTrigger className={`${cellInput} !h-11 justify-between [&_svg]:opacity-0 group-hover:[&_svg]:opacity-60 focus-visible:[&_svg]:opacity-100`} aria-label={`Name for line ${index + 1}`}>
+                            <SelectValue placeholder="" />
+                          </SelectTrigger>
+                          <SelectContent className="min-w-56">
+                            <SelectItem value={NO_NAME} className="text-muted-foreground">No name</SelectItem>
+                            {line.name && !customerNames.includes(line.name) && !supplierNames.includes(line.name) ? <SelectItem value={line.name}>{line.name}</SelectItem> : null}
+                            {customerNames.length ? (
+                              <>
+                                <SelectSeparator />
+                                <SelectGroup>
+                                  <SelectLabel>Customers</SelectLabel>
+                                  {customerNames.map((name) => <SelectItem key={`customer-${name}`} value={name}>{name}</SelectItem>)}
+                                </SelectGroup>
+                              </>
+                            ) : null}
+                            {supplierNames.length ? (
+                              <>
+                                <SelectSeparator />
+                                <SelectGroup>
+                                  <SelectLabel>Suppliers</SelectLabel>
+                                  {supplierNames.filter((name) => !customerNames.includes(name)).map((name) => <SelectItem key={`supplier-${name}`} value={name}>{name}</SelectItem>)}
+                                </SelectGroup>
+                              </>
+                            ) : null}
+                            {!customerNames.length && !supplierNames.length ? <p className="px-2 py-1.5 text-xs text-muted-foreground">Add customers or suppliers to pick them here.</p> : null}
+                          </SelectContent>
+                        </Select>
                       </td>
                       <td className="px-1">
                         <div className="flex items-center justify-center gap-0.5">

@@ -917,6 +917,8 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
           record={editingRecord}
           defaults={defaults}
           currency={defaultCurrency}
+          customers={customers}
+          vendors={vendors}
           open={editorOpen}
           onOpenChange={setEditorOpen}
           onSaved={handleSaved}

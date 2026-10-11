@@ -113,8 +113,8 @@ export default async function SectionPage({ params, searchParams }: SectionPageP
   }
 
   const kinds = new Set<RecordKind>([module.kind, "settings"]);
-  if (module.fields.some((field) => field.key === "customer")) kinds.add("customers");
-  if (module.fields.some((field) => field.key === "vendor")) kinds.add("vendors");
+  if (module.fields.some((field) => field.key === "customer") || module.kind === "journals") kinds.add("customers");
+  if (module.fields.some((field) => field.key === "vendor") || module.kind === "journals") kinds.add("vendors");
   if (["invoices", "bills", "journals", "supplier-credits", "purchase-orders"].includes(module.kind)) kinds.add("accounts");
   if (module.fields.some((field) => field.key === "lineItems")) kinds.add("items");
   const groups = await listBookkeepingRecordGroups([...kinds]);
