@@ -426,7 +426,9 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
           ? { label: "Actions", items: [{ action: "apply-credit", label: "Apply credit" }] }
           : module.kind === "supplier-credits"
             ? { label: "Actions", items: [{ action: "refund", label: "Record refund" }] }
-            : null;
+            : module.kind === "journals"
+              ? { label: "Actions", items: [] }
+              : null;
   const supportsBulkActions = Boolean(bulkMenu);
   const [bulkPaymentOpen, setBulkPaymentOpen] = useState(false);
   const [bulkExpenseIds, setBulkExpenseIds] = useState<string[]>([]);
@@ -794,7 +796,7 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
                               : BadgeCheck;
                     return <DropdownMenuItem key={item.action} onClick={() => void runBulkAction(item.action)}><Icon size={15} />{item.label}</DropdownMenuItem>;
                   })}
-                  <DropdownMenuSeparator />
+                  {bulkMenu.items.length ? <DropdownMenuSeparator /> : null}
                   <DropdownMenuItem variant="destructive" onClick={() => void runBulkAction("delete")}><Trash2 size={15} />Delete</DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
