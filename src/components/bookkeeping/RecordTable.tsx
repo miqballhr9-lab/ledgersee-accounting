@@ -135,7 +135,12 @@ function displayValue(record: BookkeepingRecord, key: string) {
   return <span className="block max-w-[220px] truncate" title={value}>{value}</span>;
 }
 
-function rowActions(module: ModuleDefinition, record: BookkeepingRecord, onAction: RecordTableProps["onAction"]) {
+function rowActions(
+  module: ModuleDefinition,
+  record: BookkeepingRecord,
+  onAction: RecordTableProps["onAction"],
+  row: { canEdit: boolean; canDelete: boolean; onEdit: () => void; onDelete: () => void },
+) {
   const actions: { kind: RecordActionKind; label: string; icon: typeof ArrowRightLeft }[] = [];
   const purchaseStatus = record.data.status === "Sent" ? "RFQ Sent" : record.data.status || "Draft";
   const hasAccountingRecord = Boolean(record.data.convertedRecordId || record.data.convertedKind);
@@ -143,8 +148,7 @@ function rowActions(module: ModuleDefinition, record: BookkeepingRecord, onActio
   const canConvertPurchaseOrder = module.kind === "purchase-orders" && ["Purchase Order", "Received"].includes(purchaseStatus) && !hasAccountingRecord;
   if (module.kind === "purchase-orders") {
     const status = record.data.status === "Sent" ? "RFQ Sent" : record.data.status || "Draft";
-    if (status === "Draft") actions.push({ kind: "send-rfq", label: "Send RFQ", icon: Mail });
-    else if (status === "RFQ Sent") actions.push({ kind: "confirm-order", label: "Confirm", icon: BadgeCheck });
+    if (status === "Draft" || status === "RFQ Sent") actions.push({ kind: "confirm-order", label: "Confirm", icon: BadgeCheck });
     else if (status === "Purchase Order") actions.push({ kind: "receive-order", label: "Receive", icon: PackageCheck });
     else if (status === "Received" && canConvertPurchaseOrder) actions.push({ kind: "convert", label: "Create bill", icon: ArrowRightLeft });
   }
@@ -166,10 +170,11 @@ function rowActions(module: ModuleDefinition, record: BookkeepingRecord, onActio
           <Icon size={13} />{label}
         </Button>
       ))}
-      {module.kind === "purchase-orders" && (canCancelPurchaseOrder || canConvertPurchaseOrder) ? (
+      {module.kind === "purchase-orders" ? (
         <DropdownMenu>
-          <DropdownMenuTrigger render={<Button type="button" variant="outline" size="icon-sm" aria-label="More purchase order actions"><Ellipsis size={15} /></Button>} />
-          <DropdownMenuContent align="end">
+          <DropdownMenuTrigger render={<Button type="button" variant="ghost" size="icon-sm" aria-label={`More actions for ${record.data.poNumber || "purchase order"}`}><Ellipsis size={15} /></Button>} />
+          <DropdownMenuContent align="end" className="min-w-44">
+            {row.canEdit ? <DropdownMenuItem onClick={row.onEdit}><Pencil size={14} />Edit</DropdownMenuItem> : null}
             {canConvertPurchaseOrder ? (
               <>
                 {purchaseStatus === "Purchase Order" ? <DropdownMenuItem onClick={() => onAction("convert", record)}><ArrowRightLeft size={14} />Create bill</DropdownMenuItem> : null}
@@ -177,6 +182,8 @@ function rowActions(module: ModuleDefinition, record: BookkeepingRecord, onActio
               </>
             ) : null}
             {canCancelPurchaseOrder ? <DropdownMenuItem className="text-destructive focus:text-destructive" onClick={() => onAction("cancel-order", record)}><Ban size={14} />Cancel purchase order</DropdownMenuItem> : null}
+            {row.canDelete ? <DropdownMenuItem variant="destructive" onClick={row.onDelete}><Trash2 size={14} />Delete</DropdownMenuItem> : null}
+            {!row.canEdit && !row.canDelete && !canCancelPurchaseOrder && !canConvertPurchaseOrder ? <DropdownMenuItem disabled>No more actions</DropdownMenuItem> : null}
           </DropdownMenuContent>
         </DropdownMenu>
       ) : ["invoices", "estimates", "sales-orders", "credit-notes"].includes(module.kind) ? (
@@ -252,9 +259,9 @@ export default function RecordTable({ module, records, columns = module.columns,
                 ))}
                 <TableCell className="whitespace-nowrap text-right">
                   <div className="flex items-center justify-end gap-1.5">
-                    {rowActions(module, record, onAction)}
-                    {canEdit ? <Button type="button" variant="ghost" size="icon-sm" aria-label={`Edit ${module.label.toLowerCase()}`} onClick={() => onEdit(record)}><Pencil size={14} /></Button> : null}
-                    {canDelete ? <Button type="button" variant="ghost" size="icon-sm" aria-label={`Delete ${module.label.toLowerCase()}`} className="text-muted-foreground hover:text-destructive" onClick={() => onDelete(record)}><Trash2 size={14} /></Button> : null}
+                    {rowActions(module, record, onAction, { canEdit, canDelete, onEdit: () => onEdit(record), onDelete: () => onDelete(record) })}
+                    {canEdit && module.kind !== "purchase-orders" ? <Button type="button" variant="ghost" size="icon-sm" aria-label={`Edit ${module.label.toLowerCase()}`} onClick={() => onEdit(record)}><Pencil size={14} /></Button> : null}
+                    {canDelete && module.kind !== "purchase-orders" ? <Button type="button" variant="ghost" size="icon-sm" aria-label={`Delete ${module.label.toLowerCase()}`} className="text-muted-foreground hover:text-destructive" onClick={() => onDelete(record)}><Trash2 size={14} /></Button> : null}
                   </div>
                 </TableCell>
               </TableRow>

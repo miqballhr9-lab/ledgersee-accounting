@@ -1442,7 +1442,7 @@ export async function advancePurchaseOrder(
     const updatedAt = new Date();
 
     if (action === "confirm") {
-      if (status !== "RFQ Sent") throw new Error("Send the RFQ before confirming this order.");
+      if (!["Draft", "RFQ Sent"].includes(status)) throw new Error("Only a draft order can be confirmed.");
       await transaction.update(bookkeepingRecord)
         .set({ data: { ...lockedOrder.data, status: "Purchase Order", confirmedAt: updatedAt.toISOString() }, updatedAt })
         .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "purchase-orders")));
