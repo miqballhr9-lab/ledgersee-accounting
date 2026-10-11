@@ -441,7 +441,7 @@ export async function saveBookkeepingRecord(
       debitAccount: firstDebit?.account ?? "",
       creditAccount: firstCredit?.account ?? "",
       amount: (debitTotalCents / 100).toFixed(2),
-      memo: journalLines.map((line) => line.description).filter(Boolean).join(" · ").slice(0, 4000),
+      memo: data.memo || journalLines.map((line) => line.description).filter(Boolean).join(" · ").slice(0, 4000),
     };
   } else if (kind === "journals") {
     const amount = Number(data.amount);

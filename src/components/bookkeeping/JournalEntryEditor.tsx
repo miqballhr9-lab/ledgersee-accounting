@@ -1,25 +1,29 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import { Plus, Trash2 } from "lucide-react";
+import { ChevronDown, Copy, FileUp, GripVertical, LoaderCircle, Paperclip, Plus, Trash2, X } from "lucide-react";
 import { readableError } from "@/lib/action-error";
 
-import { saveBookkeepingRecord } from "@/app/actions";
+import { getAttachmentUploadTarget, saveBookkeepingRecord } from "@/app/actions";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Textarea } from "@/components/ui/textarea";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
 
 interface JournalEntryEditorProps {
   accounts: BookkeepingRecord[];
   record: BookkeepingRecord | null;
   defaults: Record<string, string>;
+  currency: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSaved: (record: BookkeepingRecord) => void;
+  /** Called instead of closing when the person chooses "Save and new". */
+  onSaveAndNew: (record: BookkeepingRecord) => void;
 }
 
 interface JournalLine {
@@ -181,7 +185,19 @@ function amountText(value: number) {
   return (value / 100).toFixed(2);
 }
 
-export default function JournalEntryEditor({ accounts, record, defaults, open, onOpenChange, onSaved }: JournalEntryEditorProps) {
+function moneyText(value: number, currency: string) {
+  try {
+    return new Intl.NumberFormat(undefined, { style: "currency", currency, minimumFractionDigits: 2 }).format(value / 100);
+  } catch {
+    return `${currency} ${amountText(value)}`;
+  }
+}
+
+// Spreadsheet-style cells: no box until a cell is focused, like a ledger sheet.
+const cellInput = "h-11 w-full rounded-none border-0 bg-transparent px-2.5 shadow-none focus-visible:bg-card focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/60 dark:bg-transparent";
+const cellBorder = "border-r border-dashed border-border";
+
+export default function JournalEntryEditor({ accounts, record, defaults, currency, open, onOpenChange, onSaved, onSaveAndNew }: JournalEntryEditorProps) {
   const [date, setDate] = useState(defaults.date ?? "");
   const [reference, setReference] = useState(defaults.reference ?? "");
   const [lines, setLines] = useState<JournalLine[]>(() => initialLines(record, accounts));
@@ -189,6 +205,13 @@ export default function JournalEntryEditor({ accounts, record, defaults, open, o
   const [error, setError] = useState("");
   const [status, setStatus] = useState("");
   const [pending, setPending] = useState(false);
+  const [memo, setMemo] = useState(record?.data.memo ?? "");
+  const [attachment, setAttachment] = useState({ url: record?.data.attachment ?? "", name: record?.data.attachmentName ?? "" });
+  const [uploading, setUploading] = useState(false);
+  const [draggedLineId, setDraggedLineId] = useState<number | null>(null);
+  const saveAndNewRef = useRef(false);
+  const formRef = useRef<HTMLFormElement>(null);
+  const attachmentInputRef = useRef<HTMLInputElement>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
   const accountOptions = accounts.filter((account) => account.data.name?.trim());
 
@@ -197,6 +220,8 @@ export default function JournalEntryEditor({ accounts, record, defaults, open, o
     setDate(record?.data.date ?? defaults.date ?? "");
     setReference(record?.data.reference ?? defaults.reference ?? "");
     setLines(startingLines);
+    setMemo(record?.data.memo ?? "");
+    setAttachment({ url: record?.data.attachment ?? "", name: record?.data.attachmentName ?? "" });
     setNextLineId(Math.max(0, ...startingLines.map((line) => line.id)) + 1);
     setError("");
     setStatus("");
@@ -227,6 +252,41 @@ export default function JournalEntryEditor({ accounts, record, defaults, open, o
 
   function removeLine(id: number) {
     setLines((current) => current.length > 2 ? current.filter((line) => line.id !== id) : current.map((line) => line.id === id ? { ...line, accountId: "", debit: "", credit: "", description: "", name: "" } : line));
+  }
+
+  function copyLine(id: number) {
+    if (lines.length >= 50) return;
+    setLines((current) => current.flatMap((line) => line.id === id ? [line, { ...line, id: nextLineId }] : [line]));
+    setNextLineId((current) => current + 1);
+  }
+
+  function moveLine(fromId: number, toId: number) {
+    if (fromId === toId) return;
+    setLines((current) => {
+      const from = current.findIndex((line) => line.id === fromId);
+      const to = current.findIndex((line) => line.id === toId);
+      if (from < 0 || to < 0) return current;
+      const next = [...current];
+      const [moving] = next.splice(from, 1);
+      next.splice(to, 0, moving);
+      return next;
+    });
+  }
+
+  async function uploadAttachment(file: File | undefined) {
+    if (!file) return;
+    setError("");
+    setUploading(true);
+    try {
+      const target = await getAttachmentUploadTarget(file.name, file.type, file.size);
+      const response = await fetch(target.uploadUrl, { method: "PUT", headers: { "Content-Type": file.type }, body: file });
+      if (!response.ok) throw new Error("The upload didn’t finish. Please try again.");
+      setAttachment({ url: target.publicUrl, name: file.name });
+    } catch (uploadError) {
+      setError(uploadError instanceof Error ? readableError(uploadError) : "The upload didn’t finish. Please try again.");
+    } finally {
+      setUploading(false);
+    }
   }
 
   async function importCsv(file: File | undefined) {
@@ -278,6 +338,8 @@ export default function JournalEntryEditor({ accounts, record, defaults, open, o
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const submitter = (event.nativeEvent as SubmitEvent).submitter;
+    saveAndNewRef.current = submitter?.getAttribute("data-intent") === "save-and-new";
     setError("");
     const filledLines = lines.filter((line) => line.accountId || line.debit.trim() || line.credit.trim() || line.description.trim() || line.name.trim());
     if (!filledLines.length) {
@@ -314,10 +376,15 @@ export default function JournalEntryEditor({ accounts, record, defaults, open, o
       const saved = await saveBookkeepingRecord("journals", {
         date,
         reference,
+        currency: record?.data.currency || currency,
+        memo,
+        attachment: attachment.url,
+        attachmentName: attachment.name,
         lines: JSON.stringify(filledLines.map(({ accountId, debit, credit, description, name }) => ({ accountId, debit, credit, description, name }))),
       }, record?.id);
       onSaved(saved);
-      onOpenChange(false);
+      if (saveAndNewRef.current) onSaveAndNew(saved);
+      else onOpenChange(false);
     } catch (saveError) {
       setError(saveError instanceof Error ? readableError(saveError) : "We couldn’t save this journal. Please try again.");
     } finally {
@@ -327,13 +394,13 @@ export default function JournalEntryEditor({ accounts, record, defaults, open, o
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-6xl">
+      <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-[min(1400px,calc(100vw-3rem))]">
         <DialogHeader className="pr-8">
           <DialogTitle className="text-lg">{record ? "Edit journal" : "New journal"}</DialogTitle>
           <DialogDescription>Post balanced double-entry journals with a debit and a credit.</DialogDescription>
         </DialogHeader>
 
-        <form id="journal-entry-form" onSubmit={submit} className="space-y-5">
+        <form ref={formRef} id="journal-entry-form" onSubmit={submit} className="space-y-5">
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2">
               <Label htmlFor="journal-date">Journal date <span className="text-destructive">*</span></Label>
@@ -346,76 +413,137 @@ export default function JournalEntryEditor({ accounts, record, defaults, open, o
           </div>
 
           <div className="flex justify-end">
-            <Button type="button" variant="outline" size="sm" onClick={() => importInputRef.current?.click()} disabled={pending || !accountOptions.length}>Import</Button>
+            <Button type="button" variant="ghost" size="sm" className="gap-1.5 text-muted-foreground" onClick={() => importInputRef.current?.click()} disabled={pending || !accountOptions.length} title="Import lines from a CSV with Account, Debits, Credits, Description and Name columns"><FileUp size={15} />Import</Button>
             <Input ref={importInputRef} type="file" accept=".csv,text/csv" className="hidden" aria-label="Import journal lines from CSV" onChange={(event) => { void importCsv(event.target.files?.[0]); event.target.value = ""; }} />
           </div>
 
-          <div className="overflow-hidden rounded-md border border-border bg-card">
-            <Table className="min-w-[1040px]">
-              <TableHeader>
-                <TableRow className="bg-muted/60 hover:bg-muted/60">
-                  <TableHead className="w-12 text-center text-[11px] uppercase tracking-wide">#</TableHead>
-                  <TableHead className="min-w-64 text-[11px] uppercase tracking-wide">Account</TableHead>
-                  <TableHead className="w-36 text-right text-[11px] uppercase tracking-wide">Debits</TableHead>
-                  <TableHead className="w-36 text-right text-[11px] uppercase tracking-wide">Credits</TableHead>
-                  <TableHead className="min-w-56 text-[11px] uppercase tracking-wide">Description</TableHead>
-                  <TableHead className="min-w-36 text-[11px] uppercase tracking-wide">Name</TableHead>
-                  <TableHead className="w-10"><span className="sr-only">Remove line</span></TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
+          <div className="-mt-3 overflow-x-auto border-y border-border">
+            <table className="w-full min-w-[1040px] border-collapse text-sm">
+              <thead>
+                <tr className="border-b-2 border-border text-[11px] font-semibold uppercase tracking-wide text-foreground">
+                  <th className="w-8" aria-label="Reorder" />
+                  <th className={`w-9 py-2.5 pr-2 text-right ${cellBorder}`}>#</th>
+                  <th className={`min-w-60 px-2.5 py-2.5 text-left ${cellBorder}`}>Account</th>
+                  <th className={`w-40 px-2.5 py-2.5 text-right ${cellBorder}`}>Debits</th>
+                  <th className={`w-40 px-2.5 py-2.5 text-right ${cellBorder}`}>Credits</th>
+                  <th className={`min-w-64 px-2.5 py-2.5 text-left ${cellBorder}`}>Description</th>
+                  <th className={`min-w-40 px-2.5 py-2.5 text-left ${cellBorder}`}>Name</th>
+                  <th className="w-20"><span className="sr-only">Line actions</span></th>
+                </tr>
+              </thead>
+              <tbody>
                 {lines.map((line, index) => {
                   const selectedAccount = accountOptions.find((account) => account.id === line.accountId);
                   const selectedLabel = selectedAccount ? accountLabel(selectedAccount) : line.accountId ? "Account unavailable" : undefined;
                   return (
-                  <TableRow key={line.id}>
-                    <TableCell className="border-r border-dotted border-border text-center text-xs text-muted-foreground">{index + 1}</TableCell>
-                    <TableCell className="border-r border-dotted border-border">
-                      <Select
-                        value={line.accountId || undefined}
-                        items={accountOptions.map((account) => ({ value: account.id, label: accountLabel(account) }))}
-                        onValueChange={(value) => updateLine(line.id, "accountId", value ?? "")}
-                      >
-                        <SelectTrigger className="w-full" aria-label={`Account for line ${index + 1}`}>
-                          <SelectValue placeholder={accountOptions.length ? "Choose account" : "Add a chart account first"}>{selectedLabel}</SelectValue>
-                        </SelectTrigger>
-                        <SelectContent>
-                          {accountOptions.map((account) => <SelectItem key={account.id} value={account.id}>{accountLabel(account)}</SelectItem>)}
-                        </SelectContent>
-                      </Select>
-                    </TableCell>
-                    <TableCell className="border-r border-dotted border-border">
-                      <Input aria-label={`Debit for line ${index + 1}`} type="number" min="0" step="0.01" value={line.debit} onChange={(event) => updateLine(line.id, "debit", event.target.value)} className="text-right tabular-nums" />
-                    </TableCell>
-                    <TableCell className="border-r border-dotted border-border">
-                      <Input aria-label={`Credit for line ${index + 1}`} type="number" min="0" step="0.01" value={line.credit} onChange={(event) => updateLine(line.id, "credit", event.target.value)} className="text-right tabular-nums" />
-                    </TableCell>
-                    <TableCell className="border-r border-dotted border-border">
-                      <Input aria-label={`Description for line ${index + 1}`} value={line.description} onChange={(event) => updateLine(line.id, "description", event.target.value)} maxLength={300} />
-                    </TableCell>
-                    <TableCell className="border-r border-dotted border-border">
-                      <Input aria-label={`Name for line ${index + 1}`} value={line.name} onChange={(event) => updateLine(line.id, "name", event.target.value)} maxLength={160} />
-                    </TableCell>
-                    <TableCell className="p-1 text-center">
-                      <Button type="button" variant="ghost" size="icon" aria-label={`Remove line ${index + 1}`} onClick={() => removeLine(line.id)} disabled={pending}>
-                        <Trash2 size={14} />
-                      </Button>
-                    </TableCell>
-                  </TableRow>
+                    <tr
+                      key={line.id}
+                      className={`group border-b border-border transition-colors hover:bg-muted/30 ${draggedLineId === line.id ? "opacity-50" : ""}`}
+                      onDragOver={(event) => { if (draggedLineId !== null) event.preventDefault(); }}
+                      onDrop={(event) => { event.preventDefault(); if (draggedLineId !== null) moveLine(draggedLineId, line.id); setDraggedLineId(null); }}
+                    >
+                      <td className="text-center">
+                        <span
+                          draggable
+                          onDragStart={(event) => { event.dataTransfer.effectAllowed = "move"; setDraggedLineId(line.id); }}
+                          onDragEnd={() => setDraggedLineId(null)}
+                          className="inline-flex cursor-grab text-muted-foreground/50 hover:text-muted-foreground active:cursor-grabbing"
+                          aria-label={`Drag line ${index + 1} to reorder`}
+                          title="Drag to reorder"
+                        >
+                          <GripVertical size={15} />
+                        </span>
+                      </td>
+                      <td className={`pr-2 text-right text-[13px] text-muted-foreground ${cellBorder}`}>{index + 1}</td>
+                      <td className={`p-0 ${cellBorder}`}>
+                        <Select
+                          value={line.accountId || null}
+                          items={accountOptions.map((account) => ({ value: account.id, label: accountLabel(account) }))}
+                          onValueChange={(value) => updateLine(line.id, "accountId", value ?? "")}
+                        >
+                          <SelectTrigger className={`${cellInput} !h-11 justify-between [&_svg]:opacity-0 group-hover:[&_svg]:opacity-60 focus-visible:[&_svg]:opacity-100`} aria-label={`Account for line ${index + 1}`}>
+                            <SelectValue placeholder={accountOptions.length ? "" : "Add a chart account first"}>{selectedLabel}</SelectValue>
+                          </SelectTrigger>
+                          <SelectContent>
+                            {accountOptions.map((account) => <SelectItem key={account.id} value={account.id}>{accountLabel(account)}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                      </td>
+                      <td className={`p-0 ${cellBorder}`}>
+                        <Input aria-label={`Debit for line ${index + 1}`} type="number" min="0" step="0.01" inputMode="decimal" value={line.debit} onChange={(event) => updateLine(line.id, "debit", event.target.value)} className={`${cellInput} text-right tabular-nums`} />
+                      </td>
+                      <td className={`p-0 ${cellBorder}`}>
+                        <Input aria-label={`Credit for line ${index + 1}`} type="number" min="0" step="0.01" inputMode="decimal" value={line.credit} onChange={(event) => updateLine(line.id, "credit", event.target.value)} className={`${cellInput} text-right tabular-nums`} />
+                      </td>
+                      <td className={`p-0 ${cellBorder}`}>
+                        <Input aria-label={`Description for line ${index + 1}`} value={line.description} onChange={(event) => updateLine(line.id, "description", event.target.value)} maxLength={300} className={cellInput} />
+                      </td>
+                      <td className={`p-0 ${cellBorder}`}>
+                        <Input aria-label={`Name for line ${index + 1}`} value={line.name} onChange={(event) => updateLine(line.id, "name", event.target.value)} maxLength={160} className={cellInput} />
+                      </td>
+                      <td className="px-1">
+                        <div className="flex items-center justify-center gap-0.5">
+                          <Button type="button" variant="ghost" size="icon-sm" className="text-muted-foreground" aria-label={`Copy line ${index + 1}`} title="Copy line" onClick={() => copyLine(line.id)} disabled={pending || lines.length >= 50}>
+                            <Copy size={14} />
+                          </Button>
+                          <Button type="button" variant="ghost" size="icon-sm" className="text-muted-foreground hover:text-destructive" aria-label={`Remove line ${index + 1}`} title="Remove line" onClick={() => removeLine(line.id)} disabled={pending}>
+                            <Trash2 size={14} />
+                          </Button>
+                        </div>
+                      </td>
+                    </tr>
                   );
                 })}
-              </TableBody>
-              <TableFooter>
-                <TableRow>
-                  <TableCell colSpan={2} className="text-right">Total</TableCell>
-                  <TableCell className="text-right tabular-nums">{amountText(totals.debit)}</TableCell>
-                  <TableCell className="text-right tabular-nums">{amountText(totals.credit)}</TableCell>
-                  <TableCell colSpan={3} className="text-right text-xs text-muted-foreground">
-                    {totals.debit === totals.credit && totals.debit > 0 ? "Balanced" : `Difference ${amountText(Math.abs(totals.debit - totals.credit))}`}
-                  </TableCell>
-                </TableRow>
-              </TableFooter>
-            </Table>
+              </tbody>
+              <tfoot>
+                <tr className="text-sm font-semibold">
+                  <td />
+                  <td className={cellBorder} />
+                  <td className={`px-2.5 py-3 text-right ${cellBorder}`}>Total</td>
+                  <td className={`px-2.5 py-3 text-right tabular-nums ${cellBorder}`}>{moneyText(totals.debit, currency)}</td>
+                  <td className={`px-2.5 py-3 text-right tabular-nums ${cellBorder}`}>{moneyText(totals.credit, currency)}</td>
+                  <td colSpan={3} className="px-2.5 py-3 text-right text-xs font-medium">
+                    {totals.debit === 0 && totals.credit === 0
+                      ? null
+                      : totals.debit === totals.credit
+                        ? <span className="text-primary">Balanced</span>
+                        : <span className="text-destructive">Out of balance by {moneyText(Math.abs(totals.debit - totals.credit), currency)}</span>}
+                  </td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+
+          <div className="flex gap-2">
+            <Button type="button" variant="outline" size="sm" onClick={addLines} disabled={pending || lines.length >= 50}><Plus size={14} />Add lines</Button>
+            <Button type="button" variant="outline" size="sm" onClick={clearLines} disabled={pending}>Clear all lines</Button>
+          </div>
+
+          <div className="grid gap-5 pt-2 md:grid-cols-2">
+            <div className="space-y-2">
+              <Label htmlFor="journal-memo">Memo</Label>
+              <Textarea id="journal-memo" value={memo} onChange={(event) => setMemo(event.target.value)} maxLength={4000} className="min-h-32" />
+            </div>
+            <div className="space-y-2">
+              <Label>Attachments</Label>
+              <div className="flex min-h-32 flex-col items-center justify-center gap-1.5 rounded-md border border-dashed border-border px-4 py-5 text-center">
+                {attachment.url ? (
+                  <div className="flex max-w-full items-center gap-2 text-sm">
+                    <Paperclip size={14} className="shrink-0 text-muted-foreground" />
+                    <a href={attachment.url} target="_blank" rel="noreferrer" className="truncate text-primary underline-offset-4 hover:underline">{attachment.name || "Attachment"}</a>
+                    <Button type="button" variant="ghost" size="icon-xs" aria-label="Remove attachment" onClick={() => setAttachment({ url: "", name: "" })} disabled={pending}><X size={13} /></Button>
+                  </div>
+                ) : (
+                  <>
+                    <Button type="button" variant="link" className="h-auto p-0" onClick={() => attachmentInputRef.current?.click()} disabled={uploading || pending}>
+                      {uploading ? <><LoaderCircle size={14} className="animate-spin" />Uploading…</> : "Add attachment"}
+                    </Button>
+                    <p className="text-xs text-muted-foreground">PDF or image, up to 20 MB</p>
+                  </>
+                )}
+                <Input ref={attachmentInputRef} type="file" accept="application/pdf,image/png,image/jpeg,image/webp,text/csv" className="hidden" aria-label="Add attachment" onChange={(event) => { void uploadAttachment(event.target.files?.[0]); event.target.value = ""; }} />
+              </div>
+            </div>
           </div>
 
           {!accountOptions.length ? <p className="text-sm text-muted-foreground">Add accounts in Chart of Accounts before recording a journal.</p> : null}
@@ -423,15 +551,20 @@ export default function JournalEntryEditor({ accounts, record, defaults, open, o
           {error ? <p role="alert" className="rounded-md border border-destructive/20 bg-destructive/5 px-3 py-2.5 text-sm text-destructive">{error}</p> : null}
         </form>
 
-        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border pt-3">
-          <div className="flex gap-2">
-            <Button type="button" variant="outline" size="sm" onClick={addLines} disabled={pending || lines.length >= 50}><Plus size={14} /> Add lines</Button>
-            <Button type="button" variant="outline" size="sm" onClick={clearLines} disabled={pending}>Clear all lines</Button>
+        <div className="sticky -bottom-4 -mx-4 -mb-4 flex items-center justify-between gap-2 border-t border-border bg-card px-4 py-3">
+          <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={pending}>Cancel</Button>
+          <div className="flex items-center gap-2">
+            <Button type="submit" form="journal-entry-form" variant="outline" disabled={pending || uploading || !accountOptions.length}>{pending ? "Saving…" : "Save"}</Button>
+            <div className="flex">
+              <Button type="submit" form="journal-entry-form" data-intent="save-and-new" className="rounded-r-none" disabled={pending || uploading || !accountOptions.length}>Save and new</Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger render={<Button type="button" className="rounded-l-none border-l border-primary-foreground/25 px-2" aria-label="More save options" disabled={pending || uploading || !accountOptions.length}><ChevronDown size={15} /></Button>} />
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={() => formRef.current?.requestSubmit()}>Save and close</DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
           </div>
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={pending}>Cancel</Button>
-            <Button type="submit" form="journal-entry-form" disabled={pending || !accountOptions.length}>{pending ? "Saving…" : record ? "Save changes" : "Save journal"}</Button>
-          </DialogFooter>
         </div>
       </DialogContent>
     </Dialog>

@@ -916,9 +916,11 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
           accounts={accounts}
           record={editingRecord}
           defaults={defaults}
+          currency={defaultCurrency}
           open={editorOpen}
           onOpenChange={setEditorOpen}
           onSaved={handleSaved}
+          onSaveAndNew={(saved) => void handleInvoiceSaveComplete(saved, "save-and-new")}
         />
       ) : (
         <RecordEditor
