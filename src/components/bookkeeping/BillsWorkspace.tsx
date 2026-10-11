@@ -6,6 +6,7 @@ import { ArrowDownToLine, Check, MoreHorizontal, Pencil, Plus, Search, Trash2 } 
 
 import { deleteBookkeepingRecord, markRecordPaid } from "@/app/actions";
 import RecordEditor from "@/components/bookkeeping/RecordEditor";
+import { useNewRecordParam } from "@/hooks/use-new-record-param";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
@@ -123,6 +124,8 @@ export default function BillsWorkspace({ records: initialRecords, vendors, accou
     setActionMessage("");
     setEditorOpen(true);
   }
+
+  useNewRecordParam(openNewBill);
 
   function openEditBill(record: BookkeepingRecord) {
     setEditingRecord(record);

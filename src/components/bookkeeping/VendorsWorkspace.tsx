@@ -6,6 +6,7 @@ import { ArrowDownToLine, MoreHorizontal, Pencil, Plus, Search, Trash2 } from "l
 
 import { deleteBookkeepingRecord } from "@/app/actions";
 import RecordEditor from "@/components/bookkeeping/RecordEditor";
+import { useNewRecordParam } from "@/hooks/use-new-record-param";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
@@ -110,6 +111,8 @@ export default function VendorsWorkspace({ records: initialRecords, bills, accou
     setActionMessage("");
     setEditorOpen(true);
   }
+
+  useNewRecordParam(openNewVendor);
 
   function openEditVendor(vendor: BookkeepingRecord) {
     setEditingRecord(vendor);

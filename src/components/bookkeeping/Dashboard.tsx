@@ -87,8 +87,8 @@ export default function Dashboard({ records, asOfDate }: DashboardProps) {
           <p className="mt-1.5 text-sm text-muted-foreground">Here’s how your books are looking.</p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" nativeButton={false} render={<Link href="/app/expenses" />} className="gap-2"><ReceiptText size={15} />Add expense</Button>
-          <Button nativeButton={false} render={<Link href="/app/invoices" />} className="gap-2"><Plus size={16} />New invoice</Button>
+          <Button variant="outline" nativeButton={false} render={<Link href="/app/expenses?new=1" />} className="gap-2"><ReceiptText size={15} />Add expense</Button>
+          <Button nativeButton={false} render={<Link href="/app/invoices?new=1" />} className="gap-2"><Plus size={16} />New invoice</Button>
         </div>
       </section>
 
@@ -171,8 +171,8 @@ export default function Dashboard({ records, asOfDate }: DashboardProps) {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div><h2 className="text-sm font-semibold">Keep your records moving</h2><p className="mt-1 text-xs text-muted-foreground">Start with a customer, or record a supplier bill.</p></div>
           <div className="flex gap-2">
-            <Button variant="outline" size="sm" nativeButton={false} render={<Link href="/app/customers" />}>Add customer</Button>
-            <Button variant="outline" size="sm" nativeButton={false} render={<Link href="/app/bills" />}>Add a bill</Button>
+            <Button variant="outline" size="sm" nativeButton={false} render={<Link href="/app/customers?new=1" />}>Add customer</Button>
+            <Button variant="outline" size="sm" nativeButton={false} render={<Link href="/app/bills?new=1" />}>Add a bill</Button>
           </div>
         </div>
       </section>

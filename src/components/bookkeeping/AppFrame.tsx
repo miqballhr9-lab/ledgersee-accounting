@@ -7,6 +7,7 @@ import {
   ArrowLeft,
   ArrowLeftRight,
   Banknote,
+  ChartNoAxesCombined,
   BarChart3,
   Boxes,
   BookOpenCheck,
@@ -27,18 +28,22 @@ import {
   Percent,
   Receipt,
   Repeat,
+  Repeat2,
   Settings,
+  Settings2,
   ShieldCheck,
   ShoppingCart,
   Undo2,
   UserRound,
   Users,
   Wallet,
+  WalletCards,
   X,
   type LucideIcon,
 } from "lucide-react";
 
 import BrandWordmark from "@/components/brand/BrandWordmark";
+import CommandMenu from "@/components/bookkeeping/CommandMenu";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -71,9 +76,11 @@ const icons: Record<string, LucideIcon> = {
   ClipboardList,
   Undo2,
   Repeat,
+  Repeat2,
   ContactRound,
   Receipt,
   Wallet,
+  WalletCards,
   ShoppingCart,
   Landmark,
   ArrowLeftRight,
@@ -83,10 +90,12 @@ const icons: Record<string, LucideIcon> = {
   BookOpenCheck,
   Percent,
   BarChart3,
+  ChartNoAxesCombined,
   Banknote,
   Boxes,
   ShieldCheck,
   Settings,
+  Settings2,
 };
 
 const gearGroups = [
@@ -115,6 +124,20 @@ const gearGroups = [
   },
 ];
 
+function itemHref(slug: string) {
+  return slug === "dashboard" ? "/app" : `/app/${slug}`;
+}
+
+/** The dashboard lives at `/app`, which prefixes every route, so it only matches exactly. */
+function isItemActive(slug: string, pathname: string) {
+  const href = itemHref(slug);
+  return pathname === href || (slug !== "dashboard" && pathname.startsWith(`${href}/`));
+}
+
+function groupForPath(pathname: string) {
+  return navigationGroups.find((group) => group.items.some((item) => isItemActive(item.slug, pathname)))?.label ?? null;
+}
+
 function initials(name: string) {
   return name.trim().split(/\s+/).slice(0, 2).map((part) => part[0]?.toUpperCase() ?? "").join("") || "LL";
 }
@@ -124,16 +147,16 @@ export default function AppFrame({ userName, userEmail, children }: AppFrameProp
   const router = useRouter();
   const [menuOpen, setMenuOpen] = useState(false);
   const [isSigningOut, setIsSigningOut] = useState(false);
-  const [openGroup, setOpenGroup] = useState<string | null>(() =>
-    navigationGroups.find((group) => group.items.some((item) => {
-      const href = item.slug === "dashboard" ? "/app" : `/app/${item.slug}`;
-      return pathname === href || pathname.startsWith(`${href}/`);
-    }))?.label ?? "Overview"
-  );
-  const activeLabel = navigationGroups.flatMap((group) => group.items).find((item) => {
-    const href = item.slug === "dashboard" ? "/app" : `/app/${item.slug}`;
-    return pathname === href;
-  })?.label ?? (pathname === "/app/profile" ? "Profile & privacy" : "Workspace");
+  const [openGroup, setOpenGroup] = useState<string | null>(() => groupForPath(pathname) ?? "Overview");
+  // Follow navigation from outside the sidebar (gear menu, quick search, links in pages).
+  const [syncedPath, setSyncedPath] = useState(pathname);
+  if (syncedPath !== pathname) {
+    setSyncedPath(pathname);
+    const group = groupForPath(pathname);
+    if (group) setOpenGroup(group);
+  }
+  const activeLabel = navigationGroups.flatMap((group) => group.items).find((item) => isItemActive(item.slug, pathname))?.label
+    ?? (pathname === "/app/profile" ? "Profile & privacy" : "Workspace");
 
   async function handleSignOut() {
     setIsSigningOut(true);
@@ -191,8 +214,8 @@ export default function AppFrame({ userName, userEmail, children }: AppFrameProp
                 </CollapsibleTrigger>
                 <CollapsibleContent className="space-y-0.5">
                   {group.items.map((item) => {
-                    const href = item.slug === "dashboard" ? "/app" : `/app/${item.slug}`;
-                    const isActive = pathname === href || pathname.startsWith(`${href}/`);
+                    const href = itemHref(item.slug);
+                    const isActive = isItemActive(item.slug, pathname);
                     const Icon = icons[item.icon] ?? FileText;
                     return (
                       <Link
@@ -245,7 +268,8 @@ export default function AppFrame({ userName, userEmail, children }: AppFrameProp
             </div>
           </div>
           <div className="flex items-center gap-2 sm:gap-3">
-            <span className="hidden rounded-full border border-border bg-background px-3 py-1.5 text-[11px] font-medium text-muted-foreground sm:inline-flex">Business account</span>
+            <CommandMenu icons={icons} />
+            <span className="hidden rounded-full border border-border bg-background px-3 py-1.5 text-[11px] font-medium text-muted-foreground xl:inline-flex">Business account</span>
             <DropdownMenu>
               <DropdownMenuTrigger render={<Button variant="outline" size="icon" aria-label="Open settings and tools" title="Settings and tools" className="shrink-0" />}>
                 <Settings size={17} strokeWidth={1.8} />

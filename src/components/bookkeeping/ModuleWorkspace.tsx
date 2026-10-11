@@ -36,6 +36,7 @@ import { budgetActualRecords, recordsWithinBudgetDates, type BudgetLine } from "
 import JournalEntryEditor from "@/components/bookkeeping/JournalEntryEditor";
 import ItemsBulkImport from "@/components/bookkeeping/ItemsBulkImport";
 import RecordEditor from "@/components/bookkeeping/RecordEditor";
+import { useNewRecordParam } from "@/hooks/use-new-record-param";
 import RecordTable, { type RecordActionKind } from "@/components/bookkeeping/RecordTable";
 
 interface ModuleWorkspaceProps {
@@ -312,6 +313,8 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
     setActionMessage("");
     setEditorOpen(true);
   }
+
+  useNewRecordParam(openNewRecord);
 
   function openEditRecord(record: BookkeepingRecord) {
     setEditingRecord(record);

@@ -6,6 +6,7 @@ import { ArrowDownToLine, CalendarDays, Filter, MoreHorizontal, Pencil, Plus, Se
 
 import { deleteBookkeepingRecord } from "@/app/actions";
 import RecordEditor from "@/components/bookkeeping/RecordEditor";
+import { useNewRecordParam } from "@/hooks/use-new-record-param";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -187,6 +188,8 @@ export default function ExpensesWorkspace({ expenses: initialExpenses, bills: in
     setEditorDefaults(createDefaults(kind, records, asOfDate));
     setActionMessage("");
   }
+
+  useNewRecordParam(() => openNewTransaction("expenses"));
 
   function openEditTransaction(record: BookkeepingRecord) {
     if (record.kind !== "bills" && record.kind !== "expenses") return;
