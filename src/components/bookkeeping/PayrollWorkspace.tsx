@@ -1,15 +1,16 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowDownToLine, Banknote, CalendarDays, CircleDollarSign, Copy, FileUp, Mail, Pencil, Plus, Trash2, Users } from "lucide-react";
+import { ArrowDownToLine, Banknote, CalendarDays, CircleDollarSign, Copy, FileUp, Mail, Pencil, Plus, SlidersHorizontal, Trash2, Users } from "lucide-react";
 import { toast } from "sonner";
 import { readableError } from "@/lib/action-error";
 
 import { deleteBookkeepingRecord, importPayrollCsv, saveBookkeepingRecord, sendPayrollSlip } from "@/app/actions";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -122,6 +123,58 @@ function nextPayrollMonth(month: string) {
   return value === 12 ? `${year + 1}-01` : `${year}-${String(value + 1).padStart(2, "0")}`;
 }
 
+interface PayrollColumn {
+  key: string;
+  label: string;
+  align?: "right";
+  render: (record: BookkeepingRecord) => ReactNode;
+}
+
+const PAYROLL_COLUMNS_KEY = "mikledger:payroll-columns:v1";
+const DEFAULT_PAYROLL_COLUMNS = ["employee", "designation", "days", "paymentAccount", "grossSalary", "tax", "otherDeductions", "payable", "description"];
+
+function payrollColumns(): PayrollColumn[] {
+  const money = (value: string | undefined) => formatRupees(Number(value || 0));
+  return [
+    {
+      key: "employee",
+      label: "Employee",
+      render: (record) => (
+        <>
+          <p className="font-medium">{record.data.employeeName || "Unnamed employee"}</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">{record.data.employeeId} · {record.data.cnic}</p>
+          {record.data.employeeEmail ? <p className="mt-0.5 text-xs text-muted-foreground">{record.data.employeeEmail}</p> : null}
+          <p className="mt-0.5 text-xs text-muted-foreground">Joined: {record.data.joiningDate || "Not set"}</p>
+        </>
+      ),
+    },
+    { key: "employeeId", label: "Employee ID", render: (record) => record.data.employeeId || "—" },
+    { key: "cnic", label: "CNIC", render: (record) => record.data.cnic || "—" },
+    { key: "employeeEmail", label: "Email", render: (record) => record.data.employeeEmail || "—" },
+    { key: "joiningDate", label: "Joining date", render: (record) => record.data.joiningDate || "—" },
+    { key: "month", label: "Month", render: (record) => record.data.month || "—" },
+    { key: "designation", label: "Designation", render: (record) => record.data.designation || "—" },
+    { key: "days", label: "Days", render: (record) => <span className="tabular-nums">{record.data.workedDays || "0"} / {record.data.workingDays || "0"}</span> },
+    {
+      key: "paymentAccount",
+      label: "Payment account",
+      render: (record) => record.data.paymentAccountName
+        ? <><span className="font-medium">{record.data.paymentMethod || "Account"}</span><span className="block text-xs text-muted-foreground">{record.data.paymentAccountName}</span></>
+        : <span className="text-muted-foreground">Not set</span>,
+    },
+    { key: "baseSalary", label: "Base salary", align: "right", render: (record) => money(record.data.baseSalary) },
+    { key: "increment", label: "Increment", align: "right", render: (record) => money(record.data.increment) },
+    { key: "allowances", label: "Allowances", align: "right", render: (record) => formatRupees(["incentive", "overtimeAllowance", "gymAllowance", "medicalAllowance", "otherAllowance"].reduce((sum, key) => sum + Number(record.data[key] || 0), 0)) },
+    { key: "grossSalary", label: "Gross salary", align: "right", render: (record) => <span className="font-medium">{money(record.data.grossSalary)}</span> },
+    { key: "tax", label: "Tax", align: "right", render: (record) => money(record.data.taxDeduction) },
+    { key: "otherDeductions", label: "Other deductions", align: "right", render: (record) => formatRupees(Math.max(0, Number(record.data.totalDeductions || 0) - Number(record.data.taxDeduction || 0))) },
+    { key: "payable", label: "Payable", align: "right", render: (record) => <span className="font-semibold">{money(record.data.payableSalary)}</span> },
+    { key: "description", label: "Description", render: (record) => <span className="block max-w-56 truncate text-muted-foreground">{record.data.description || "—"}</span> },
+  ];
+}
+
+const PAYROLL_COLUMNS = payrollColumns();
+
 export default function PayrollWorkspace({ records, accounts, employees = [], asOfDate, dateRange }: PayrollWorkspaceProps) {
   const router = useRouter();
   const uploadRef = useRef<HTMLInputElement>(null);
@@ -139,6 +192,28 @@ export default function PayrollWorkspace({ records, accounts, employees = [], as
   const [isDeleting, setIsDeleting] = useState("");
   const [isSending, setIsSending] = useState("");
   const [isImporting, setIsImporting] = useState(false);
+  const [visibleColumnKeys, setVisibleColumnKeys] = useState<string[]>(DEFAULT_PAYROLL_COLUMNS);
+  const allColumns = PAYROLL_COLUMNS;
+  const visibleColumns = allColumns.filter((column) => visibleColumnKeys.includes(column.key));
+
+  useEffect(() => {
+    try {
+      const stored: unknown = JSON.parse(window.localStorage.getItem(PAYROLL_COLUMNS_KEY) || "null");
+      if (Array.isArray(stored) && stored.length) setVisibleColumnKeys(stored.filter((key): key is string => typeof key === "string"));
+    } catch {
+      // Stored choice unreadable; keep the default columns.
+    }
+  }, []);
+
+  function saveVisibleColumns(next: string[]) {
+    const keys = next.includes("employee") ? next : ["employee", ...next];
+    setVisibleColumnKeys(keys);
+    try {
+      window.localStorage.setItem(PAYROLL_COLUMNS_KEY, JSON.stringify(keys));
+    } catch {
+      // Storage can be blocked; the choice still applies until reload.
+    }
+  }
   const paymentAccounts = accounts.filter((account) => paymentAccountType(account));
   const totals = calculatePayroll(values);
 
@@ -387,6 +462,26 @@ export default function PayrollWorkspace({ records, accounts, employees = [], as
             <Input aria-label="Custom range end date" type="date" value={customToDate} onChange={(event) => setCustomToDate(event.target.value)} className="sm:w-40" />
             {(customFromDate || customToDate) ? <Button type="button" variant="ghost" size="sm" onClick={() => { setCustomFromDate(""); setCustomToDate(""); }}>Use month</Button> : null}
             <Input aria-label="Search payroll" placeholder="Search employee…" value={search} onChange={(event) => setSearch(event.target.value)} className="sm:w-56" />
+            <DropdownMenu>
+              <DropdownMenuTrigger render={<Button type="button" variant="ghost" className="gap-2"><SlidersHorizontal size={16} />Customise</Button>} />
+              <DropdownMenuContent align="end" className="min-w-56">
+                <DropdownMenuGroup>
+                  <DropdownMenuLabel>Columns</DropdownMenuLabel>
+                  {allColumns.map((column) => (
+                    <DropdownMenuCheckboxItem
+                      key={column.key}
+                      checked={visibleColumnKeys.includes(column.key)}
+                      disabled={column.key === "employee"}
+                      onCheckedChange={(checked) => saveVisibleColumns(checked ? [...visibleColumnKeys, column.key] : visibleColumnKeys.filter((key) => key !== column.key))}
+                    >
+                      {column.label}
+                    </DropdownMenuCheckboxItem>
+                  ))}
+                </DropdownMenuGroup>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => saveVisibleColumns(DEFAULT_PAYROLL_COLUMNS)}>Reset to default</DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </div>
         {filteredRecords.length > 0 ? (
@@ -394,35 +489,16 @@ export default function PayrollWorkspace({ records, accounts, employees = [], as
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Employee</TableHead>
-                  <TableHead>Designation</TableHead>
-                  <TableHead>Days</TableHead>
-                  <TableHead>Payment account</TableHead>
-                  <TableHead className="text-right">Gross salary</TableHead>
-                  <TableHead className="text-right">Tax</TableHead>
-                  <TableHead className="text-right">Other deductions</TableHead>
-                  <TableHead className="text-right">Payable</TableHead>
-                  <TableHead>Description</TableHead>
+                  {visibleColumns.map((column) => <TableHead key={column.key} className={column.align === "right" ? "text-right" : undefined}>{column.label}</TableHead>)}
                   <TableHead><span className="sr-only">Actions</span></TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {filteredRecords.map((record) => (
                   <TableRow key={record.id}>
-                    <TableCell>
-                      <p className="font-medium">{record.data.employeeName || "Unnamed employee"}</p>
-                      <p className="mt-0.5 text-xs text-muted-foreground">{record.data.employeeId} · {record.data.cnic}</p>
-                      {record.data.employeeEmail ? <p className="mt-0.5 text-xs text-muted-foreground">{record.data.employeeEmail}</p> : null}
-                      <p className="mt-0.5 text-xs text-muted-foreground">Joined: {record.data.joiningDate || "Not set"}</p>
-                    </TableCell>
-                    <TableCell>{record.data.designation || "—"}</TableCell>
-                    <TableCell className="tabular-nums">{record.data.workedDays || "0"} / {record.data.workingDays || "0"}</TableCell>
-                    <TableCell>{record.data.paymentAccountName ? <><span className="font-medium">{record.data.paymentMethod || "Account"}</span><span className="block text-xs text-muted-foreground">{record.data.paymentAccountName}</span></> : <span className="text-muted-foreground">Not set</span>}</TableCell>
-                    <TableCell className="text-right font-medium tabular-nums">{formatRupees(Number(record.data.grossSalary || 0))}</TableCell>
-                    <TableCell className="text-right tabular-nums">{formatRupees(Number(record.data.taxDeduction || 0))}</TableCell>
-                    <TableCell className="text-right tabular-nums">{formatRupees(Math.max(0, Number(record.data.totalDeductions || 0) - Number(record.data.taxDeduction || 0)))}</TableCell>
-                    <TableCell className="text-right font-semibold tabular-nums">{formatRupees(Number(record.data.payableSalary || 0))}</TableCell>
-                    <TableCell className="max-w-56 truncate text-muted-foreground">{record.data.description || "—"}</TableCell>
+                    {visibleColumns.map((column) => (
+                      <TableCell key={column.key} className={column.align === "right" ? "text-right tabular-nums" : undefined}>{column.render(record)}</TableCell>
+                    ))}
                     <TableCell>
                       <div className="flex justify-end gap-1">
                         <Button variant="ghost" size="icon" aria-label={`Copy salary for ${record.data.employeeName}`} title="Copy salary to next month" onClick={() => openCopiedEntry(record)}><Copy size={15} /></Button>
