@@ -3,13 +3,14 @@
 import { useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowDownToLine, Copy, ExternalLink, FileUp, Plus, Save, Send, Trash2, GripVertical } from "lucide-react";
+import { ArrowDownToLine, ArrowUpDown, ChevronDown, Copy, ExternalLink, FileSpreadsheet, FileText, FileUp, GripVertical, Plus, Printer, Save, Send, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { readableError } from "@/lib/action-error";
 
-import { saveBudgetPlan, sendBudgetSummary } from "@/app/actions";
+import { deleteBookkeepingRecord, saveBudgetPlan, sendBudgetSummary } from "@/app/actions";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectSeparator, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
@@ -192,7 +193,10 @@ export default function BudgetPlannerWorkspace({ budgets, financialRecords, acco
 
   function loadBudget(id: string) {
     const budget = savedBudgets.find((record) => record.id === id);
-    if (!budget) return;
+    if (budget) loadBudgetRecord(budget);
+  }
+
+  function loadBudgetRecord(budget: BookkeepingRecord) {
     setSelectedBudgetId(budget.id);
     setName(budget.data.name || "Operating budget");
     setDescription(budget.data.description || "");
@@ -295,9 +299,9 @@ export default function BudgetPlannerWorkspace({ budgets, financialRecords, acco
     saveCsv("mikledger-budget-template.csv", [["name", "period", "startDate", "endDate", "category", "budgetHead", "expected", "description"]]);
   }
 
-  function exportBudget() {
+  function budgetExportRows() {
     const rows: (string | number)[][] = [["name", "period", "startDate", "endDate", "category", "budgetHead", "expected", "actual", "variance", "description"]];
-    lines.map((line) => resolveBudgetLine(line, accountHeads)).forEach((line, index) => rows.push([
+    lines.map((line) => resolveBudgetLine(line, accountHeads)).forEach((line, index) => line.budgetHead.trim() && rows.push([
       name,
       period,
       dateRange.startDate,
@@ -309,7 +313,43 @@ export default function BudgetPlannerWorkspace({ budgets, financialRecords, acco
       budgetVariance(line, actuals[index] ?? 0),
       line.description,
     ]));
-    saveCsv(`${name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "budget"}.csv`, rows);
+    return rows;
+  }
+
+  function budgetFileName() {
+    return name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "budget";
+  }
+
+  function exportBudget() {
+    saveCsv(`${budgetFileName()}.csv`, budgetExportRows());
+  }
+
+  async function exportBudgetExcel() {
+    try {
+      const XLSX = await import("xlsx");
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(budgetExportRows()), "Budget");
+      XLSX.writeFile(workbook, `${budgetFileName()}.xlsx`);
+    } catch {
+      toast.error("We couldn’t create the Excel file. Please try again.");
+    }
+  }
+
+  async function deleteBudget() {
+    const budget = savedBudgets.find((record) => record.id === selectedBudgetId);
+    if (!budget) return;
+    if (!window.confirm(`Delete the budget “${budget.data.name || "Untitled budget"}”? This can’t be undone.`)) return;
+    try {
+      await deleteBookkeepingRecord("budgets", budget.id);
+      const remaining = savedBudgets.filter((record) => record.id !== budget.id);
+      setSavedBudgets(remaining);
+      if (remaining[0]) loadBudgetRecord(remaining[0]);
+      else startNewBudget();
+      toast.success("Budget deleted.");
+      router.refresh();
+    } catch (error) {
+      toast.error(errorMessage(error));
+    }
   }
 
   async function importBudgetFile(file: File) {
@@ -396,8 +436,22 @@ export default function BudgetPlannerWorkspace({ budgets, financialRecords, acco
           <p className="mt-1.5 max-w-2xl text-sm text-muted-foreground">Set expected income and costs, then compare them with your recorded activity.</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button type="button" variant="outline" className="gap-2" onClick={downloadTemplate}><ArrowDownToLine size={15} />Blank template</Button>
-          <Button type="button" variant="outline" className="gap-2" onClick={() => uploadRef.current?.click()} disabled={isImporting}><FileUp size={15} />{isImporting ? "Importing…" : "Import CSV"}</Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger render={<Button type="button" variant="outline" className="gap-2 print:hidden" disabled={isImporting}><ArrowUpDown size={15} />{isImporting ? "Importing…" : "Import / Export"}<ChevronDown size={14} /></Button>} />
+            <DropdownMenuContent align="end" className="min-w-56">
+              <DropdownMenuItem onClick={() => uploadRef.current?.click()}><FileUp size={15} />Import CSV</DropdownMenuItem>
+              <DropdownMenuItem onClick={downloadTemplate}><FileText size={15} />Blank template</DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuGroup>
+                <DropdownMenuLabel>Download this budget</DropdownMenuLabel>
+                <DropdownMenuItem disabled={!lines.some((line) => line.budgetHead.trim())} onClick={exportBudget}><ArrowDownToLine size={15} />CSV file</DropdownMenuItem>
+                <DropdownMenuItem disabled={!lines.some((line) => line.budgetHead.trim())} onClick={() => void exportBudgetExcel()}><FileSpreadsheet size={15} />Excel (.xlsx)</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => window.print()}><Printer size={15} />Print or save as PDF</DropdownMenuItem>
+              </DropdownMenuGroup>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem variant="destructive" disabled={!selectedBudgetId} onClick={() => void deleteBudget()}><Trash2 size={15} />Delete this budget</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
           <input ref={uploadRef} type="file" accept=".csv,text/csv" className="sr-only" aria-label="Import budget CSV file" onChange={(event) => { const file = event.currentTarget.files?.[0]; if (file) void importBudgetFile(file); event.currentTarget.value = ""; }} />
         </div>
       </header>
@@ -416,7 +470,6 @@ export default function BudgetPlannerWorkspace({ budgets, financialRecords, acco
             </div>
             <div className="flex flex-wrap justify-end gap-2">
               <Button type="button" variant="outline" className="gap-2" onClick={copyBudget} disabled={!lines.some((line) => line.budgetHead.trim())}><Copy size={15} />Copy budget</Button>
-              <Button type="button" variant="outline" className="gap-2" onClick={exportBudget} disabled={!lines.some((line) => line.budgetHead.trim())}><ArrowDownToLine size={15} />Download / export</Button>
               <Button type="button" variant="outline" onClick={startNewBudget}>New budget</Button>
             </div>
           </section>
@@ -548,7 +601,7 @@ export default function BudgetPlannerWorkspace({ budgets, financialRecords, acco
           </section>
         </div>
 
-        <aside className="min-w-0 space-y-4">
+        <aside className="min-w-0 space-y-4 print:hidden">
           <section className="rounded-lg border border-border bg-card p-4">
             <p className="text-xs font-medium uppercase tracking-[0.1em] text-muted-foreground">Budget overview</p>
             <div className="mt-4 space-y-3">
