@@ -45,19 +45,37 @@ interface SheetRow {
   workedDays: string;
   baseSalary: string;
   increment: string;
-  allowances: string;
-  tax: string;
-  otherDeductions: string;
+  incentive: string;
+  overtimeAllowance: string;
+  gymAllowance: string;
+  medicalAllowance: string;
+  otherAllowance: string;
+  taxDeduction: string;
+  advanceDeduction: string;
+  loanDeduction: string;
+  fineDeduction: string;
   adjustment: string;
   description: string;
 }
 
-const allowanceKeys = ["incentive", "overtimeAllowance", "gymAllowance", "medicalAllowance", "otherAllowance"] as const;
-const deductionKeys = ["advanceDeduction", "loanDeduction", "fineDeduction"] as const;
+/** Amount columns the sheet edits, in the order they appear; each matches a payroll entry field. */
+const allowanceColumns = [
+  { key: "incentive", label: "Incentive" },
+  { key: "overtimeAllowance", label: "Overtime" },
+  { key: "gymAllowance", label: "Gym" },
+  { key: "medicalAllowance", label: "Medical" },
+  { key: "otherAllowance", label: "Other allowance" },
+] as const;
+const deductionColumns = [
+  { key: "advanceDeduction", label: "Advance" },
+  { key: "loanDeduction", label: "Loan deduction" },
+  { key: "fineDeduction", label: "Fine" },
+  { key: "adjustment", label: "Other adjustment" },
+] as const;
+const amountKeys = ["baseSalary", "increment", ...allowanceColumns.map((column) => column.key), "taxDeduction", ...deductionColumns.map((column) => column.key)] as const;
 
-function sumOf(record: BookkeepingRecord, keys: readonly string[]) {
-  const total = keys.reduce((sum, key) => sum + (Number(record.data[key]) || 0), 0);
-  return total ? String(Math.round(total * 100) / 100) : "";
+function savedAmount(value: string | undefined) {
+  return value && Number(value) ? value : "";
 }
 
 function personFromEmployee(employee: BookkeepingRecord): Person {
@@ -93,22 +111,18 @@ const cellInput = "h-11 w-full rounded-none border-0 bg-transparent px-2.5 shado
 const cellBorder = "border-r border-dashed border-border";
 
 function blankRow(id: number, workingDays: string): SheetRow {
-  return { id, personKey: "", workedDays: workingDays, baseSalary: "", increment: "", allowances: "", tax: "", otherDeductions: "", adjustment: "", description: "" };
+  return {
+    id, personKey: "", workedDays: workingDays, baseSalary: "", increment: "",
+    incentive: "", overtimeAllowance: "", gymAllowance: "", medicalAllowance: "", otherAllowance: "",
+    taxDeduction: "", advanceDeduction: "", loanDeduction: "", fineDeduction: "", adjustment: "", description: "",
+  };
 }
 
 function rowFromEntry(id: number, entry: BookkeepingRecord, personKey: string): SheetRow {
-  return {
-    id,
-    personKey,
-    workedDays: entry.data.workedDays || "",
-    baseSalary: entry.data.baseSalary || "",
-    increment: Number(entry.data.increment) ? entry.data.increment : "",
-    allowances: sumOf(entry, allowanceKeys),
-    tax: entry.data.taxDeduction || "",
-    otherDeductions: sumOf(entry, deductionKeys),
-    adjustment: entry.data.adjustment || "",
-    description: entry.data.description || "",
-  };
+  const row: SheetRow = { ...blankRow(id, entry.data.workedDays || ""), personKey, description: entry.data.description || "" };
+  for (const key of amountKeys) row[key] = savedAmount(entry.data[key]);
+  row.taxDeduction = entry.data.taxDeduction || "";
+  return row;
 }
 
 /** The month's saved entries first, then active employees who have none yet, padded to five lines. */
@@ -167,14 +181,10 @@ export default function PayrollSheet({ open, onOpenChange, month: initialMonth, 
       designation: person.designation,
       joiningDate: person.joiningDate,
       paymentAccountId: paymentAccountId || person.paymentAccountId,
-      baseSalary: row.baseSalary || "0",
-      increment: row.increment || "0",
+      ...Object.fromEntries(amountKeys.map((key) => [key, row[key] || "0"])),
+      taxDeduction: row.taxDeduction,
       workingDays: workingDays || "0",
       workedDays: row.workedDays || "0",
-      otherAllowance: row.allowances || "0",
-      taxDeduction: row.tax,
-      advanceDeduction: row.otherDeductions || "0",
-      adjustment: row.adjustment || "0",
       description: row.description,
     };
   }
@@ -220,12 +230,13 @@ export default function PayrollSheet({ open, onOpenChange, month: initialMonth, 
     const values = payrollValues(row);
     return values ? calculatePayroll(values) : null;
   });
+  const columnTotal = (key: keyof SheetRow) => rows.reduce((sum, row, index) => sum + (lineTotals[index] ? Number(row[key]) || 0 : 0), 0);
   const sheetTotals = lineTotals.reduce((sum, totals) => totals ? {
     gross: sum.gross + totals.grossSalary,
     tax: sum.tax + totals.taxDeduction,
-    other: sum.other + totals.totalDeductions - totals.taxDeduction,
     payable: sum.payable + totals.payableSalary,
-  } : sum, { gross: 0, tax: 0, other: 0, payable: 0 });
+  } : sum, { gross: 0, tax: 0, payable: 0 });
+  const allowanceTotal = (row: SheetRow) => allowanceColumns.reduce((sum, column) => sum + (Number(row[column.key]) || 0), 0);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -275,7 +286,7 @@ export default function PayrollSheet({ open, onOpenChange, month: initialMonth, 
           <DialogDescription>One line per employee for the month. Gross, tax and payable work out as you type; leave Tax empty to use the estimate. Removing a line here doesn’t delete a saved entry.</DialogDescription>
         </DialogHeader>
 
-        <form id="payroll-sheet-form" onSubmit={submit} className="space-y-5">
+        <form id="payroll-sheet-form" onSubmit={submit} className="min-w-0 space-y-5">
           <div className="grid gap-4 sm:grid-cols-3">
             <div className="space-y-1.5">
               <Label htmlFor="sheet-month">Payroll month <span className="text-destructive">*</span></Label>
@@ -296,22 +307,24 @@ export default function PayrollSheet({ open, onOpenChange, month: initialMonth, 
             </div>
           </div>
 
-          <div className="overflow-x-auto border-y border-border">
-            <table className="w-full min-w-[1240px] border-collapse text-sm">
+          <div className="max-w-full overflow-x-auto border-y border-border">
+            <table className="w-full min-w-[2360px] border-collapse text-sm">
               <thead>
                 <tr className="border-b-2 border-border text-[11px] font-semibold uppercase tracking-wide text-foreground">
-                  <th className={`w-9 py-2.5 pr-2 text-right ${cellBorder}`}>#</th>
-                  <th className={`min-w-52 px-2.5 py-2.5 text-left ${cellBorder}`}>Employee</th>
+                  <th className={`sticky left-0 z-10 w-9 min-w-9 bg-card py-2.5 pr-2 text-right ${cellBorder}`}>#</th>
+                  <th className={`sticky left-9 z-10 min-w-52 bg-card px-2.5 py-2.5 text-left ${cellBorder}`}>Employee</th>
                   <th className={`w-28 px-2.5 py-2.5 text-left ${cellBorder}`}>Employee ID</th>
                   <th className={`w-36 px-2.5 py-2.5 text-left ${cellBorder}`}>Designation</th>
                   <th className={`w-20 px-2.5 py-2.5 text-right ${cellBorder}`}>Days</th>
                   <th className={`w-32 px-2.5 py-2.5 text-right ${cellBorder}`}>Base salary</th>
                   <th className={`w-28 px-2.5 py-2.5 text-right ${cellBorder}`}>Increment</th>
-                  <th className={`w-28 px-2.5 py-2.5 text-right ${cellBorder}`}>Allowances</th>
+                  {allowanceColumns.map((column) => <th key={column.key} className={`w-28 px-2.5 py-2.5 text-right ${cellBorder}`}>{column.label}</th>)}
+                  <th className={`w-32 bg-muted/40 px-2.5 py-2.5 text-right ${cellBorder}`}>Total allowances</th>
                   <th className={`w-32 px-2.5 py-2.5 text-right ${cellBorder}`}>Gross salary</th>
                   <th className={`w-28 px-2.5 py-2.5 text-right ${cellBorder}`}>Tax</th>
-                  <th className={`w-28 px-2.5 py-2.5 text-right ${cellBorder}`}>Other deductions</th>
+                  {deductionColumns.map((column) => <th key={column.key} className={`w-28 px-2.5 py-2.5 text-right ${cellBorder}`}>{column.label}</th>)}
                   <th className={`w-32 px-2.5 py-2.5 text-right ${cellBorder}`}>Payable</th>
+                  <th className={`min-w-64 px-2.5 py-2.5 text-left ${cellBorder}`}>Description</th>
                   <th className="w-20"><span className="sr-only">Line actions</span></th>
                 </tr>
               </thead>
@@ -319,15 +332,15 @@ export default function PayrollSheet({ open, onOpenChange, month: initialMonth, 
                 {rows.map((row, index) => {
                   const person = personFor(row.personKey);
                   const totals = lineTotals[index];
-                  const number = (key: "workedDays" | "baseSalary" | "increment" | "allowances" | "tax" | "otherDeductions", label: string, placeholder?: string) => (
-                    <td className={`p-0 ${cellBorder}`}>
-                      <Input aria-label={`${label} for line ${index + 1}`} type="number" min="0" step={key === "workedDays" ? "1" : "0.01"} inputMode="decimal" value={row[key]} placeholder={placeholder} onChange={(event) => updateRow(row.id, key, event.target.value)} className={`${cellInput} text-right tabular-nums`} />
+                  const number = (key: "workedDays" | (typeof amountKeys)[number], label: string, placeholder?: string) => (
+                    <td key={key} className={`p-0 ${cellBorder}`}>
+                      <Input aria-label={`${label} for line ${index + 1}`} type="number" min={key === "adjustment" ? undefined : "0"} step={key === "workedDays" ? "1" : "0.01"} inputMode="decimal" value={row[key]} placeholder={placeholder} onChange={(event) => updateRow(row.id, key, event.target.value)} className={`${cellInput} text-right tabular-nums`} />
                     </td>
                   );
                   return (
                     <tr key={row.id} className="group border-b border-border hover:bg-muted/30">
-                      <td className={`pr-2 text-right text-[13px] text-muted-foreground ${cellBorder}`}>{index + 1}</td>
-                      <td className={`p-0 ${cellBorder}`}>
+                      <td className={`sticky left-0 z-10 w-9 min-w-9 bg-card pr-2 text-right text-[13px] text-muted-foreground ${cellBorder}`}>{index + 1}</td>
+                      <td className={`sticky left-9 z-10 min-w-52 bg-card p-0 ${cellBorder}`}>
                         <Select value={row.personKey || null} onValueChange={(value) => updateRow(row.id, "personKey", value ?? "")}>
                           <SelectTrigger className={`${cellInput} !h-11 justify-between [&_svg]:opacity-0 group-hover:[&_svg]:opacity-60 focus-visible:[&_svg]:opacity-100`} aria-label={`Employee for line ${index + 1}`}>
                             <SelectValue placeholder={activeEmployees.length ? "" : "Add employees first"} />
@@ -343,11 +356,15 @@ export default function PayrollSheet({ open, onOpenChange, month: initialMonth, 
                       {number("workedDays", "Worked days")}
                       {number("baseSalary", "Base salary")}
                       {number("increment", "Increment")}
-                      {number("allowances", "Allowances")}
+                      {allowanceColumns.map((column) => number(column.key, column.label))}
+                      <td className={`bg-muted/40 px-2.5 text-right tabular-nums ${cellBorder}`}>{totals ? rupees(allowanceTotal(row)) : ""}</td>
                       <td className={`px-2.5 text-right font-medium tabular-nums ${cellBorder}`}>{totals ? rupees(totals.grossSalary) : ""}</td>
-                      {number("tax", "Tax", totals ? String(Math.round(totals.estimatedTax)) : "")}
-                      {number("otherDeductions", "Other deductions")}
+                      {number("taxDeduction", "Tax", totals ? String(Math.round(totals.estimatedTax)) : "")}
+                      {deductionColumns.map((column) => number(column.key, column.label))}
                       <td className={`px-2.5 text-right font-semibold tabular-nums ${cellBorder}`}>{totals ? rupees(totals.payableSalary) : ""}</td>
+                      <td className={`p-0 ${cellBorder}`}>
+                        <Input aria-label={`Description for line ${index + 1}`} value={row.description} maxLength={1000} onChange={(event) => updateRow(row.id, "description", event.target.value)} className={cellInput} />
+                      </td>
                       <td className="px-1">
                         <div className="flex items-center justify-center gap-0.5">
                           <Button type="button" variant="ghost" size="icon-sm" className="text-muted-foreground" aria-label={`Copy line ${index + 1}`} title="Copy line" onClick={() => copyLine(row.id)} disabled={pending}><Copy size={14} /></Button>
@@ -361,11 +378,14 @@ export default function PayrollSheet({ open, onOpenChange, month: initialMonth, 
               <tfoot>
                 <tr className="text-sm font-semibold">
                   <td className={cellBorder} />
-                  <td colSpan={7} className={`px-2.5 py-3 text-right ${cellBorder}`}>Total</td>
+                  <td colSpan={6} className={`px-2.5 py-3 text-right ${cellBorder}`}>Total</td>
+                  {allowanceColumns.map((column) => <td key={column.key} className={`px-2.5 py-3 text-right tabular-nums ${cellBorder}`}>{rupees(columnTotal(column.key))}</td>)}
+                  <td className={`bg-muted/40 px-2.5 py-3 text-right tabular-nums ${cellBorder}`}>{rupees(allowanceColumns.reduce((sum, column) => sum + columnTotal(column.key), 0))}</td>
                   <td className={`px-2.5 py-3 text-right tabular-nums ${cellBorder}`}>{rupees(sheetTotals.gross)}</td>
                   <td className={`px-2.5 py-3 text-right tabular-nums ${cellBorder}`}>{rupees(sheetTotals.tax)}</td>
-                  <td className={`px-2.5 py-3 text-right tabular-nums ${cellBorder}`}>{rupees(sheetTotals.other)}</td>
+                  {deductionColumns.map((column) => <td key={column.key} className={`px-2.5 py-3 text-right tabular-nums ${cellBorder}`}>{rupees(columnTotal(column.key))}</td>)}
                   <td className={`px-2.5 py-3 text-right tabular-nums ${cellBorder}`}>{rupees(sheetTotals.payable)}</td>
+                  <td className={cellBorder} />
                   <td />
                 </tr>
               </tfoot>
