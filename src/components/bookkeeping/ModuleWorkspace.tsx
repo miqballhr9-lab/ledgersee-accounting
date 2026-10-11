@@ -401,14 +401,16 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
 
   async function handleDelete(record: BookkeepingRecord) {
     const title = record.data[module.titleKey] || module.label.toLowerCase();
-    if (!window.confirm(`Delete “${title}”? This can’t be undone.`)) return;
+    if (!window.confirm(`Delete “${title}”? This can’t be undone.`)) return false;
     setActionMessage("");
     try {
       await deleteBookkeepingRecord(module.kind, record.id);
       setRecords((current) => current.filter((item) => item.id !== record.id));
       setActionMessage(`${module.label} deleted.`);
+      return true;
     } catch (error) {
       setActionMessage(error instanceof Error ? readableError(error) : "We couldn’t delete that record.");
+      return false;
     }
   }
 
@@ -936,6 +938,11 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
           onOpenChange={setEditorOpen}
           onSaved={handleSaved}
           onSaveAndNew={(saved) => void handleInvoiceSaveComplete(saved, "save-and-new")}
+          onStartFrom={(values) => {
+            setEditingRecord(null);
+            setDefaults({ ...createDefaults(module, records, defaultCurrency), ...values });
+          }}
+          onDelete={handleDelete}
         />
       ) : (
         <RecordEditor

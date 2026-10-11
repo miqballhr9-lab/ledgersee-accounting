@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import { ChevronDown, Copy, FileUp, GripVertical, LoaderCircle, Paperclip, Plus, Trash2, X } from "lucide-react";
+import { BookOpen, ChevronDown, Copy, History, FileUp, GripVertical, LoaderCircle, Paperclip, Plus, Trash2, X } from "lucide-react";
 import { readableError } from "@/lib/action-error";
 
 import { getAttachmentUploadTarget, saveBookkeepingRecord } from "@/app/actions";
@@ -27,6 +27,10 @@ interface JournalEntryEditorProps {
   onSaved: (record: BookkeepingRecord) => void;
   /** Called instead of closing when the person chooses "Save and new". */
   onSaveAndNew: (record: BookkeepingRecord) => void;
+  /** Starts a new, unsaved journal from these lines and memo (used by Copy and Reverse). */
+  onStartFrom: (values: { lines: string; memo: string }) => void;
+  /** Deletes the open journal; resolves true when it was deleted. */
+  onDelete: (record: BookkeepingRecord) => Promise<boolean>;
 }
 
 interface JournalLine {
@@ -128,10 +132,11 @@ function importedAmount(value: string) {
   return amount.toFixed(2);
 }
 
-function initialLines(record: BookkeepingRecord | null, accounts: BookkeepingRecord[]) {
-  if (record?.data.lines) {
+function initialLines(record: BookkeepingRecord | null, accounts: BookkeepingRecord[], defaults: Record<string, string> = {}) {
+  const savedLinesJson = record ? record.data.lines : defaults.lines;
+  if (savedLinesJson) {
     try {
-      const parsed: unknown = JSON.parse(record.data.lines);
+      const parsed: unknown = JSON.parse(savedLinesJson);
       if (Array.isArray(parsed)) {
         const savedLines = parsed.flatMap((entry, index) => {
           const line = toObject(entry);
@@ -196,6 +201,10 @@ function moneyText(value: number, currency: string) {
   }
 }
 
+function timestampText(value: string) {
+  return value ? `${value.replace("T", " ").slice(0, 16)} UTC` : "—";
+}
+
 // Spreadsheet-style cells: no box until a cell is focused, like a ledger sheet.
 const cellInput = "h-11 w-full rounded-none border-0 bg-transparent px-2.5 shadow-none focus-visible:bg-card focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/60 dark:bg-transparent";
 const cellBorder = "border-r border-dashed border-border";
@@ -205,33 +214,35 @@ function contactNames(records: BookkeepingRecord[]) {
   return [...new Set(records.map((record) => record.data.name?.trim() ?? "").filter(Boolean))].sort((a, b) => a.localeCompare(b));
 }
 
-export default function JournalEntryEditor({ accounts, record, defaults, currency, customers, vendors, employeeNames, open, onOpenChange, onSaved, onSaveAndNew }: JournalEntryEditorProps) {
+export default function JournalEntryEditor({ accounts, record, defaults, currency, customers, vendors, employeeNames, open, onOpenChange, onSaved, onSaveAndNew, onStartFrom, onDelete }: JournalEntryEditorProps) {
   const [date, setDate] = useState(defaults.date ?? "");
   const [reference, setReference] = useState(defaults.reference ?? "");
-  const [lines, setLines] = useState<JournalLine[]>(() => initialLines(record, accounts));
+  const [lines, setLines] = useState<JournalLine[]>(() => initialLines(record, accounts, defaults));
   const [nextLineId, setNextLineId] = useState(9);
   const [error, setError] = useState("");
   const [status, setStatus] = useState("");
   const [pending, setPending] = useState(false);
-  const [memo, setMemo] = useState(record?.data.memo ?? "");
+  const [memo, setMemo] = useState(record?.data.memo ?? defaults.memo ?? "");
   const [attachment, setAttachment] = useState({ url: record?.data.attachment ?? "", name: record?.data.attachmentName ?? "" });
   const [uploading, setUploading] = useState(false);
   const [draggedLineId, setDraggedLineId] = useState<number | null>(null);
+  const [infoView, setInfoView] = useState<"transaction" | "history" | null>(null);
   const saveAndNewRef = useRef(false);
   const formRef = useRef<HTMLFormElement>(null);
   const attachmentInputRef = useRef<HTMLInputElement>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
   const accountOptions = accounts.filter((account) => account.data.name?.trim());
+  const displayCurrency = record?.data.currency || currency;
   const customerNames = useMemo(() => contactNames(customers), [customers]);
   const supplierNames = useMemo(() => contactNames(vendors), [vendors]);
   const employeeOptions = useMemo(() => [...new Set(employeeNames)].sort((a, b) => a.localeCompare(b)), [employeeNames]);
 
   useEffect(() => {
-    const startingLines = initialLines(record, accounts);
+    const startingLines = initialLines(record, accounts, defaults);
     setDate(record?.data.date ?? defaults.date ?? "");
     setReference(record?.data.reference ?? defaults.reference ?? "");
     setLines(startingLines);
-    setMemo(record?.data.memo ?? "");
+    setMemo(record?.data.memo ?? defaults.memo ?? "");
     setAttachment({ url: record?.data.attachment ?? "", name: record?.data.attachmentName ?? "" });
     setNextLineId(Math.max(0, ...startingLines.map((line) => line.id)) + 1);
     setError("");
@@ -282,6 +293,26 @@ export default function JournalEntryEditor({ accounts, record, defaults, currenc
       next.splice(to, 0, moving);
       return next;
     });
+  }
+
+  function filledLineValues() {
+    return lines
+      .filter((line) => line.accountId || line.debit.trim() || line.credit.trim() || line.description.trim() || line.name.trim())
+      .map(({ accountId, debit, credit, description, name }) => ({ accountId, debit, credit, description, name }));
+  }
+
+  function copyJournal() {
+    onStartFrom({ lines: JSON.stringify(filledLineValues()), memo });
+  }
+
+  function reverseJournal() {
+    const reversed = filledLineValues().map((line) => ({ ...line, debit: line.credit, credit: line.debit }));
+    onStartFrom({ lines: JSON.stringify(reversed), memo: `Reverse of ${record?.data.reference || "journal"}${memo ? ` — ${memo}` : ""}` });
+  }
+
+  async function deleteJournal() {
+    if (!record) return;
+    if (await onDelete(record)) onOpenChange(false);
   }
 
   async function uploadAttachment(file: File | undefined) {
@@ -550,14 +581,14 @@ export default function JournalEntryEditor({ accounts, record, defaults, currenc
                   <td />
                   <td className={cellBorder} />
                   <td className={`px-2.5 py-3 text-right ${cellBorder}`}>Total</td>
-                  <td className={`px-2.5 py-3 text-right tabular-nums ${cellBorder}`}>{moneyText(totals.debit, currency)}</td>
-                  <td className={`px-2.5 py-3 text-right tabular-nums ${cellBorder}`}>{moneyText(totals.credit, currency)}</td>
+                  <td className={`px-2.5 py-3 text-right tabular-nums ${cellBorder}`}>{moneyText(totals.debit, displayCurrency)}</td>
+                  <td className={`px-2.5 py-3 text-right tabular-nums ${cellBorder}`}>{moneyText(totals.credit, displayCurrency)}</td>
                   <td colSpan={3} className="px-2.5 py-3 text-right text-xs font-medium">
                     {totals.debit === 0 && totals.credit === 0
                       ? null
                       : totals.debit === totals.credit
                         ? <span className="text-primary">Balanced</span>
-                        : <span className="text-destructive">Out of balance by {moneyText(Math.abs(totals.debit - totals.credit), currency)}</span>}
+                        : <span className="text-destructive">Out of balance by {moneyText(Math.abs(totals.debit - totals.credit), displayCurrency)}</span>}
                   </td>
                 </tr>
               </tfoot>
@@ -604,6 +635,20 @@ export default function JournalEntryEditor({ accounts, record, defaults, currenc
         <div className="sticky -bottom-4 -mx-4 -mb-4 flex items-center justify-between gap-2 border-t border-border bg-card px-4 py-3">
           <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={pending}>Cancel</Button>
           <div className="flex items-center gap-2">
+            {record ? (
+              <>
+                <Button type="button" variant="ghost" onClick={reverseJournal} disabled={pending} title="Start a new journal with debits and credits swapped">Reverse</Button>
+                <DropdownMenu>
+                  <DropdownMenuTrigger render={<Button type="button" variant="ghost" className="gap-1" disabled={pending}>More<ChevronDown size={14} /></Button>} />
+                  <DropdownMenuContent align="end" side="top" className="min-w-48">
+                    <DropdownMenuItem onClick={copyJournal}><Copy size={14} />Copy</DropdownMenuItem>
+                    <DropdownMenuItem variant="destructive" onClick={() => void deleteJournal()}><Trash2 size={14} />Delete</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => setInfoView("transaction")}><BookOpen size={14} />Transaction journal</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => setInfoView("history")}><History size={14} />Audit history</DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </>
+            ) : null}
             <Button type="submit" form="journal-entry-form" variant="outline" disabled={pending || uploading || !accountOptions.length}>{pending ? "Saving…" : "Save"}</Button>
             <div className="flex">
               <Button type="submit" form="journal-entry-form" data-intent="save-and-new" className="rounded-r-none" disabled={pending || uploading || !accountOptions.length}>Save and new</Button>
@@ -617,6 +662,50 @@ export default function JournalEntryEditor({ accounts, record, defaults, currenc
           </div>
         </div>
       </DialogContent>
+      {record ? (
+        <Dialog open={infoView !== null} onOpenChange={(next) => { if (!next) setInfoView(null); }}>
+          <DialogContent className="sm:max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>{infoView === "history" ? "Audit history" : "Transaction journal"} · {record.data.reference || "Journal"}</DialogTitle>
+              <DialogDescription>
+                {infoView === "history" ? "When this journal was recorded and last changed." : `How this journal posts to your accounts on ${record.data.date || "its date"}.`}
+              </DialogDescription>
+            </DialogHeader>
+            {infoView === "history" ? (
+              <ul className="space-y-3 text-sm">
+                <li className="flex justify-between gap-4 border-b border-border pb-3"><span className="text-muted-foreground">Created</span><span className="tabular-nums">{timestampText(record.createdAt)}</span></li>
+                <li className="flex justify-between gap-4"><span className="text-muted-foreground">Last modified</span><span className="tabular-nums">{timestampText(record.updatedAt)}</span></li>
+              </ul>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-border text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                      <th className="py-2 pr-3">Account</th>
+                      <th className="py-2 pr-3">Name</th>
+                      <th className="py-2 pr-3 text-right">Debit</th>
+                      <th className="py-2 text-right">Credit</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {initialLines(record, accounts).filter((line) => line.accountId || cents(line.debit) || cents(line.credit)).map((line, index) => {
+                      const account = accountOptions.find((option) => option.id === line.accountId);
+                      return (
+                        <tr key={index} className="border-b border-border/60">
+                          <td className={`py-2 pr-3 ${cents(line.credit) ? "pl-6" : ""}`}>{account ? accountLabel(account) : "Account unavailable"}</td>
+                          <td className="py-2 pr-3 text-muted-foreground">{line.name || "—"}</td>
+                          <td className="py-2 pr-3 text-right tabular-nums">{cents(line.debit) ? moneyText(cents(line.debit), displayCurrency) : ""}</td>
+                          <td className="py-2 text-right tabular-nums">{cents(line.credit) ? moneyText(cents(line.credit), displayCurrency) : ""}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
+      ) : null}
     </Dialog>
   );
 }
