@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
-import { Copy, Plus, Trash2 } from "lucide-react";
+import { Copy, GripVertical, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { saveBookkeepingRecord } from "@/app/actions";
@@ -170,6 +170,7 @@ export default function PayrollSheet({ open, onOpenChange, month: initialMonth, 
     return entryPeople.get(key) ?? null;
   }
   const [pending, setPending] = useState(false);
+  const [draggedRowId, setDraggedRowId] = useState<number | null>(null);
   const [error, setError] = useState("");
 
   function payrollValues(row: SheetRow): PayrollValues | null {
@@ -247,6 +248,19 @@ export default function PayrollSheet({ open, onOpenChange, month: initialMonth, 
     setNextId((current) => current + copied.length);
     setError("");
     toast.success(`Copied ${copied.length} ${copied.length === 1 ? "salary" : "salaries"} from ${sourceMonth}. Review and save.`);
+  }
+
+  function moveRow(fromId: number, toId: number) {
+    if (fromId === toId) return;
+    setRows((current) => {
+      const from = current.findIndex((row) => row.id === fromId);
+      const to = current.findIndex((row) => row.id === toId);
+      if (from < 0 || to < 0) return current;
+      const next = [...current];
+      const [moving] = next.splice(from, 1);
+      next.splice(to, 0, moving);
+      return next;
+    });
   }
 
   function copyLine(id: number) {
@@ -339,8 +353,9 @@ export default function PayrollSheet({ open, onOpenChange, month: initialMonth, 
             <table className="w-full min-w-[2360px] border-collapse text-sm">
               <thead>
                 <tr className="border-b-2 border-border text-[11px] font-semibold uppercase tracking-wide text-foreground">
-                  <th className={`sticky left-0 z-10 w-9 min-w-9 bg-card py-2.5 pr-2 text-right ${cellBorder}`}>#</th>
-                  <th className={`sticky left-9 z-10 min-w-52 bg-card px-2.5 py-2.5 text-left ${cellBorder}`}>Employee</th>
+                  <th className="sticky left-0 z-10 w-8 min-w-8 bg-card" aria-label="Reorder" />
+                  <th className={`sticky left-8 z-10 w-9 min-w-9 bg-card py-2.5 pr-2 text-right ${cellBorder}`}>#</th>
+                  <th className={`sticky left-[4.25rem] z-10 min-w-52 bg-card px-2.5 py-2.5 text-left ${cellBorder}`}>Employee</th>
                   <th className={`w-28 px-2.5 py-2.5 text-left ${cellBorder}`}>Employee ID</th>
                   <th className={`w-36 px-2.5 py-2.5 text-left ${cellBorder}`}>Designation</th>
                   <th className={`w-20 px-2.5 py-2.5 text-right ${cellBorder}`}>Days</th>
@@ -366,9 +381,17 @@ export default function PayrollSheet({ open, onOpenChange, month: initialMonth, 
                     </td>
                   );
                   return (
-                    <tr key={row.id} className="group border-b border-border hover:bg-muted/30">
-                      <td className={`sticky left-0 z-10 w-9 min-w-9 bg-card pr-2 text-right text-[13px] text-muted-foreground ${cellBorder}`}>{index + 1}</td>
-                      <td className={`sticky left-9 z-10 min-w-52 bg-card p-0 ${cellBorder}`}>
+                    <tr
+                      key={row.id}
+                      className={`group border-b border-border hover:bg-muted/30 ${draggedRowId === row.id ? "opacity-50" : ""}`}
+                      onDragOver={(event) => { if (draggedRowId !== null) event.preventDefault(); }}
+                      onDrop={(event) => { event.preventDefault(); if (draggedRowId !== null) moveRow(draggedRowId, row.id); setDraggedRowId(null); }}
+                    >
+                      <td className="sticky left-0 z-10 w-8 min-w-8 bg-card text-center">
+                        <span draggable onDragStart={(event) => { event.dataTransfer.effectAllowed = "move"; setDraggedRowId(row.id); }} onDragEnd={() => setDraggedRowId(null)} className="inline-flex cursor-grab text-muted-foreground/50 hover:text-muted-foreground active:cursor-grabbing" aria-label={`Drag line ${index + 1} to reorder`} title="Drag to reorder"><GripVertical size={15} /></span>
+                      </td>
+                      <td className={`sticky left-8 z-10 w-9 min-w-9 bg-card pr-2 text-right text-[13px] text-muted-foreground ${cellBorder}`}>{index + 1}</td>
+                      <td className={`sticky left-[4.25rem] z-10 min-w-52 bg-card p-0 ${cellBorder}`}>
                         <Select value={row.personKey || null} onValueChange={(value) => updateRow(row.id, "personKey", value ?? "")}>
                           <SelectTrigger className={`${cellInput} !h-11 justify-between [&_svg]:opacity-0 group-hover:[&_svg]:opacity-60 focus-visible:[&_svg]:opacity-100`} aria-label={`Employee for line ${index + 1}`}>
                             <SelectValue placeholder={activeEmployees.length ? "" : "Add employees first"} />
@@ -405,6 +428,7 @@ export default function PayrollSheet({ open, onOpenChange, month: initialMonth, 
               </tbody>
               <tfoot>
                 <tr className="text-sm font-semibold">
+                  <td />
                   <td className={cellBorder} />
                   <td colSpan={6} className={`px-2.5 py-3 text-right ${cellBorder}`}>Total</td>
                   {allowanceColumns.map((column) => <td key={column.key} className={`px-2.5 py-3 text-right tabular-nums ${cellBorder}`}>{rupees(columnTotal(column.key))}</td>)}

@@ -3,7 +3,7 @@
 import { useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowDownToLine, Copy, ExternalLink, FileUp, Plus, Save, Send, Trash2 } from "lucide-react";
+import { ArrowDownToLine, Copy, ExternalLink, FileUp, Plus, Save, Send, Trash2, GripVertical } from "lucide-react";
 import { toast } from "sonner";
 import { readableError } from "@/lib/action-error";
 
@@ -12,7 +12,6 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectSeparator, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { budgetActual, budgetActualRecords, budgetExpectedTotal, budgetPresetRange, budgetVariance, csvCell, parseBudgetLines, parseCsv, recordsWithinBudgetDates, type BudgetCategory, type BudgetLine, type BudgetPeriod } from "@/lib/budget-utils";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
@@ -66,8 +65,17 @@ function isAccountReference(value: string) {
 }
 
 function emptyBudgetLine(): BudgetLine {
-  return { category: "Expenses", budgetHead: "", headKey: "", type: "Expense", expected: "0", description: "" };
+  return { category: "Expenses", budgetHead: "", headKey: "", type: "Expense", expected: "", description: "" };
 }
+
+/** The sheet always shows at least five lines, like a ledger page; empty ones are left out when saving. */
+function sheetLines(lines: BudgetLine[]) {
+  return [...lines, ...Array.from({ length: Math.max(0, 5 - lines.length) }, emptyBudgetLine)];
+}
+
+// Spreadsheet-style cells, matching the journal and payroll sheets: no box until a cell is focused.
+const cellInput = "h-11 w-full rounded-none border-0 bg-transparent px-2.5 shadow-none focus-visible:bg-card focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/60 dark:bg-transparent";
+const cellBorder = "border-r border-dashed border-border";
 
 function validPeriod(value: string | undefined): value is BudgetPeriod {
   return periodOptions.some((option) => option === value);
@@ -127,13 +135,14 @@ export default function BudgetPlannerWorkspace({ budgets, financialRecords, acco
   });
   const [lines, setLines] = useState<BudgetLine[]>(() => {
     const initialLines = budgets[0] ? parseBudgetLines(budgets[0].data.lines) : [];
-    return initialLines.length ? initialLines : [emptyBudgetLine()];
+    return sheetLines(initialLines);
   });
   const [recipientEmail, setRecipientEmail] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
   const [activeActualLine, setActiveActualLine] = useState<BudgetLine | null>(null);
+  const [draggedLine, setDraggedLine] = useState<number | null>(null);
 
   const accountHeads: BudgetHeadOption[] = accounts
     .filter((account) => (account.data.type === "Income" || account.data.type === "Expense") && account.data.name?.trim())
@@ -190,7 +199,7 @@ export default function BudgetPlannerWorkspace({ budgets, financialRecords, acco
     setPeriod(validPeriod(budget.data.period) ? budget.data.period : "Custom");
     setDateRange({ startDate: budget.data.startDate || "", endDate: budget.data.endDate || "" });
     const budgetLines = parseBudgetLines(budget.data.lines);
-    setLines(budgetLines.length ? budgetLines : [emptyBudgetLine()]);
+    setLines(sheetLines(budgetLines));
   }
 
   function startNewBudget() {
@@ -200,7 +209,7 @@ export default function BudgetPlannerWorkspace({ budgets, financialRecords, acco
     setDescription("");
     setPeriod("Monthly");
     setDateRange(defaultRange);
-    setLines([emptyBudgetLine()]);
+    setLines(sheetLines([]));
     setRecipientEmail("");
   }
 
@@ -209,6 +218,16 @@ export default function BudgetPlannerWorkspace({ budgets, financialRecords, acco
     setName(`${name.trim() || "Budget"} copy`);
     setLines(lines.map((line) => ({ ...line })));
     toast.success("Budget copied. Update its dates and save the new version.");
+  }
+
+  function moveLine(from: number, to: number) {
+    if (from === to) return;
+    setLines((current) => {
+      const next = [...current];
+      const [moving] = next.splice(from, 1);
+      next.splice(to, 0, moving);
+      return next;
+    });
   }
 
   function updateLine(index: number, field: keyof BudgetLine, value: string) {
@@ -228,7 +247,7 @@ export default function BudgetPlannerWorkspace({ budgets, financialRecords, acco
       startDate: dateRange.startDate,
       endDate: dateRange.endDate,
       currency,
-      lines: lines.map((line) => resolveBudgetLine(line, accountHeads)),
+      lines: lines.filter((line) => line.budgetHead.trim()).map((line) => resolveBudgetLine(line, accountHeads)),
     };
   }
 
@@ -419,19 +438,22 @@ export default function BudgetPlannerWorkspace({ budgets, financialRecords, acco
           <section className="overflow-hidden rounded-lg border border-border bg-card">
             <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-4 sm:px-5">
               <div><h2 className="text-sm font-semibold">Budget lines</h2><p className="mt-1 text-xs text-muted-foreground">Choose expense heads from your Chart of Accounts; sales and Payroll keep their matching actuals for the selected dates.</p></div>
-              <Button type="button" variant="outline" size="sm" className="gap-2" onClick={() => setLines((current) => [...current, emptyBudgetLine()])}><Plus size={15} />Add line</Button>
             </div>
             <div className="w-full min-w-0 overflow-x-auto">
-              <Table className="min-w-[1120px]">
-                <TableHeader><TableRow className="bg-muted/40 hover:bg-muted/40">
-                  <TableHead className="w-[280px] text-[11px] font-semibold uppercase tracking-[0.06em]">Budget Head</TableHead>
-                  <TableHead className="w-[140px] text-right text-[11px] font-semibold uppercase tracking-[0.06em]">Expected budget</TableHead>
-                  <TableHead className="w-[140px] text-right text-[11px] font-semibold uppercase tracking-[0.06em]">Actual</TableHead>
-                  <TableHead className="w-[140px] text-right text-[11px] font-semibold uppercase tracking-[0.06em]">Variance</TableHead>
-                  <TableHead className="w-[260px] text-[11px] font-semibold uppercase tracking-[0.06em]">Description</TableHead>
-                  <TableHead className="w-12"><span className="sr-only">Actions</span></TableHead>
-                </TableRow></TableHeader>
-                <TableBody>
+              <table className="w-full min-w-[1120px] border-collapse text-sm">
+                <thead>
+                  <tr className="border-b-2 border-border text-[11px] font-semibold uppercase tracking-wide text-foreground">
+                    <th className="w-8" aria-label="Reorder" />
+                    <th className={`w-9 py-2.5 pr-2 text-right ${cellBorder}`}>#</th>
+                    <th className={`w-[300px] px-2.5 py-2.5 text-left ${cellBorder}`}>Budget head</th>
+                    <th className={`w-[150px] px-2.5 py-2.5 text-right ${cellBorder}`}>Expected budget</th>
+                    <th className={`w-[150px] px-2.5 py-2.5 text-right ${cellBorder}`}>Actual</th>
+                    <th className={`w-[150px] px-2.5 py-2.5 text-right ${cellBorder}`}>Variance</th>
+                    <th className={`px-2.5 py-2.5 text-left ${cellBorder}`}>Description</th>
+                    <th className="w-20"><span className="sr-only">Line actions</span></th>
+                  </tr>
+                </thead>
+                <tbody>
                   {lines.map((line, index) => {
                     const actual = actuals[index] ?? 0;
                     const resolvedLine = resolveBudgetLine(line, accountHeads);
@@ -444,17 +466,27 @@ export default function BudgetPlannerWorkspace({ budgets, financialRecords, acco
                     const selectedHead = budgetHeadOptions.find((option) => option.value === resolvedLine.headKey)
                       ?? budgetHeadOptions.find((option) => option.budgetHead.toLocaleLowerCase() === resolvedLine.budgetHead.toLocaleLowerCase() && option.category === resolvedLine.category && option.type === resolvedLine.type);
                     const unresolvedAccountHead = !selectedHead && (isAccountReference(line.budgetHead) || isAccountReference(line.headKey ?? ""));
+                    const hasHead = Boolean(line.budgetHead.trim());
                     return (
-                      <TableRow key={index}>
-                        <TableCell>
+                      <tr
+                        key={index}
+                        className={`group border-b border-border hover:bg-muted/30 ${draggedLine === index ? "opacity-50" : ""}`}
+                        onDragOver={(event) => { if (draggedLine !== null) event.preventDefault(); }}
+                        onDrop={(event) => { event.preventDefault(); if (draggedLine !== null) moveLine(draggedLine, index); setDraggedLine(null); }}
+                      >
+                        <td className="text-center">
+                          <span draggable onDragStart={(event) => { event.dataTransfer.effectAllowed = "move"; setDraggedLine(index); }} onDragEnd={() => setDraggedLine(null)} className="inline-flex cursor-grab text-muted-foreground/50 hover:text-muted-foreground active:cursor-grabbing" aria-label={`Drag line ${index + 1} to reorder`} title="Drag to reorder"><GripVertical size={15} /></span>
+                        </td>
+                        <td className={`pr-2 text-right text-[13px] text-muted-foreground ${cellBorder}`}>{index + 1}</td>
+                        <td className={`p-0 ${cellBorder}`}>
                           <Select
-                            value={selectedHead?.value ?? ""}
+                            value={selectedHead?.value ?? null}
                             onValueChange={(value) => {
                               const option = budgetHeadOptions.find((item) => item.value === value);
                               if (option) setLines((current) => current.map((item, lineIndex) => lineIndex === index ? { ...item, category: option.category, budgetHead: option.budgetHead, headKey: option.value, type: option.type } : item));
                             }}
                           >
-                            <SelectTrigger aria-label={`Budget Head on line ${index + 1}`} className="w-full"><span className="min-w-0 flex-1 truncate text-left">{selectedHead?.label ?? (unresolvedAccountHead ? "Account unavailable" : "Choose a budget head")}</span></SelectTrigger>
+                            <SelectTrigger aria-label={`Budget Head on line ${index + 1}`} className={`${cellInput} !h-11 justify-between [&_svg]:opacity-0 group-hover:[&_svg]:opacity-60 focus-visible:[&_svg]:opacity-100`}><span className="min-w-0 flex-1 truncate text-left">{selectedHead?.label ?? (unresolvedAccountHead ? "Account unavailable" : "")}</span></SelectTrigger>
                             <SelectContent>
                               <SelectGroup>
                                 <SelectLabel>Sales and income</SelectLabel>
@@ -473,18 +505,38 @@ export default function BudgetPlannerWorkspace({ budgets, financialRecords, acco
                               {savedHeadOptions.length ? <><SelectSeparator /><SelectGroup><SelectLabel>Previously used heads</SelectLabel>{savedHeadOptions.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}</SelectGroup></> : null}
                             </SelectContent>
                           </Select>
-                        </TableCell>
-                        <TableCell><Input aria-label={`Expected budget on line ${index + 1}`} type="number" min="0" step="0.01" value={line.expected} onChange={(event) => updateLine(index, "expected", event.target.value)} className="text-right tabular-nums" /></TableCell>
-                        <TableCell className="text-right text-sm tabular-nums">{directSourceKind ? <Button type="button" variant="link" className="h-auto p-0 text-sm tabular-nums" aria-label={`Open records behind ${formatAmount(actual, currency)} actual for ${resolvedLine.budgetHead || `line ${index + 1}`}`} nativeButton={false} render={<Link href={sourceHref(directSourceKind, resolvedLine)} />}>{formatAmount(actual, currency)}</Button> : <Button type="button" variant="link" className="h-auto p-0 text-sm tabular-nums" aria-label={`View records behind ${formatAmount(actual, currency)} actual for ${resolvedLine.budgetHead || `line ${index + 1}`}`} onClick={() => setActiveActualLine(resolvedLine)}>{formatAmount(actual, currency)}</Button>}</TableCell>
-                        <TableCell className={`text-right text-sm font-medium tabular-nums ${variance < 0 ? "text-destructive" : "text-primary"}`}>{formatAmount(variance, currency)}</TableCell>
-                        <TableCell><Input aria-label={`Description on line ${index + 1}`} value={line.description} maxLength={300} onChange={(event) => updateLine(index, "description", event.target.value)} placeholder="Optional details" /></TableCell>
-                        <TableCell><Button type="button" variant="ghost" size="icon" aria-label={`Remove budget line ${index + 1}`} onClick={() => setLines((current) => current.filter((_, lineIndex) => lineIndex !== index))}><Trash2 size={15} /></Button></TableCell>
-                      </TableRow>
+                        </td>
+                        <td className={`p-0 ${cellBorder}`}><Input aria-label={`Expected budget on line ${index + 1}`} type="number" min="0" step="0.01" inputMode="decimal" value={line.expected} onChange={(event) => updateLine(index, "expected", event.target.value)} className={`${cellInput} text-right tabular-nums`} /></td>
+                        <td className={`px-2.5 text-right tabular-nums ${cellBorder}`}>{hasHead ? (directSourceKind ? <Button type="button" variant="link" className="h-auto p-0 text-sm tabular-nums" aria-label={`Open records behind ${formatAmount(actual, currency)} actual for ${resolvedLine.budgetHead || `line ${index + 1}`}`} nativeButton={false} render={<Link href={sourceHref(directSourceKind, resolvedLine)} />}>{formatAmount(actual, currency)}</Button> : <Button type="button" variant="link" className="h-auto p-0 text-sm tabular-nums" aria-label={`View records behind ${formatAmount(actual, currency)} actual for ${resolvedLine.budgetHead || `line ${index + 1}`}`} onClick={() => setActiveActualLine(resolvedLine)}>{formatAmount(actual, currency)}</Button>) : null}</td>
+                        <td className={`px-2.5 text-right font-medium tabular-nums ${cellBorder} ${variance < 0 ? "text-destructive" : "text-primary"}`}>{hasHead ? formatAmount(variance, currency) : null}</td>
+                        <td className={`p-0 ${cellBorder}`}><Input aria-label={`Description on line ${index + 1}`} value={line.description} maxLength={300} onChange={(event) => updateLine(index, "description", event.target.value)} className={cellInput} /></td>
+                        <td className="px-1">
+                          <div className="flex items-center justify-center gap-0.5">
+                            <Button type="button" variant="ghost" size="icon-sm" className="text-muted-foreground" aria-label={`Copy budget line ${index + 1}`} title="Copy line" onClick={() => setLines((current) => current.flatMap((item, lineIndex) => lineIndex === index ? [item, { ...item }] : [item]))}><Copy size={14} /></Button>
+                            <Button type="button" variant="ghost" size="icon-sm" className="text-muted-foreground hover:text-destructive" aria-label={`Remove budget line ${index + 1}`} title="Remove line" onClick={() => setLines((current) => current.length > 1 ? current.filter((_, lineIndex) => lineIndex !== index) : [emptyBudgetLine()])}><Trash2 size={14} /></Button>
+                          </div>
+                        </td>
+                      </tr>
                     );
                   })}
-                  {lines.length > 0 ? <TableRow className="bg-muted/30 font-semibold"><TableCell>Total</TableCell><TableCell className="text-right tabular-nums">{formatAmount(expectedTotal, currency)}</TableCell><TableCell className="text-right tabular-nums">{formatAmount(actualTotal, currency)}</TableCell><TableCell className={`text-right tabular-nums ${varianceTotal < 0 ? "text-destructive" : "text-primary"}`}>{formatAmount(varianceTotal, currency)}</TableCell><TableCell colSpan={2}></TableCell></TableRow> : null}
-                </TableBody>
-              </Table>
+                </tbody>
+                <tfoot>
+                  <tr className="font-semibold">
+                    <td />
+                    <td className={cellBorder} />
+                    <td className={`px-2.5 py-3 text-right ${cellBorder}`}>Total</td>
+                    <td className={`px-2.5 py-3 text-right tabular-nums ${cellBorder}`}>{formatAmount(expectedTotal, currency)}</td>
+                    <td className={`px-2.5 py-3 text-right tabular-nums ${cellBorder}`}>{formatAmount(actualTotal, currency)}</td>
+                    <td className={`px-2.5 py-3 text-right tabular-nums ${cellBorder} ${varianceTotal < 0 ? "text-destructive" : "text-primary"}`}>{formatAmount(varianceTotal, currency)}</td>
+                    <td className={cellBorder} />
+                    <td />
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+            <div className="flex gap-2 border-t border-border px-4 py-3 sm:px-5">
+              <Button type="button" variant="outline" size="sm" onClick={() => setLines((current) => [...current, ...Array.from({ length: 5 }, emptyBudgetLine)])}><Plus size={14} />Add lines</Button>
+              <Button type="button" variant="outline" size="sm" onClick={() => setLines(sheetLines([]))}>Clear all lines</Button>
             </div>
             <div className="flex flex-col gap-3 border-t border-border bg-muted/20 px-4 py-4 sm:flex-row sm:items-end sm:justify-between sm:px-5">
               <div className="w-full space-y-2 sm:max-w-sm"><label className="text-xs font-medium" htmlFor="budget-recipient">Send budget to</label><Input id="budget-recipient" type="email" value={recipientEmail} onChange={(event) => setRecipientEmail(event.target.value)} placeholder="name@company.com" /></div>
