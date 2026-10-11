@@ -216,6 +216,29 @@ export default function PayrollSheet({ open, onOpenChange, month: initialMonth, 
     setError("");
   }
 
+  function previousMonth(value: string) {
+    const [year, monthNumber] = value.split("-").map(Number);
+    const date = new Date(year, monthNumber - 2, 1);
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+  }
+
+  /** Fill the sheet with last month's salaries for every employee paid then, keeping this month's working days. */
+  function copyPreviousMonth() {
+    const sourceMonth = previousMonth(month);
+    const entries = existingRecords.filter((entry) => entry.data.month === sourceMonth);
+    if (!entries.length) {
+      toast.info(`No payroll saved for ${sourceMonth} to copy.`);
+      return;
+    }
+    const keyFor = (entry: BookkeepingRecord) => employees.find((employee) => samePerson(entry, employee))?.id ?? `entry:${entry.id}`;
+    const copied = entries.map((entry, index) => ({ ...rowFromEntry(nextId + index, entry, keyFor(entry)), workedDays: workingDays }));
+    const others = rows.filter((row) => row.personKey && !copied.some((line) => line.personKey === row.personKey));
+    setRows([...copied, ...others]);
+    setNextId((current) => current + copied.length);
+    setError("");
+    toast.success(`Copied ${copied.length} ${copied.length === 1 ? "salary" : "salaries"} from ${sourceMonth}. Review and save.`);
+  }
+
   function copyLine(id: number) {
     setRows((current) => current.flatMap((row) => (row.id === id ? [row, { ...row, id: nextId }] : [row])));
     setNextId((current) => current + 1);
@@ -395,6 +418,7 @@ export default function PayrollSheet({ open, onOpenChange, month: initialMonth, 
           <div className="flex gap-2">
             <Button type="button" variant="outline" size="sm" onClick={addLines} disabled={pending}><Plus size={14} />Add lines</Button>
             <Button type="button" variant="outline" size="sm" onClick={clearLines} disabled={pending}>Clear all lines</Button>
+            <Button type="button" variant="outline" size="sm" onClick={copyPreviousMonth} disabled={pending} title="Fill this sheet with the previous month’s salaries"><Copy size={14} />Copy previous month</Button>
           </div>
           {!activeEmployees.length && !entryPeople.size ? <p className="text-sm text-muted-foreground">Add your staff on the Employees page first, then pick them here.</p> : null}
           {error ? <p role="alert" className="rounded-md border border-destructive/20 bg-destructive/5 px-3 py-2.5 text-sm text-destructive">{error}</p> : null}
