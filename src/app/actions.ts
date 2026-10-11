@@ -25,6 +25,11 @@ const convertTargets: Partial<Record<RecordKind, RecordKind>> = {
   "sales-orders": "invoices",
   "purchase-orders": "bills",
 };
+/** Other targets a record can be converted to on request, besides its default. */
+const optionalConvertTargets: Partial<Record<RecordKind, RecordKind[]>> = {
+  "sales-orders": ["estimates"],
+  estimates: ["sales-orders"],
+};
 
 export async function updateProfileName(input: string): Promise<{ ok: true; name: string } | { ok: false; message: string }> {
   const me = await requireUser();
@@ -1041,7 +1046,7 @@ export async function markRecordPaid(kind: string, id: string): Promise<void> {
   revalidatePath("/app", "layout");
 }
 
-export async function convertBookkeepingRecord(id: string): Promise<void> {
+export async function convertBookkeepingRecord(id: string, target?: string): Promise<void> {
   const me = await requireUser();
   await db.transaction(async (transaction) => {
     const [source] = await transaction
@@ -1052,8 +1057,18 @@ export async function convertBookkeepingRecord(id: string): Promise<void> {
       .limit(1);
     if (!source) throw new Error("We couldn’t find that record. Refresh and try again.");
     const sourceKind = source.kind as RecordKind;
-    const targetKind = convertTargets[sourceKind];
-    if (!targetKind) throw new Error("This record can’t be converted.");
+    const defaultTarget = convertTargets[sourceKind];
+    const targetKind = target && target !== defaultTarget
+      ? optionalConvertTargets[sourceKind]?.find((kind) => kind === target)
+      : defaultTarget;
+    if (!targetKind) throw new Error("This record can’t be converted to that document.");
+    if (sourceKind !== "purchase-orders" && source.data.status === "Converted") {
+      throw new Error(`${source.data.orderNumber || source.data.estimateNumber || "This record"} has already been converted.`);
+    }
+    const targetCount = targetKind === "estimates" || targetKind === "sales-orders"
+      ? (await transaction.select({ id: bookkeepingRecord.id }).from(bookkeepingRecord)
+        .where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, targetKind)))).length
+      : 0;
     if (sourceKind === "purchase-orders") {
       if (source.data.convertedRecordId || source.data.convertedKind) {
         throw new Error("This purchase order has already been recorded as a bill or expense.");
@@ -1075,6 +1090,22 @@ export async function convertBookkeepingRecord(id: string): Promise<void> {
             dueDate: dueDateForTerms(today, "30 days"),
             paidAmount: "0",
             status: "Draft",
+          }
+        : targetKind === "estimates"
+        ? {
+            estimateNumber: `EST-${String(targetCount + 1).padStart(4, "0")}`,
+            date: today,
+            expiryDate: dueDateForTerms(today, "30 days"),
+            status: "Draft",
+            sourceOrderNumber: sourceData.orderNumber || "",
+          }
+        : targetKind === "sales-orders"
+        ? {
+            orderNumber: `SO-${String(targetCount + 1).padStart(4, "0")}`,
+            date: today,
+            deliveryDate: "",
+            status: "Draft",
+            sourceEstimateNumber: sourceData.estimateNumber || "",
           }
         : {
             billNumber: `BILL-${Date.now()}`,

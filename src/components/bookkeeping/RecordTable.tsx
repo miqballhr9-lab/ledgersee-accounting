@@ -3,6 +3,7 @@
 import { ArrowRightLeft, BadgeCheck, Ban, Check, CircleDollarSign, Copy, Ellipsis, Link2, Mail, PackageCheck, Pencil, Play, Printer, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import type { ModuleDefinition } from "@/lib/bookkeeping-config";
@@ -18,6 +19,12 @@ interface RecordTableProps {
   onEdit: (record: BookkeepingRecord) => void;
   onDelete: (record: BookkeepingRecord) => void;
   onAction: (kind: RecordActionKind, record: BookkeepingRecord) => void;
+  /** When given, each row gets a checkbox for actions on several records at once. */
+  selection?: {
+    selectedIds: ReadonlySet<string>;
+    onToggle: (id: string, checked: boolean) => void;
+    onToggleAll: (checked: boolean) => void;
+  };
 }
 
 const columnLabels: Record<string, string> = {
@@ -140,7 +147,7 @@ function rowActions(module: ModuleDefinition, record: BookkeepingRecord, onActio
     else if (status === "RFQ Sent") actions.push({ kind: "confirm-order", label: "Confirm", icon: BadgeCheck });
     else if (status === "Purchase Order") actions.push({ kind: "receive-order", label: "Receive", icon: PackageCheck });
     else if (status === "Received" && canConvertPurchaseOrder) actions.push({ kind: "convert", label: "Create bill", icon: ArrowRightLeft });
-  } else if (["estimates", "sales-orders"].includes(module.kind)) actions.push({ kind: "convert", label: "Convert", icon: ArrowRightLeft });
+  }
   if (module.kind === "invoices") {
     if (!["Paid", "Cancelled"].includes(record.data.status ?? "")) actions.push({ kind: "payment", label: "Record payment", icon: CircleDollarSign });
     actions.push({ kind: "send", label: "Send invoice", icon: Mail });
@@ -186,7 +193,9 @@ function rowActions(module: ModuleDefinition, record: BookkeepingRecord, onActio
   );
 }
 
-export default function RecordTable({ module, records, columns = module.columns, onEdit, onDelete, onAction }: RecordTableProps) {
+export default function RecordTable({ module, records, columns = module.columns, onEdit, onDelete, onAction, selection }: RecordTableProps) {
+  const allSelected = Boolean(selection) && records.length > 0 && records.every((record) => selection?.selectedIds.has(record.id));
+  const someSelected = Boolean(selection) && records.some((record) => selection?.selectedIds.has(record.id));
   if (records.length === 0) {
     return (
       <div className="grid min-h-56 place-items-center border-t border-border px-6 py-10 text-center">
@@ -203,6 +212,16 @@ export default function RecordTable({ module, records, columns = module.columns,
       <Table>
         <TableHeader>
           <TableRow className="bg-muted/40 hover:bg-muted/40">
+            {selection ? (
+              <TableHead className="w-10">
+                <Checkbox
+                  aria-label={`Select all ${module.plural.toLowerCase()} on this page`}
+                  checked={allSelected}
+                  indeterminate={someSelected && !allSelected}
+                  onCheckedChange={(checked) => selection.onToggleAll(checked === true)}
+                />
+              </TableHead>
+            ) : null}
             {columns.map((key) => <TableHead key={key} className="whitespace-nowrap text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">{columnLabels[key] ?? key}</TableHead>)}
             <TableHead className="w-[170px] text-right text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">Actions</TableHead>
           </TableRow>
@@ -213,7 +232,16 @@ export default function RecordTable({ module, records, columns = module.columns,
             const canEdit = module.kind !== "purchase-orders" || ["Draft", "RFQ Sent"].includes(purchaseStatus);
             const canDelete = module.kind !== "purchase-orders" || purchaseStatus === "Draft";
             return (
-              <TableRow key={record.id} className="group">
+              <TableRow key={record.id} className="group" data-state={selection?.selectedIds.has(record.id) ? "selected" : undefined}>
+                {selection ? (
+                  <TableCell className="w-10">
+                    <Checkbox
+                      aria-label={`Select ${record.data[module.titleKey] || module.label.toLowerCase()}`}
+                      checked={selection.selectedIds.has(record.id)}
+                      onCheckedChange={(checked) => selection.onToggle(record.id, checked === true)}
+                    />
+                  </TableCell>
+                ) : null}
                 {columns.map((key) => (
                   <TableCell key={key} className={`max-w-[240px] py-3 text-[13px] ${key === "address" ? "whitespace-normal" : "whitespace-nowrap"}`}>
                     {key === module.titleKey ? <span className="font-medium text-foreground">{displayValue(record, key)}</span> : displayValue(record, key)}

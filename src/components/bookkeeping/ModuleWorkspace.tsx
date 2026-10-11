@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import Image from "next/image";
-import { ArrowDownToLine, Plus, Search, SlidersHorizontal } from "lucide-react";
+import { ArrowDownToLine, ArrowRightLeft, ChevronDown, ClipboardList, FileCheck2, FileText, Plus, Search, SlidersHorizontal, Trash2 } from "lucide-react";
 
 import {
   advancePurchaseOrder,
@@ -26,7 +26,7 @@ import {
 } from "@/app/actions";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuGroup, DropdownMenuLabel, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -203,6 +203,8 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
   const [pendingAction, setPendingAction] = useState(false);
   const [actionMessage, setActionMessage] = useState("");
   const [paymentRecord, setPaymentRecord] = useState<BookkeepingRecord | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
+  const [bulkPending, setBulkPending] = useState(false);
   const [paymentAmount, setPaymentAmount] = useState("");
   const [paymentDate, setPaymentDate] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("");
@@ -367,6 +369,53 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
     } catch (error) {
       setActionMessage(error instanceof Error ? error.message : "We couldn’t delete that record.");
     }
+  }
+
+  // Sales orders and estimates convert into each other or into invoices, several at a time.
+  const bulkConvertTargets: { kind: "estimates" | "sales-orders" | "invoices"; label: string }[] = module.kind === "sales-orders"
+    ? [{ kind: "estimates", label: "Convert to estimate" }, { kind: "invoices", label: "Convert to invoice" }]
+    : module.kind === "estimates"
+      ? [{ kind: "sales-orders", label: "Convert to sales order" }, { kind: "invoices", label: "Convert to invoice" }]
+      : [];
+  const supportsBulkActions = bulkConvertTargets.length > 0;
+  const selectedRecords = records.filter((record) => selectedIds.has(record.id));
+
+  function toggleSelected(id: string, checked: boolean) {
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      if (checked) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }
+
+  async function runBulkAction(action: "estimates" | "sales-orders" | "invoices" | "delete") {
+    if (!selectedRecords.length) return;
+    const count = selectedRecords.length;
+    const noun = count === 1 ? module.label.toLowerCase() : module.plural.toLowerCase();
+    if (action === "delete" && !window.confirm(`Delete ${count} ${noun}? This can’t be undone.`)) return;
+    setBulkPending(true);
+    setActionMessage("");
+    const done: string[] = [];
+    const failed: string[] = [];
+    for (const record of selectedRecords) {
+      const title = record.data[module.titleKey] || module.label;
+      try {
+        if (action === "delete") await deleteBookkeepingRecord(module.kind, record.id);
+        else await convertBookkeepingRecord(record.id, action);
+        done.push(record.id);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "it couldn’t be processed.";
+        failed.push(message.includes(title) ? message : `${title}: ${message}`);
+      }
+    }
+    if (action === "delete") setRecords((current) => current.filter((record) => !done.includes(record.id)));
+    setSelectedIds(new Set());
+    setBulkPending(false);
+    const verb = action === "delete" ? "deleted" : `converted to ${action === "estimates" ? "estimates" : action === "sales-orders" ? "sales orders" : "invoices"}`;
+    if (done.length) toast.success(`${done.length} ${done.length === 1 ? module.label.toLowerCase() : module.plural.toLowerCase()} ${verb}.`);
+    if (failed.length) toast.error(failed.join(" "));
+    router.refresh();
   }
 
   async function handleAction(kind: RecordActionKind, record: BookkeepingRecord) {
@@ -584,6 +633,25 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
               <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
               <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={`Search ${module.plural.toLowerCase()}`} className="pl-9" aria-label={`Search ${module.plural}`} />
             </div>
+            {supportsBulkActions ? (
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  render={
+                    <Button type="button" variant="outline" className="gap-2" disabled={!selectedRecords.length || bulkPending} title={selectedRecords.length ? undefined : `Select ${module.plural.toLowerCase()} with the checkboxes first`}>
+                      <ArrowRightLeft size={15} />{bulkPending ? "Working…" : `Convert${selectedRecords.length ? ` (${selectedRecords.length})` : ""}`}<ChevronDown size={14} />
+                    </Button>
+                  }
+                />
+                <DropdownMenuContent align="end" className="min-w-48">
+                  {bulkConvertTargets.map((target) => {
+                    const Icon = target.kind === "invoices" ? FileText : target.kind === "estimates" ? FileCheck2 : ClipboardList;
+                    return <DropdownMenuItem key={target.kind} onClick={() => void runBulkAction(target.kind)}><Icon size={15} />{target.label}</DropdownMenuItem>;
+                  })}
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem variant="destructive" onClick={() => void runBulkAction("delete")}><Trash2 size={15} />Delete</DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ) : null}
             {module.kind !== "purchase-orders" && filterKey && filterOptions.length ? (
               <Select value={filter} onValueChange={(value) => setFilter(value ?? "all")}>
                 <SelectTrigger className="w-[150px]" aria-label="Filter records"><SelectValue placeholder="All records" /></SelectTrigger>
@@ -640,6 +708,15 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
           onEdit={openEditRecord}
           onDelete={(record) => void handleDelete(record)}
           onAction={(kind, record) => void handleAction(kind, record)}
+          selection={supportsBulkActions ? {
+            selectedIds,
+            onToggle: toggleSelected,
+            onToggleAll: (checked) => setSelectedIds((current) => {
+              const next = new Set(current);
+              tableRecords.forEach((record) => (checked ? next.add(record.id) : next.delete(record.id)));
+              return next;
+            }),
+          } : undefined}
         />
 
         <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border px-4 py-3 sm:px-5">
