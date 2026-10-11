@@ -40,8 +40,8 @@ export default async function SectionPage({ params, searchParams }: SectionPageP
   }
 
   if (section === "payroll") {
-    const groups = await listBookkeepingRecordGroups(["payroll", "accounts", "employees"]);
-    return <PayrollWorkspace records={groups.payroll ?? []} accounts={groups.accounts ?? []} employees={groups.employees ?? []} asOfDate={new Date().toISOString().slice(0, 10)} dateRange={{ startDate, endDate }} />;
+    const groups = await listBookkeepingRecordGroups(["payroll", "employees"]);
+    return <PayrollWorkspace records={groups.payroll ?? []} employees={groups.employees ?? []} asOfDate={new Date().toISOString().slice(0, 10)} dateRange={{ startDate, endDate }} />;
   }
 
   if (section === "reports") {

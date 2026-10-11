@@ -12,7 +12,6 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { readableError } from "@/lib/action-error";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
-import { paymentAccountLabel } from "@/lib/payment-accounts";
 import { calculatePayroll, emptyPayrollValues, type PayrollValues } from "@/lib/payroll-utils";
 
 interface PayrollSheetProps {
@@ -22,7 +21,6 @@ interface PayrollSheetProps {
   /** When set, the sheet starts from this entry's figures (used to copy a salary into another month). */
   copyFrom?: BookkeepingRecord | null;
   employees: BookkeepingRecord[];
-  paymentAccounts: BookkeepingRecord[];
   /** Payroll entries already saved; the month's entries load into the sheet and saving updates them. */
   existingRecords: BookkeepingRecord[];
   onSaved: (records: BookkeepingRecord[], month: string) => void;
@@ -152,13 +150,12 @@ function rupees(value: number) {
 }
 
 /** Enter a month's salaries for many employees at once, one employee per line. */
-export default function PayrollSheet({ open, onOpenChange, month: initialMonth, copyFrom, employees, paymentAccounts, existingRecords, onSaved }: PayrollSheetProps) {
+export default function PayrollSheet({ open, onOpenChange, month: initialMonth, copyFrom, employees, existingRecords, onSaved }: PayrollSheetProps) {
   const activeEmployees = employees.filter((employee) => employee.data.name?.trim() && employee.data.status !== "Inactive");
   const monthEntries = existingRecords.filter((entry) => entry.data.month === initialMonth);
   const [month, setMonth] = useState(initialMonth);
   const [reference, setReference] = useState(() => (copyFrom ? "" : monthEntries.find((entry) => entry.data.reference)?.data.reference) || defaultReference(initialMonth));
   const [workingDays, setWorkingDays] = useState(() => (copyFrom ?? monthEntries[0])?.data.workingDays || "26");
-  const [paymentAccountId, setPaymentAccountId] = useState("");
   const [rows, setRows] = useState<SheetRow[]>(() => startingRows(initialMonth, existingRecords, activeEmployees, employees, (copyFrom ?? monthEntries[0])?.data.workingDays || "26", copyFrom));
   const [nextId, setNextId] = useState(() => rows.length + 1);
   // People who appear only on saved entries (not on the Employees list) stay pickable.
@@ -186,7 +183,7 @@ export default function PayrollSheet({ open, onOpenChange, month: initialMonth, 
       cnic: person.cnic,
       designation: person.designation,
       joiningDate: person.joiningDate,
-      paymentAccountId: paymentAccountId || person.paymentAccountId,
+      paymentAccountId: person.paymentAccountId,
       ...Object.fromEntries(amountKeys.map((key) => [key, row[key] || "0"])),
       taxDeduction: row.taxDeduction,
       workingDays: workingDays || "0",
@@ -323,7 +320,7 @@ export default function PayrollSheet({ open, onOpenChange, month: initialMonth, 
         </DialogHeader>
 
         <form id="payroll-sheet-form" onSubmit={submit} className="min-w-0 space-y-5">
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid gap-4 sm:grid-cols-3">
             <div className="space-y-1.5">
               <Label htmlFor="sheet-reference">Reference no. <span className="text-destructive">*</span></Label>
               <Input id="sheet-reference" value={reference} onChange={(event) => setReference(event.target.value)} maxLength={60} required placeholder="SAL-2026-10" />
@@ -335,15 +332,6 @@ export default function PayrollSheet({ open, onOpenChange, month: initialMonth, 
             <div className="space-y-1.5">
               <Label htmlFor="sheet-working-days">Total working days</Label>
               <Input id="sheet-working-days" type="number" min="1" max="31" step="1" value={workingDays} onChange={(event) => changeWorkingDays(event.target.value)} required />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="sheet-payment-account">Salary payment account</Label>
-              <Select value={paymentAccountId || null} onValueChange={(value) => setPaymentAccountId(value ?? "")}>
-                <SelectTrigger id="sheet-payment-account" className="w-full"><SelectValue placeholder="Each employee’s own account" /></SelectTrigger>
-                <SelectContent>
-                  {paymentAccounts.map((account) => <SelectItem key={account.id} value={account.id}>{paymentAccountLabel(account)}</SelectItem>)}
-                </SelectContent>
-              </Select>
             </div>
           </div>
 

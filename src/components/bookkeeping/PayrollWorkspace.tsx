@@ -18,12 +18,10 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { payrollCsvFields } from "@/lib/payroll-utils";
-import { paymentAccountType } from "@/lib/payment-accounts";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
 
 interface PayrollWorkspaceProps {
   records: BookkeepingRecord[];
-  accounts: BookkeepingRecord[];
   /** Saved employees, offered as a picker that fills in the employee details. */
   employees?: BookkeepingRecord[];
   asOfDate: string;
@@ -117,7 +115,7 @@ function payrollColumns(): PayrollColumn[] {
 
 const PAYROLL_COLUMNS = payrollColumns();
 
-export default function PayrollWorkspace({ records, accounts, employees = [], asOfDate, dateRange }: PayrollWorkspaceProps) {
+export default function PayrollWorkspace({ records, employees = [], asOfDate, dateRange }: PayrollWorkspaceProps) {
   const router = useRouter();
   const uploadRef = useRef<HTMLInputElement>(null);
   const currentMonth = asOfDate.slice(0, 7);
@@ -154,7 +152,6 @@ export default function PayrollWorkspace({ records, accounts, employees = [], as
       // Storage can be blocked; the choice still applies until reload.
     }
   }
-  const paymentAccounts = accounts.filter((account) => paymentAccountType(account));
 
   const periodRecords = useMemo(() => savedRecords.filter((record) => {
     if (!customFromDate && !customToDate) return record.data.month === selectedMonth;
@@ -450,7 +447,6 @@ export default function PayrollWorkspace({ records, accounts, employees = [], as
           month={sheet.month}
           copyFrom={sheet.copyFrom}
           employees={employees}
-          paymentAccounts={paymentAccounts}
           existingRecords={savedRecords}
           onSaved={(saved, month) => {
             setSavedRecords((previous) => [...saved, ...previous.filter((record) => !saved.some((item) => item.id === record.id))]);
