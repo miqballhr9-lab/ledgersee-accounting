@@ -489,7 +489,6 @@ export async function saveBookkeepingRecord(
           .limit(1);
         if (!existing) throw new ActionError("We couldn’t find that purchase order. Refresh and try again.");
         const status = existing.data.status === "Sent" ? "RFQ Sent" : existing.data.status || "Draft";
-        if (!["Draft", "RFQ Sent"].includes(status)) throw new ActionError("Confirmed purchase orders can’t be edited. Cancel the order or create a new one.");
         const [saved] = await transaction
           .update(bookkeepingRecord)
           .set({ data: { ...existing.data, ...data, status }, updatedAt: new Date() })
@@ -918,15 +917,6 @@ export async function deleteBookkeepingRecord(kind: string, id: string): Promise
     });
     revalidatePath("/app", "layout");
     return;
-  }
-  if (kind === "purchase-orders") {
-    const [order] = await db
-      .select()
-      .from(bookkeepingRecord)
-      .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, kind)))
-      .limit(1);
-    if (!order) throw new ActionError("We couldn’t find that purchase order. Refresh and try again.");
-    if (!["Draft", "Cancelled"].includes(order.data.status || "Draft")) throw new ActionError("Only draft or cancelled purchase orders can be deleted.");
   }
   if (kind === "accounts") {
     const [existing] = await db

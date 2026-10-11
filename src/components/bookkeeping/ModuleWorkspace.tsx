@@ -363,7 +363,7 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
         : module.kind === "credit-notes"
           ? { label: "Actions", items: [{ action: "apply-credit", label: "Apply credit" }] }
           : module.kind === "supplier-credits"
-            ? { label: "Actions", items: [{ action: "apply-credit", label: "Apply to bill" }, { action: "refund", label: "Record refund" }] }
+            ? { label: "Actions", items: [{ action: "refund", label: "Record refund" }] }
             : null;
   const supportsBulkActions = Boolean(bulkMenu);
   const [bulkPaymentOpen, setBulkPaymentOpen] = useState(false);
@@ -446,7 +446,6 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
       const title = record.data[module.titleKey] || module.label;
       try {
         if (action === "delete") {
-          if (module.kind === "purchase-orders" && (record.data.status || "Draft") !== "Draft") throw new Error(`${title} is past draft; cancel it instead of deleting.`);
           await deleteBookkeepingRecord(module.kind, record.id);
         } else if (action === "bill") await convertBookkeepingRecord(record.id);
         else if (action === "undo-payment") await undoInvoicePayments(record.id);
