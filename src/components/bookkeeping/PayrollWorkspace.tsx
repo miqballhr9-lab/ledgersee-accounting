@@ -5,9 +5,8 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import PaymentDialog from "@/components/bookkeeping/PaymentDialog";
 import PayrollSheet from "@/components/bookkeeping/PayrollSheet";
 import { paymentAccountType } from "@/lib/payment-accounts";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowDownToLine, ArrowUpDown, Banknote, CalendarDays, ChevronDown, CircleDollarSign, Copy, FileSpreadsheet, FileText, FileUp, ListChecks, Mail, Pencil, Plus, Printer, SlidersHorizontal, Trash2, Undo2, Users } from "lucide-react";
+import { ArrowDownToLine, Ellipsis, ArrowUpDown, Banknote, CalendarDays, ChevronDown, CircleDollarSign, Copy, FileSpreadsheet, FileText, FileUp, ListChecks, Mail, Pencil, Plus, Printer, SlidersHorizontal, Trash2, Undo2, Users } from "lucide-react";
 import { toast } from "sonner";
 import { readableError } from "@/lib/action-error";
 
@@ -73,7 +72,7 @@ interface PayrollColumn {
 }
 
 const PAYROLL_COLUMNS_KEY = "mikledger:payroll-columns:v1";
-const DEFAULT_PAYROLL_COLUMNS = ["reference", "employee", "designation", "days", "paymentAccount", "grossSalary", "tax", "otherDeductions", "payable", "status", "description"];
+const DEFAULT_PAYROLL_COLUMNS = ["reference", "employee", "designation", "days", "paymentAccount", "grossSalary", "tax", "otherDeductions", "payable", "description"];
 
 function payrollColumns(): PayrollColumn[] {
   const money = (value: string | undefined) => formatRupees(Number(value || 0));
@@ -280,8 +279,8 @@ export default function PayrollWorkspace({ records, accounts, employees = [], as
     router.refresh();
   }
 
-  async function undoSelectedPayments() {
-    const paid = selectedRecords.filter((record) => record.data.status === "Paid");
+  async function undoPayments(records: BookkeepingRecord[]) {
+    const paid = records.filter((record) => record.data.status === "Paid");
     if (!paid.length) {
       toast.info("None of the selected salaries are marked paid.");
       return;
@@ -440,7 +439,7 @@ export default function PayrollWorkspace({ records, accounts, employees = [], as
               <DropdownMenuTrigger render={<Button type="button" variant="outline" className="gap-2" disabled={!selectedRecords.length || isPaying || isDeleting === "bulk"} title={selectedRecords.length ? undefined : "Select payroll rows with the checkboxes first"}><ListChecks size={15} />{isPaying ? "Working…" : `Actions${selectedRecords.length ? ` (${selectedRecords.length})` : ""}`}<ChevronDown size={14} /></Button>} />
               <DropdownMenuContent align="end" className="min-w-48">
                 <DropdownMenuItem onClick={startPayment}><CircleDollarSign size={15} />Record payment</DropdownMenuItem>
-                <DropdownMenuItem onClick={() => void undoSelectedPayments()}><Undo2 size={15} />Undo payment</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => void undoPayments(selectedRecords)}><Undo2 size={15} />Undo payment</DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem variant="destructive" onClick={() => void deleteSelected()}><Trash2 size={15} />Delete</DropdownMenuItem>
               </DropdownMenuContent>
@@ -483,12 +482,25 @@ export default function PayrollWorkspace({ records, accounts, employees = [], as
                       <TableCell key={column.key} className={column.align === "right" ? "text-right tabular-nums" : undefined}>{column.render(record)}</TableCell>
                     ))}
                     <TableCell className="print:hidden">
-                      <div className="flex justify-end gap-1">
-                        <Button variant="ghost" size="icon" aria-label={`Copy salary for ${record.data.employeeName}`} title="Copy salary to next month" onClick={() => openCopiedEntry(record)}><Copy size={15} /></Button>
-                        <Button variant="ghost" size="icon" nativeButton={false} render={<Link href={`/app/payroll/${record.id}/print`} />} aria-label={`Download salary slip for ${record.data.employeeName}`} title="Print or save salary slip as PDF"><ArrowDownToLine size={15} /></Button>
-                        <Button variant="ghost" size="icon" aria-label={`Send salary slip to ${record.data.employeeName}`} title="Send salary slip by email" onClick={() => void handleSendSlip(record)} disabled={isSending === record.id}><Mail size={15} /></Button>
-                        <Button variant="ghost" size="icon" aria-label={`Edit ${record.data.employeeName}`} onClick={() => openEditEntry(record)}><Pencil size={15} /></Button>
-                        <Button variant="ghost" size="icon" aria-label={`Delete ${record.data.employeeName}`} onClick={() => void handleDelete(record)} disabled={isDeleting === record.id}><Trash2 size={15} /></Button>
+                      <div className="flex items-center justify-end gap-2">
+                        {record.data.status === "Paid"
+                          ? <span className="inline-flex rounded-full bg-accent px-2 py-0.5 text-[11px] font-medium text-accent-foreground" title={record.data.paidDate ? `Paid on ${record.data.paidDate}` : undefined}>Paid</span>
+                          : <span className="inline-flex rounded-full bg-secondary px-2 py-0.5 text-[11px] font-medium text-secondary-foreground">Unpaid</span>}
+                        <DropdownMenu>
+                          <DropdownMenuTrigger render={<Button type="button" variant="ghost" size="icon-sm" aria-label={`More actions for ${record.data.employeeName || "this salary"}`}><Ellipsis size={16} /></Button>} />
+                          <DropdownMenuContent align="end" className="min-w-52">
+                            <DropdownMenuItem onClick={() => openEditEntry(record)}><Pencil size={14} />Edit</DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => openCopiedEntry(record)}><Copy size={14} />Copy to next month</DropdownMenuItem>
+                            {record.data.status === "Paid"
+                              ? <DropdownMenuItem disabled={isPaying} onClick={() => void undoPayments([record])}><Undo2 size={14} />Undo payment</DropdownMenuItem>
+                              : <DropdownMenuItem disabled={isPaying} onClick={() => setPaymentTargets([record])}><CircleDollarSign size={14} />Record payment</DropdownMenuItem>}
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem onClick={() => window.open(`/app/payroll/${record.id}/print`, "_blank", "noopener")}><ArrowDownToLine size={14} />Download salary slip</DropdownMenuItem>
+                            <DropdownMenuItem disabled={isSending === record.id} onClick={() => void handleSendSlip(record)}><Mail size={14} />Email salary slip</DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem variant="destructive" disabled={isDeleting === record.id} onClick={() => void handleDelete(record)}><Trash2 size={14} />Delete</DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
                       </div>
                     </TableCell>
                   </TableRow>
