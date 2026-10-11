@@ -73,7 +73,8 @@ export const modules: readonly ModuleDefinition[] = [
       { key: "paymentTerms", label: "Payment terms", type: "select", options: ["Due on receipt", "15 days", "30 days", "60 days"] },
       { key: "openingBalance", label: "Opening balance", type: "number", section: "Opening balance", placeholder: "0.00" },
       { key: "openingBalanceDate", label: "As of", type: "date" },
-      { key: "notes", label: "Notes", type: "textarea", section: "Notes" },
+      { key: "notes", label: "Notes", type: "textarea", section: "Notes and attachments" },
+      { key: "attachment", label: "Attachment", type: "file", help: "Attach a PDF, image, or CSV up to 10 MB." },
     ],
   },
   {
@@ -108,7 +109,8 @@ export const modules: readonly ModuleDefinition[] = [
       { key: "defaultExpenseAccount", label: "Default expense category", type: "select", help: "This category is prefilled on new bills from this supplier." },
       { key: "openingBalance", label: "Opening balance", type: "number", section: "Opening balance", placeholder: "0.00" },
       { key: "openingBalanceDate", label: "As of", type: "date" },
-      { key: "notes", label: "Notes", type: "textarea", section: "Notes" },
+      { key: "notes", label: "Notes", type: "textarea", section: "Notes and attachments" },
+      { key: "attachment", label: "Attachment", type: "file", help: "Attach a PDF, image, or CSV up to 10 MB." },
     ],
   },
   {
