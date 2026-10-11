@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowDownToLine, Banknote, CalendarDays, CircleDollarSign, Copy, FileUp, Mail, Pencil, Plus, SlidersHorizontal, Trash2, Users } from "lucide-react";
+import { ArrowDownToLine, ArrowUpDown, Banknote, CalendarDays, ChevronDown, CircleDollarSign, Copy, FileSpreadsheet, FileText, FileUp, Mail, Pencil, Plus, Printer, SlidersHorizontal, Trash2, Users } from "lucide-react";
 import { toast } from "sonner";
 import { readableError } from "@/lib/action-error";
 
@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -375,16 +376,24 @@ export default function PayrollWorkspace({ records, accounts, employees = [], as
     }
   }
 
-  function downloadTemplate() {
-    saveCsv("mikledger-payroll-template.csv", [[...payrollCsvFields]]);
+  function payrollExportRows() {
+    const headers = [...payrollCsvFields, "afterIncrement", "proratedSalary", "grossSalary", "estimatedTax", "totalDeductions", "payableSalary"];
+    return [headers, ...filteredRecords.map((record) => headers.map((field) => record.data[field] || ""))];
   }
 
   function exportPayroll() {
-    const headers = [...payrollCsvFields, "afterIncrement", "proratedSalary", "grossSalary", "estimatedTax", "totalDeductions", "payableSalary"];
-    saveCsv("mikledger-payroll.csv", [
-      headers,
-      ...filteredRecords.map((record) => headers.map((field) => record.data[field] || "")),
-    ]);
+    saveCsv("mikledger-payroll.csv", payrollExportRows());
+  }
+
+  async function exportPayrollExcel() {
+    try {
+      const XLSX = await import("xlsx");
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(payrollExportRows()), "Payroll");
+      XLSX.writeFile(workbook, "mikledger-payroll.xlsx");
+    } catch {
+      toast.error("We couldn’t create the Excel file. Please try again.");
+    }
   }
 
   async function handleDelete(record: BookkeepingRecord) {
@@ -448,19 +457,30 @@ export default function PayrollWorkspace({ records, accounts, employees = [], as
             <p className="mt-1 text-xs text-muted-foreground">{customFromDate || customToDate ? `${customFromDate || "Any date"} – ${customToDate || "Any date"}` : monthLabel(selectedMonth)} · PKR</p>
           </div>
           <input ref={uploadRef} type="file" accept=".csv,text/csv" className="hidden" aria-label="Upload payroll CSV" onChange={(event) => { void handleImport(event.target.files?.[0]); event.target.value = ""; }} />
-          <div className="flex flex-wrap gap-2">
-            <Button type="button" variant="outline" size="sm" onClick={downloadTemplate}><ArrowDownToLine size={15} />Blank CSV template</Button>
-            <Button type="button" variant="outline" size="sm" onClick={() => uploadRef.current?.click()} disabled={isImporting}><FileUp size={15} />{isImporting ? "Importing…" : "Import CSV"}</Button>
-            <Button type="button" variant="outline" size="sm" onClick={exportPayroll}><ArrowDownToLine size={15} />Export CSV</Button>
-          </div>
-          <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-            <div className="relative">
-              <CalendarDays size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-              <Input aria-label="Payroll month" type="month" value={selectedMonth} onChange={(event) => { setSelectedMonth(event.target.value); setCustomFromDate(""); setCustomToDate(""); }} className="pl-9 sm:w-44" />
-            </div>
-            <Input aria-label="Custom range start date" type="date" value={customFromDate} onChange={(event) => setCustomFromDate(event.target.value)} className="sm:w-40" />
-            <Input aria-label="Custom range end date" type="date" value={customToDate} onChange={(event) => setCustomToDate(event.target.value)} className="sm:w-40" />
-            {(customFromDate || customToDate) ? <Button type="button" variant="ghost" size="sm" onClick={() => { setCustomFromDate(""); setCustomToDate(""); }}>Use month</Button> : null}
+          <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center print:hidden">
+            <Popover>
+              <PopoverTrigger render={<Button type="button" variant="outline" className="justify-between gap-2 sm:w-auto"><CalendarDays size={15} /><span>Date: {customFromDate || customToDate ? `${customFromDate || "Any date"} – ${customToDate || "Any date"}` : monthLabel(selectedMonth)}</span><ChevronDown size={14} /></Button>} />
+              <PopoverContent align="start" className="w-80 space-y-4">
+                <div className="space-y-1.5">
+                  <Label htmlFor="payroll-period-month">Payroll month</Label>
+                  <Input id="payroll-period-month" type="month" value={selectedMonth} onChange={(event) => { setSelectedMonth(event.target.value); setCustomFromDate(""); setCustomToDate(""); }} />
+                </div>
+                <div className="space-y-2 border-t border-border pt-3">
+                  <p className="text-xs font-medium text-muted-foreground">Or a custom date range</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="payroll-range-from">From</Label>
+                      <Input id="payroll-range-from" type="date" value={customFromDate} onChange={(event) => setCustomFromDate(event.target.value)} />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="payroll-range-to">To</Label>
+                      <Input id="payroll-range-to" type="date" value={customToDate} onChange={(event) => setCustomToDate(event.target.value)} />
+                    </div>
+                  </div>
+                  {(customFromDate || customToDate) ? <Button type="button" variant="ghost" size="sm" className="px-0" onClick={() => { setCustomFromDate(""); setCustomToDate(""); }}>Clear range and use the month</Button> : null}
+                </div>
+              </PopoverContent>
+            </Popover>
             <Input aria-label="Search payroll" placeholder="Search employee…" value={search} onChange={(event) => setSearch(event.target.value)} className="sm:w-56" />
             <DropdownMenu>
               <DropdownMenuTrigger render={<Button type="button" variant="ghost" className="gap-2"><SlidersHorizontal size={16} />Customise</Button>} />
@@ -482,6 +502,19 @@ export default function PayrollWorkspace({ records, accounts, employees = [], as
                 <DropdownMenuItem onClick={() => saveVisibleColumns(DEFAULT_PAYROLL_COLUMNS)}>Reset to default</DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
+            <DropdownMenu>
+              <DropdownMenuTrigger render={<Button type="button" variant="outline" className="gap-2" disabled={isImporting}><ArrowUpDown size={15} />{isImporting ? "Importing…" : "Import / Export"}<ChevronDown size={14} /></Button>} />
+              <DropdownMenuContent align="end" className="min-w-56">
+                <DropdownMenuItem onClick={() => uploadRef.current?.click()}><FileUp size={15} />Import CSV</DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuGroup>
+                  <DropdownMenuLabel>Download</DropdownMenuLabel>
+                  <DropdownMenuItem onClick={exportPayroll}><FileText size={15} />CSV file</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => void exportPayrollExcel()}><FileSpreadsheet size={15} />Excel (.xlsx)</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => window.print()}><Printer size={15} />Print or save as PDF</DropdownMenuItem>
+                </DropdownMenuGroup>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </div>
         {filteredRecords.length > 0 ? (
@@ -490,7 +523,7 @@ export default function PayrollWorkspace({ records, accounts, employees = [], as
               <TableHeader>
                 <TableRow>
                   {visibleColumns.map((column) => <TableHead key={column.key} className={column.align === "right" ? "text-right" : undefined}>{column.label}</TableHead>)}
-                  <TableHead><span className="sr-only">Actions</span></TableHead>
+                  <TableHead className="print:hidden"><span className="sr-only">Actions</span></TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -499,7 +532,7 @@ export default function PayrollWorkspace({ records, accounts, employees = [], as
                     {visibleColumns.map((column) => (
                       <TableCell key={column.key} className={column.align === "right" ? "text-right tabular-nums" : undefined}>{column.render(record)}</TableCell>
                     ))}
-                    <TableCell>
+                    <TableCell className="print:hidden">
                       <div className="flex justify-end gap-1">
                         <Button variant="ghost" size="icon" aria-label={`Copy salary for ${record.data.employeeName}`} title="Copy salary to next month" onClick={() => openCopiedEntry(record)}><Copy size={15} /></Button>
                         <Button variant="ghost" size="icon" nativeButton={false} render={<Link href={`/app/payroll/${record.id}/print`} />} aria-label={`Download salary slip for ${record.data.employeeName}`} title="Print or save salary slip as PDF"><ArrowDownToLine size={15} /></Button>
