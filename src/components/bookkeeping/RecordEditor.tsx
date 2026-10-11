@@ -74,7 +74,8 @@ function getInitialValues(module: ModuleDefinition, record: BookkeepingRecord | 
     customerId: record?.data.customerId ?? "",
   };
   if (module.kind === "vendors") {
-    values.displayName = record?.data.displayName || record?.data.company || record?.data.name || values.displayName;
+    // Older suppliers kept a separate display name; the form's Display name field edits `name`.
+    values.name = record?.data.displayName || record?.data.name || record?.data.company || values.name;
   }
   if (module.kind === "invoices") {
     values.paymentTerms = record?.data.paymentTerms || "30 days";
@@ -348,7 +349,7 @@ export default function RecordEditor({ module, record, customers, vendors, items
       const recordValues = module.kind === "vendors"
         ? {
             ...normalizedValues,
-            displayName: normalizedValues.displayName?.trim() || normalizedValues.company?.trim() || normalizedValues.name?.trim() || "",
+            displayName: normalizedValues.name?.trim() || normalizedValues.company?.trim() || "",
           }
         : module.kind === "expenses"
         ? {
@@ -434,9 +435,9 @@ export default function RecordEditor({ module, record, customers, vendors, items
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className={`max-h-[calc(100dvh-2rem)] overflow-y-auto ${module.kind === "vendors" ? "sm:max-w-[820px]" : "sm:max-w-[680px]"}`}>
+      <DialogContent className={`max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-[680px]`}>
         <DialogHeader className="pr-8">
-          <DialogTitle className="text-lg">{module.kind === "vendors" ? (record ? "Edit supplier" : "Add supplier") : record ? `Edit ${module.label.toLowerCase()}` : `New ${module.label.toLowerCase()}`}</DialogTitle>
+          <DialogTitle className="text-lg">{record ? `Edit ${module.label.toLowerCase()}` : `New ${module.label.toLowerCase()}`}</DialogTitle>
           <DialogDescription>{module.description}</DialogDescription>
         </DialogHeader>
 
