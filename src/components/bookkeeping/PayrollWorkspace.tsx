@@ -12,6 +12,7 @@ import { readableError } from "@/lib/action-error";
 import { deleteBookkeepingRecord, importPayrollCsv, sendPayrollSlip } from "@/app/actions";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Label } from "@/components/ui/label";
@@ -126,6 +127,7 @@ export default function PayrollWorkspace({ records, accounts, employees = [], as
   const [customToDate, setCustomToDate] = useState(dateRange?.endDate ?? "");
   const [search, setSearch] = useState("");
   const sheetCount = useRef(0);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const [sheet, setSheet] = useState<{ key: number; month: string; copyFrom?: BookkeepingRecord } | null>(null);
   const [isDeleting, setIsDeleting] = useState("");
   const [isSending, setIsSending] = useState("");
@@ -233,6 +235,34 @@ export default function PayrollWorkspace({ records, accounts, employees = [], as
     } catch {
       toast.error("We couldn’t create the Excel file. Please try again.");
     }
+  }
+
+  const visibleIds = filteredRecords.map((record) => record.id);
+  const selectedRecords = filteredRecords.filter((record) => selectedIds.has(record.id));
+  const allSelected = visibleIds.length > 0 && visibleIds.every((id) => selectedIds.has(id));
+
+  async function deleteSelected() {
+    if (!selectedRecords.length) {
+      toast.info("Select payroll rows with the checkboxes first.");
+      return;
+    }
+    const count = selectedRecords.length;
+    if (!window.confirm(`Delete ${count} payroll ${count === 1 ? "entry" : "entries"}? This can’t be undone.`)) return;
+    setIsDeleting("bulk");
+    const deleted: string[] = [];
+    for (const record of selectedRecords) {
+      try {
+        await deleteBookkeepingRecord("payroll", record.id);
+        deleted.push(record.id);
+      } catch (error) {
+        toast.error(`${record.data.employeeName || "Entry"}: ${errorMessage(error)}`);
+      }
+    }
+    setSavedRecords((previous) => previous.filter((item) => !deleted.includes(item.id)));
+    setSelectedIds(new Set());
+    setIsDeleting("");
+    if (deleted.length) toast.success(`Deleted ${deleted.length} payroll ${deleted.length === 1 ? "entry" : "entries"}.`);
+    router.refresh();
   }
 
   async function handleDelete(record: BookkeepingRecord) {
@@ -343,6 +373,10 @@ export default function PayrollWorkspace({ records, accounts, employees = [], as
                   <DropdownMenuItem onClick={() => void exportPayrollExcel()}><FileSpreadsheet size={15} />Excel (.xlsx)</DropdownMenuItem>
                   <DropdownMenuItem onClick={() => window.print()}><Printer size={15} />Print or save as PDF</DropdownMenuItem>
                 </DropdownMenuGroup>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem variant="destructive" disabled={!selectedRecords.length || isDeleting === "bulk"} onClick={() => void deleteSelected()}>
+                  <Trash2 size={15} />{selectedRecords.length ? `Delete selected (${selectedRecords.length})` : "Delete selected"}
+                </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
@@ -352,13 +386,33 @@ export default function PayrollWorkspace({ records, accounts, employees = [], as
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead className="w-10 print:hidden">
+                    <Checkbox
+                      aria-label="Select all payroll rows shown"
+                      checked={allSelected}
+                      indeterminate={!allSelected && selectedRecords.length > 0}
+                      onCheckedChange={(checked) => setSelectedIds(checked ? new Set(visibleIds) : new Set())}
+                    />
+                  </TableHead>
                   {visibleColumns.map((column) => <TableHead key={column.key} className={column.align === "right" ? "text-right" : undefined}>{column.label}</TableHead>)}
                   <TableHead className="print:hidden"><span className="sr-only">Actions</span></TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {filteredRecords.map((record) => (
-                  <TableRow key={record.id}>
+                  <TableRow key={record.id} data-state={selectedIds.has(record.id) ? "selected" : undefined}>
+                    <TableCell className="w-10 print:hidden">
+                      <Checkbox
+                        aria-label={`Select ${record.data.employeeName || "payroll entry"}`}
+                        checked={selectedIds.has(record.id)}
+                        onCheckedChange={(checked) => setSelectedIds((current) => {
+                          const next = new Set(current);
+                          if (checked) next.add(record.id);
+                          else next.delete(record.id);
+                          return next;
+                        })}
+                      />
+                    </TableCell>
                     {visibleColumns.map((column) => (
                       <TableCell key={column.key} className={column.align === "right" ? "text-right tabular-nums" : undefined}>{column.render(record)}</TableCell>
                     ))}
