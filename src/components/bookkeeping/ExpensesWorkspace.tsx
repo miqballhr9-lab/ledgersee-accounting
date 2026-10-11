@@ -2,10 +2,13 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowDownToLine, CalendarDays, Filter, MoreHorizontal, Pencil, Plus, Search } from "lucide-react";
+import { ArrowDownToLine, CalendarDays, Check, Filter, MoreHorizontal, Pencil, Plus, Search, Trash2 } from "lucide-react";
+import { toast } from "sonner";
 
-import { deleteBookkeepingRecord } from "@/app/actions";
+import { deleteBookkeepingRecord, markRecordPaid } from "@/app/actions";
 import RecordEditor from "@/components/bookkeeping/RecordEditor";
+import BulkActionsMenu from "@/components/bookkeeping/BulkActionsMenu";
+import { Checkbox } from "@/components/ui/checkbox";
 import { useNewRecordParam } from "@/hooks/use-new-record-param";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -205,6 +208,52 @@ export default function ExpensesWorkspace({ expenses: initialExpenses, bills: in
     router.refresh();
   }
 
+
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
+  const [bulkPending, setBulkPending] = useState(false);
+  function toggleSelected(id: string, checked: boolean) {
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      if (checked) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }
+  const selectedTransactions = records.filter((record) => selectedIds.has(`${record.kind}-${record.id}`));
+
+  async function runBulkAction(action: "mark-paid" | "delete") {
+    if (!selectedTransactions.length) return;
+    const count = selectedTransactions.length;
+    const noun = count === 1 ? "transaction" : "transactions";
+    if (!window.confirm(action === "delete" ? `Delete ${count} ${noun}? This can’t be undone.` : `Mark the selected bills as paid in full? Expenses are already paid and are skipped.`)) return;
+    setBulkPending(true);
+    setActionMessage("");
+    const done: string[] = [];
+    const failed: string[] = [];
+    for (const record of selectedTransactions) {
+      const title = record.kind === "bills" ? record.data.billNumber || "Bill" : record.data.description || "Expense";
+      try {
+        if (action === "delete") await deleteBookkeepingRecord(record.kind, record.id);
+        else {
+          if (record.kind !== "bills") continue;
+          if (["Paid", "Cancelled"].includes(record.data.status ?? "")) throw new Error(`${title} is already ${(record.data.status ?? "").toLowerCase()}.`);
+          await markRecordPaid("bills", record.id);
+        }
+        done.push(`${record.kind}-${record.id}`);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "it couldn’t be updated.";
+        failed.push(message.includes(title) ? message : `${title}: ${message}`);
+      }
+    }
+    if (action === "delete") setRecords((current) => current.filter((record) => !done.includes(`${record.kind}-${record.id}`)));
+    setSelectedIds(new Set());
+    setBulkPending(false);
+    if (done.length) toast.success(action === "delete" ? `${done.length} ${done.length === 1 ? "transaction" : "transactions"} deleted.` : `${done.length} ${done.length === 1 ? "bill" : "bills"} marked paid.`);
+    else if (action === "mark-paid" && !failed.length) toast.info("Select at least one unpaid bill to mark paid.");
+    if (failed.length) toast.error(failed.join(" "));
+    router.refresh();
+  }
+
   async function handleDelete(record: BookkeepingRecord) {
     if (!window.confirm(`Delete this ${record.kind === "bills" ? "bill" : "expense"}? This can’t be undone.`)) return;
     setPendingDelete(record.id);
@@ -297,6 +346,13 @@ export default function ExpensesWorkspace({ expenses: initialExpenses, bills: in
               <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
               <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search transactions" className="pl-9" aria-label="Search transactions" />
             </div>
+            <BulkActionsMenu
+              count={selectedTransactions.length}
+              pending={bulkPending}
+              noun="transactions"
+              items={[{ key: "mark-paid", label: "Mark bills paid", icon: Check }, { key: "delete", label: "Delete", icon: Trash2, destructive: true }]}
+              onSelect={(action) => void runBulkAction(action)}
+            />
             <Select value={typeFilter} onValueChange={(value) => setTypeFilter(value ?? "all")}>
               <SelectTrigger className="w-[150px]" aria-label="Transaction type"><SelectValue /></SelectTrigger>
               <SelectContent>
@@ -325,6 +381,18 @@ export default function ExpensesWorkspace({ expenses: initialExpenses, bills: in
           <Table>
             <TableHeader>
               <TableRow className="bg-muted/40 hover:bg-muted/40">
+                <TableHead className="w-10">
+                  <Checkbox
+                    aria-label="Select all transactions on this page"
+                    checked={pageRecords.length > 0 && pageRecords.every((record) => selectedIds.has(`${record.kind}-${record.id}`))}
+                    indeterminate={pageRecords.some((record) => selectedIds.has(`${record.kind}-${record.id}`)) && !pageRecords.every((record) => selectedIds.has(`${record.kind}-${record.id}`))}
+                    onCheckedChange={(checked) => setSelectedIds((current) => {
+                      const next = new Set(current);
+                      pageRecords.forEach((record) => (checked === true ? next.add(`${record.kind}-${record.id}`) : next.delete(`${record.kind}-${record.id}`)));
+                      return next;
+                    })}
+                  />
+                </TableHead>
                 {["Date", "Type", "No. / Description", "Payee", "Category", "Payment account", "Amount", "Status", ""].map((heading) => (
                   <TableHead key={heading || "actions"} className="whitespace-nowrap text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">{heading}</TableHead>
                 ))}
@@ -339,7 +407,8 @@ export default function ExpensesWorkspace({ expenses: initialExpenses, bills: in
                   ? record.data.paymentAccountName || (record.data.paymentMethod === "Credit" ? "Credit · unpaid" : record.data.paymentMethod)
                   : record.data.paymentAccount;
                 return (
-                  <TableRow key={`${record.kind}-${record.id}`}>
+                  <TableRow key={`${record.kind}-${record.id}`} data-state={selectedIds.has(`${record.kind}-${record.id}`) ? "selected" : undefined}>
+                    <TableCell className="w-10"><Checkbox aria-label={`Select ${title || (isBill ? "bill" : "expense")}`} checked={selectedIds.has(`${record.kind}-${record.id}`)} onCheckedChange={(checked) => toggleSelected(`${record.kind}-${record.id}`, checked === true)} /></TableCell>
                     <TableCell className="whitespace-nowrap text-[13px]">{formatDate(getRecordDate(record))}</TableCell>
                     <TableCell className="text-[13px]">{isBill ? "Bill" : "Expense"}</TableCell>
                     <TableCell className="max-w-[240px] text-[13px] font-medium"><span className="block truncate" title={title || ""}>{title || "—"}</span></TableCell>
@@ -367,7 +436,7 @@ export default function ExpensesWorkspace({ expenses: initialExpenses, bills: in
               })}
               {!pageRecords.length ? (
                 <TableRow>
-                  <TableCell colSpan={9} className="h-48 whitespace-normal text-center">
+                  <TableCell colSpan={10} className="h-48 whitespace-normal text-center">
                     <div className="sticky left-0 w-[calc(100vw-4.5rem)] sm:static sm:mx-auto sm:w-auto sm:max-w-sm">
                       <p className="text-sm font-medium">{records.length ? "No transactions match these filters" : "No expenses or bills yet"}</p>
                       <p className="mt-1 text-sm text-muted-foreground">{records.length ? "Change the date, type, or filters to see more results." : "Add a bill you need to pay or record a purchase already paid."}</p>

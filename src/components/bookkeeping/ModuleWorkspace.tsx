@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import Image from "next/image";
-import { ArrowDownToLine, ArrowRightLeft, BadgeCheck, ChevronDown, CircleDollarSign, ClipboardList, FileCheck2, FileText, ListChecks, Plus, Search, SlidersHorizontal, Trash2, Undo2 } from "lucide-react";
+import { ArrowDownToLine, ArrowRightLeft, BadgeCheck, ChevronDown, CircleDollarSign, ClipboardList, FileCheck2, FileText, ListChecks, Plus, Receipt, Search, SlidersHorizontal, Trash2, Undo2, WalletCards } from "lucide-react";
 
 import {
   advancePurchaseOrder,
@@ -373,11 +373,13 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
   }
 
   // Actions on several checked records at once, offered from the toolbar menu.
-  type BulkAction = "estimates" | "sales-orders" | "invoices" | "pay" | "undo-payment" | "apply-credit" | "delete";
+  type BulkAction = "estimates" | "sales-orders" | "invoices" | "bill" | "expense" | "pay" | "undo-payment" | "apply-credit" | "delete";
   const bulkMenu: { label: string; items: { action: BulkAction; label: string }[] } | null = module.kind === "sales-orders"
     ? { label: "Convert", items: [{ action: "estimates", label: "Convert to estimate" }, { action: "invoices", label: "Convert to invoice" }] }
     : module.kind === "estimates"
       ? { label: "Convert", items: [{ action: "sales-orders", label: "Convert to sales order" }, { action: "invoices", label: "Convert to invoice" }] }
+      : module.kind === "purchase-orders"
+      ? { label: "Convert", items: [{ action: "bill", label: "Convert to bill" }, { action: "expense", label: "Convert to expense" }] }
       : module.kind === "invoices"
         ? { label: "Actions", items: [{ action: "pay", label: "Record payment" }, { action: "undo-payment", label: "Undo payment" }] }
         : module.kind === "credit-notes"
@@ -385,6 +387,7 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
           : null;
   const supportsBulkActions = Boolean(bulkMenu);
   const [bulkPaymentOpen, setBulkPaymentOpen] = useState(false);
+  const [bulkExpenseIds, setBulkExpenseIds] = useState<string[]>([]);
   const [bulkPaymentDate, setBulkPaymentDate] = useState("");
   const [bulkPaymentAccount, setBulkPaymentAccount] = useState("");
   const selectedRecords = records.filter((record) => selectedIds.has(record.id));
@@ -413,6 +416,16 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
       openBulkPayment();
       return;
     }
+    if (action === "expense") {
+      // Reuses the single "Record as expense" dialog to pick the category and account for every selected order.
+      const vendor = vendors.find((item) => item.data.name?.trim().toLowerCase() === selectedRecords[0]?.data.vendor?.trim().toLowerCase());
+      setBulkExpenseIds(selectedRecords.map((record) => record.id));
+      setExpenseConversionRecord(selectedRecords[0]);
+      setExpenseCategoryId(expenseAccounts.find((account) => account.id === vendor?.data.defaultExpenseAccount)?.id ?? expenseAccounts[0]?.id ?? "");
+      setExpensePaymentAccountId("");
+      setExpenseConversionError("");
+      return;
+    }
     const count = selectedRecords.length;
     const noun = count === 1 ? module.label.toLowerCase() : module.plural.toLowerCase();
     if (action === "delete" && !window.confirm(`Delete ${count} ${noun}? This can’t be undone.`)) return;
@@ -424,7 +437,10 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
     for (const record of selectedRecords) {
       const title = record.data[module.titleKey] || module.label;
       try {
-        if (action === "delete") await deleteBookkeepingRecord(module.kind, record.id);
+        if (action === "delete") {
+          if (module.kind === "purchase-orders" && (record.data.status || "Draft") !== "Draft") throw new Error(`${title} is past draft; cancel it instead of deleting.`);
+          await deleteBookkeepingRecord(module.kind, record.id);
+        } else if (action === "bill") await convertBookkeepingRecord(record.id);
         else if (action === "undo-payment") await undoInvoicePayments(record.id);
         else if (action === "apply-credit") await applyCreditNote(record.id);
         else if (action === "pay") {
@@ -446,6 +462,8 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
       estimates: "converted to estimates",
       "sales-orders": "converted to sales orders",
       invoices: "converted to invoices",
+      bill: "converted to bills",
+      expense: "recorded as expenses",
       pay: "marked paid",
       "undo-payment": "reopened as unpaid",
       "apply-credit": "applied",
@@ -589,6 +607,27 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
     }
     setPendingAction(true);
     setExpenseConversionError("");
+    if (bulkExpenseIds.length) {
+      const failed: string[] = [];
+      let done = 0;
+      for (const id of bulkExpenseIds) {
+        const order = records.find((record) => record.id === id);
+        try {
+          await convertPurchaseOrderToExpense(id, expenseCategoryId, expensePaymentAccountId || undefined);
+          done += 1;
+        } catch (error) {
+          failed.push(`${order?.data.poNumber || "Purchase order"}: ${error instanceof Error ? error.message : "it couldn’t be recorded."}`);
+        }
+      }
+      setBulkExpenseIds([]);
+      setExpenseConversionRecord(null);
+      setSelectedIds(new Set());
+      setPendingAction(false);
+      if (done) toast.success(`${done} ${done === 1 ? "purchase order" : "purchase orders"} recorded as expenses.`);
+      if (failed.length) toast.error(failed.join(" "));
+      router.refresh();
+      return;
+    }
     try {
       await convertPurchaseOrderToExpense(expenseConversionRecord.id, expenseCategoryId, expensePaymentAccountId || undefined);
       setExpenseConversionRecord(null);
@@ -694,7 +733,9 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
                 />
                 <DropdownMenuContent align="end" className="min-w-48">
                   {bulkMenu.items.map((item) => {
-                    const Icon = item.action === "invoices" ? FileText
+                    const Icon = item.action === "bill" ? Receipt
+                      : item.action === "expense" ? WalletCards
+                      : item.action === "invoices" ? FileText
                       : item.action === "estimates" ? FileCheck2
                         : item.action === "sales-orders" ? ClipboardList
                           : item.action === "pay" ? CircleDollarSign
@@ -864,12 +905,14 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
         </DialogContent>
       </Dialog>
 
-      <Dialog open={Boolean(expenseConversionRecord)} onOpenChange={(open) => { if (!open) setExpenseConversionRecord(null); }}>
+      <Dialog open={Boolean(expenseConversionRecord)} onOpenChange={(open) => { if (!open) { setExpenseConversionRecord(null); setBulkExpenseIds([]); } }}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Record purchase as expense</DialogTitle>
             <DialogDescription>
-              {expenseConversionRecord?.data.poNumber} · {expenseConversionRecord?.data.vendor} · {formatCurrency(Number(expenseConversionRecord?.data.amount || 0), expenseConversionRecord?.data.currency || defaultCurrency)}
+              {bulkExpenseIds.length > 1
+                ? `${bulkExpenseIds.length} purchase orders · ${formatCurrency(records.filter((record) => bulkExpenseIds.includes(record.id)).reduce((sum, record) => sum + Number(record.data.amount || 0), 0), defaultCurrency)}`
+                : <>{expenseConversionRecord?.data.poNumber} · {expenseConversionRecord?.data.vendor} · {formatCurrency(Number(expenseConversionRecord?.data.amount || 0), expenseConversionRecord?.data.currency || defaultCurrency)}</>}
             </DialogDescription>
           </DialogHeader>
           <form id="purchase-order-expense-form" onSubmit={submitExpenseConversion} className="space-y-4">

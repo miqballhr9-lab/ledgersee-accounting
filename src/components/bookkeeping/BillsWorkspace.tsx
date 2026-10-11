@@ -6,6 +6,9 @@ import { ArrowDownToLine, Check, MoreHorizontal, Pencil, Plus, Search, Trash2 } 
 
 import { deleteBookkeepingRecord, markRecordPaid } from "@/app/actions";
 import RecordEditor from "@/components/bookkeeping/RecordEditor";
+import BulkActionsMenu from "@/components/bookkeeping/BulkActionsMenu";
+import { Checkbox } from "@/components/ui/checkbox";
+import { toast } from "sonner";
 import { useNewRecordParam } from "@/hooks/use-new-record-param";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -136,6 +139,50 @@ export default function BillsWorkspace({ records: initialRecords, vendors, accou
     router.refresh();
   }
 
+
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
+  const [bulkPending, setBulkPending] = useState(false);
+  function toggleSelected(id: string, checked: boolean) {
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      if (checked) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }
+  const selectedBills = records.filter((record) => selectedIds.has(record.id));
+
+  async function runBulkAction(action: "mark-paid" | "delete") {
+    if (!selectedBills.length) return;
+    const count = selectedBills.length;
+    const noun = count === 1 ? "bill" : "bills";
+    if (!window.confirm(action === "delete" ? `Delete ${count} ${noun}? This can’t be undone.` : `Mark ${count} ${noun} as paid in full?`)) return;
+    setBulkPending(true);
+    setActionMessage("");
+    const done: string[] = [];
+    const failed: string[] = [];
+    for (const record of selectedBills) {
+      const title = record.data.billNumber || "Bill";
+      try {
+        if (action === "delete") await deleteBookkeepingRecord("bills", record.id);
+        else {
+          if (["Paid", "Cancelled"].includes(billStatus(record, asOfDate))) throw new Error(`${title} is already ${billStatus(record, asOfDate).toLowerCase()}.`);
+          await markRecordPaid("bills", record.id);
+        }
+        done.push(record.id);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "it couldn’t be updated.";
+        failed.push(message.includes(title) ? message : `${title}: ${message}`);
+      }
+    }
+    if (action === "delete") setRecords((current) => current.filter((record) => !done.includes(record.id)));
+    setSelectedIds(new Set());
+    setBulkPending(false);
+    if (done.length) toast.success(`${done.length} ${done.length === 1 ? "bill" : "bills"} ${action === "delete" ? "deleted" : "marked paid"}.`);
+    if (failed.length) toast.error(failed.join(" "));
+    router.refresh();
+  }
+
   async function handleMarkPaid(record: BookkeepingRecord) {
     if (!window.confirm(`Mark ${record.data.billNumber || "this bill"} as paid in full?`)) return;
     setPendingAction(true);
@@ -229,6 +276,13 @@ export default function BillsWorkspace({ records: initialRecords, vendors, accou
               <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
               <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search bills or vendors" className="pl-9" aria-label="Search bills or vendors" />
             </div>
+            <BulkActionsMenu
+              count={selectedBills.length}
+              pending={bulkPending}
+              noun="bills"
+              items={[{ key: "mark-paid", label: "Mark paid", icon: Check }, { key: "delete", label: "Delete", icon: Trash2, destructive: true }]}
+              onSelect={(action) => void runBulkAction(action)}
+            />
             <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value ?? "all")}>
               <SelectTrigger className="w-[145px]" aria-label="Filter bills by status"><SelectValue placeholder="All statuses" /></SelectTrigger>
               <SelectContent>
@@ -253,6 +307,14 @@ export default function BillsWorkspace({ records: initialRecords, vendors, accou
           <Table>
             <TableHeader>
               <TableRow className="bg-muted/40 hover:bg-muted/40">
+                <TableHead className="w-10">
+                  <Checkbox
+                    aria-label="Select all bills shown"
+                    checked={filteredRecords.length > 0 && filteredRecords.every((record) => selectedIds.has(record.id))}
+                    indeterminate={filteredRecords.some((record) => selectedIds.has(record.id)) && !filteredRecords.every((record) => selectedIds.has(record.id))}
+                    onCheckedChange={(checked) => setSelectedIds(checked === true ? new Set(filteredRecords.map((record) => record.id)) : new Set())}
+                  />
+                </TableHead>
                 {["Vendor", "Bill no.", "Bill date", "Due date", "Category", "Total", "Balance due", "Status", ""].map((heading) => (
                   <TableHead key={heading || "actions"} className="whitespace-nowrap text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">{heading}</TableHead>
                 ))}
@@ -263,7 +325,8 @@ export default function BillsWorkspace({ records: initialRecords, vendors, accou
                 const status = billStatus(record, asOfDate);
                 const canMarkPaid = !["Paid", "Cancelled"].includes(status);
                 return (
-                  <TableRow key={record.id} className="group">
+                  <TableRow key={record.id} className="group" data-state={selectedIds.has(record.id) ? "selected" : undefined}>
+                    <TableCell className="w-10"><Checkbox aria-label={`Select ${record.data.billNumber || "bill"}`} checked={selectedIds.has(record.id)} onCheckedChange={(checked) => toggleSelected(record.id, checked === true)} /></TableCell>
                     <TableCell className="max-w-[220px] truncate text-[13px] font-medium" title={record.data.vendor || ""}>{record.data.vendor || "—"}</TableCell>
                     <TableCell className="whitespace-nowrap text-[13px] text-muted-foreground">{record.data.billNumber || "—"}</TableCell>
                     <TableCell className="whitespace-nowrap text-[13px]">{formatDate(record.data.billDate || "")}</TableCell>
@@ -289,7 +352,7 @@ export default function BillsWorkspace({ records: initialRecords, vendors, accou
               })}
               {!filteredRecords.length ? (
                 <TableRow>
-                  <TableCell colSpan={9} className="h-52 whitespace-normal text-center">
+                  <TableCell colSpan={10} className="h-52 whitespace-normal text-center">
                     <div className="sticky left-0 w-[calc(100vw-4.5rem)] sm:static sm:mx-auto sm:w-auto sm:max-w-sm">
                       <p className="text-sm font-medium">{records.length ? "No bills match these filters" : "No bills yet"}</p>
                       <p className="mt-1 text-sm text-muted-foreground">{records.length ? "Try a different search, status, or category." : "Add your first vendor bill to start tracking due dates and balances."}</p>
