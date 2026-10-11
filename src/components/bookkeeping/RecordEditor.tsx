@@ -430,6 +430,23 @@ export default function RecordEditor({ module, record, customers, vendors, items
   const linesCurrency = values.currency || defaultCurrency || "USD";
   const hasStructuredLines = structuredLineKinds.has(module.kind);
   const customerOptions = customers.filter((customer) => customer.data.name?.trim());
+  const totalsRows = hasStructuredLines
+    ? { subtotal, tax: taxAmount, total: invoiceTotal, currency: values.currency || "USD" }
+    : categoryLineKinds.has(module.kind)
+      ? { subtotal: expenseTotal, tax: expenseTaxAmount, total: expenseGrandTotal, currency: linesCurrency }
+      : null;
+  // The totals box follows the Tax rate / Discount inputs so the figures entered sit above their result.
+  const totalsAnchorKey = totalsRows
+    ? [...module.fields].reverse().find((field) => field.key === "discount" || field.key === "taxRate")?.key ?? "lineItems"
+    : null;
+  const totalsBox = totalsRows ? (
+    <div className="space-y-2 rounded-lg border border-border bg-muted/30 p-3 text-sm sm:col-span-2">
+      <div className="flex justify-between gap-4"><span className="text-muted-foreground">Subtotal</span><span className="tabular-nums">{currencyAmount(totalsRows.subtotal, totalsRows.currency)}</span></div>
+      <div className="flex justify-between gap-4"><span className="text-muted-foreground">Tax ({Math.max(0, Number(values.taxRate) || 0)}%)</span><span className="tabular-nums">{currencyAmount(totalsRows.tax, totalsRows.currency)}</span></div>
+      <div className="flex justify-between gap-4"><span className="text-muted-foreground">Discount</span><span className="tabular-nums">−{currencyAmount(discount, totalsRows.currency)}</span></div>
+      <div className="flex justify-between gap-4 border-t border-border pt-2 font-semibold"><span>{module.label} total</span><span className="tabular-nums">{currencyAmount(totalsRows.total, totalsRows.currency)}</span></div>
+    </div>
+  ) : null;
   const expenseAccounts = accounts.filter((account) =>
     account.data.locked !== "true" && accountCategoryForType(account.data.accountType ?? "") === "Expense",
   );
@@ -603,12 +620,6 @@ export default function RecordEditor({ module, record, customers, vendors, items
                         Add line
                       </Button>
                       {!availableItems.length ? <p className="text-xs leading-5 text-muted-foreground">No saved items or services yet. Add them in <Link href="/app/items" className="font-medium text-primary underline underline-offset-4">Items &amp; services</Link>, then reopen this document.</p> : null}
-                      <div className="space-y-2 rounded-lg border border-border bg-muted/30 p-3 text-sm">
-                        <div className="flex justify-between gap-4"><span className="text-muted-foreground">Subtotal</span><span className="tabular-nums">{currencyAmount(subtotal, values.currency || "USD")}</span></div>
-                        <div className="flex justify-between gap-4"><span className="text-muted-foreground">Tax ({Math.max(0, Number(values.taxRate) || 0)}%)</span><span className="tabular-nums">{currencyAmount(taxAmount, values.currency || "USD")}</span></div>
-                        <div className="flex justify-between gap-4"><span className="text-muted-foreground">Discount</span><span className="tabular-nums">−{currencyAmount(discount, values.currency || "USD")}</span></div>
-                        <div className="flex justify-between gap-4 border-t border-border pt-2 font-semibold"><span>{module.label} total</span><span className="tabular-nums">{currencyAmount(invoiceTotal, values.currency || "USD")}</span></div>
-                      </div>
                     </div>
                   ) : null}
 
@@ -780,12 +791,6 @@ export default function RecordEditor({ module, record, customers, vendors, items
                           <Plus size={15} />Add lines
                         </Button>
                       </div>
-                      <div className="space-y-2 rounded-lg border border-border bg-muted/30 p-3 text-sm">
-                        <div className="flex justify-between gap-4"><span className="text-muted-foreground">Subtotal</span><span className="tabular-nums">{currencyAmount(expenseTotal, linesCurrency)}</span></div>
-                        <div className="flex justify-between gap-4"><span className="text-muted-foreground">Tax ({Math.max(0, Number(values.taxRate) || 0)}%)</span><span className="tabular-nums">{currencyAmount(expenseTaxAmount, linesCurrency)}</span></div>
-                        <div className="flex justify-between gap-4"><span className="text-muted-foreground">Discount</span><span className="tabular-nums">−{currencyAmount(discount, linesCurrency)}</span></div>
-                        <div className="flex justify-between gap-4 border-t border-border pt-2 font-semibold"><span>{module.label} total</span><span className="tabular-nums">{currencyAmount(expenseGrandTotal, linesCurrency)}</span></div>
-                      </div>
                       {!expenseCategories.length ? <NoAccountsNotice message="You need Expense accounts in your Chart of accounts to categorize spending." /> : null}
                     </div>
                   ) : null}
@@ -863,6 +868,7 @@ export default function RecordEditor({ module, record, customers, vendors, items
 
                   {field.help && field.type !== "file" && field.type !== "checkbox" && !(field.key === "paymentMethod" && !paymentAccounts.length && !record) && !(hasStructuredLines && field.key === "lineItems") && !(categoryLineKinds.has(module.kind) && field.key === "lineItems") ? <p className="text-xs leading-5 text-muted-foreground">{field.help}</p> : null}
                 </div>
+                {field.key === totalsAnchorKey ? totalsBox : null}
                 </Fragment>
               );
             })}
