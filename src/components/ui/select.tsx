@@ -6,7 +6,34 @@ import { Select as SelectPrimitive } from "@base-ui/react/select"
 import { cn } from "@/lib/utils"
 import { ChevronDownIcon, CheckIcon, ChevronUpIcon } from "lucide-react"
 
-const Select = SelectPrimitive.Root
+/**
+ * Collects `value → label` from the SelectItems nested in `children`, so the
+ * trigger shows an option's label ("Bank · Main account") instead of its raw
+ * value (an account id) when the caller doesn't pass `items` itself.
+ */
+function collectItemLabels(node: React.ReactNode, labels: Record<string, React.ReactNode>) {
+  React.Children.forEach(node, (child) => {
+    if (!React.isValidElement<{ value?: unknown; children?: React.ReactNode }>(child)) return
+    if (child.type === SelectItem && child.props.value != null) {
+      labels[String(child.props.value)] = child.props.children
+    } else if (child.props.children) {
+      collectItemLabels(child.props.children, labels)
+    }
+  })
+  return labels
+}
+
+function Select<Value, Multiple extends boolean | undefined = false>({
+  items,
+  children,
+  ...props
+}: SelectPrimitive.Root.Props<Value, Multiple>) {
+  return (
+    <SelectPrimitive.Root {...props} items={items ?? collectItemLabels(children, {})}>
+      {children}
+    </SelectPrimitive.Root>
+  )
+}
 
 function SelectGroup({ className, ...props }: SelectPrimitive.Group.Props) {
   return (

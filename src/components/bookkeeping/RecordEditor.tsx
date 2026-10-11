@@ -1,6 +1,7 @@
 "use client";
 
 import { Fragment, useEffect, useRef, useState, type FormEvent } from "react";
+import { toast } from "sonner";
 import Link from "next/link";
 import { ChevronDown, Copy, LoaderCircle, Mail, MessageCircle, MessageSquareText, Plus, Printer, Share2, Trash2, UploadCloud } from "lucide-react";
 
@@ -12,6 +13,7 @@ import {
   sendCustomerDocumentRecord,
   sendInvoiceRecord,
 } from "@/app/actions";
+import NoAccountsNotice from "@/components/bookkeeping/NoAccountsNotice";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -399,6 +401,7 @@ export default function RecordEditor({ module, record, customers, vendors, items
           return;
         }
       }
+      toast.success(shouldSend ? `${module.label} saved and emailed to the customer.` : `${module.label} ${record ? "updated" : "saved"}.`);
       if (intent === "save-and-new" || intent === "save-and-copy") {
         await onSaveComplete(saved, intent);
       } else {
@@ -764,7 +767,7 @@ export default function RecordEditor({ module, record, customers, vendors, items
                           <span className="font-semibold tabular-nums">{currencyAmount(expenseTotal, defaultCurrency || "USD")}</span>
                         </div>
                       </div>
-                      {!expenseCategories.length ? <p className="text-xs leading-5 text-muted-foreground">Add an Expense account in Chart of accounts before recording expense lines.</p> : null}
+                      {!expenseCategories.length ? <NoAccountsNotice message="You need Expense accounts in your Chart of accounts to categorize spending." /> : null}
                     </div>
                   ) : null}
 
@@ -782,7 +785,7 @@ export default function RecordEditor({ module, record, customers, vendors, items
                           ) : null}
                         </SelectContent>
                       </Select>
-                      {!paymentAccounts.length && !record ? <p className="text-xs leading-5 text-muted-foreground">Add a Cash, Bank, or Credit card account in Chart of accounts to record a paid sale or purchase.</p> : null}
+                      {!paymentAccounts.length && !record ? <NoAccountsNotice message="To record this as paid, add a Cash, Bank or Credit card account. Otherwise it stays unpaid on credit." /> : null}
                     </>
                   ) : null}
 
@@ -839,7 +842,7 @@ export default function RecordEditor({ module, record, customers, vendors, items
                   ) : null}
                   {module.kind === "expenses" && field.key === "payee" ? <datalist id="expense-payees">{vendorOptions.map((vendor) => <option value={vendor.data.name} key={vendor.id} />)}</datalist> : null}
 
-                  {field.help && field.type !== "file" && field.type !== "checkbox" && !(hasStructuredLines && field.key === "lineItems") && !(module.kind === "expenses" && field.key === "lineItems") ? <p className="text-xs leading-5 text-muted-foreground">{field.help}</p> : null}
+                  {field.help && field.type !== "file" && field.type !== "checkbox" && !(field.key === "paymentMethod" && !paymentAccounts.length && !record) && !(hasStructuredLines && field.key === "lineItems") && !(module.kind === "expenses" && field.key === "lineItems") ? <p className="text-xs leading-5 text-muted-foreground">{field.help}</p> : null}
                 </div>
                 </Fragment>
               );

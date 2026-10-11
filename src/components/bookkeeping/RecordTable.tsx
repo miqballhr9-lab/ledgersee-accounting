@@ -141,7 +141,10 @@ function rowActions(module: ModuleDefinition, record: BookkeepingRecord, onActio
     else if (status === "Purchase Order") actions.push({ kind: "receive-order", label: "Receive", icon: PackageCheck });
     else if (status === "Received" && canConvertPurchaseOrder) actions.push({ kind: "convert", label: "Create bill", icon: ArrowRightLeft });
   } else if (["estimates", "sales-orders"].includes(module.kind)) actions.push({ kind: "convert", label: "Convert", icon: ArrowRightLeft });
-  if (module.kind === "invoices") actions.push({ kind: "payment", label: "Record payment", icon: CircleDollarSign }, { kind: "send", label: "Send invoice", icon: Mail });
+  if (module.kind === "invoices") {
+    if (!["Paid", "Cancelled"].includes(record.data.status ?? "")) actions.push({ kind: "payment", label: "Record payment", icon: CircleDollarSign });
+    actions.push({ kind: "send", label: "Send invoice", icon: Mail });
+  }
   if (["estimates", "sales-orders", "credit-notes"].includes(module.kind)) actions.push({ kind: "send", label: `Send ${module.label.toLowerCase()}`, icon: Mail });
   if (module.kind === "bills") actions.push({ kind: "mark-paid", label: "Mark paid", icon: Check });
   if (module.kind === "credit-notes") actions.push({ kind: "apply-credit", label: "Apply credit", icon: BadgeCheck });

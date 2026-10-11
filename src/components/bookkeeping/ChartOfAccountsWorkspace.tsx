@@ -24,6 +24,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import AccountEditorSheet from "@/components/bookkeeping/AccountEditorSheet";
+import StandardAccountsButton from "@/components/bookkeeping/StandardAccountsButton";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
 
 interface ChartOfAccountsWorkspaceProps {
@@ -89,6 +90,10 @@ export default function ChartOfAccountsWorkspace({ accounts: initialAccounts, cu
     });
   }
 
+  function handleStandardAdded(added: BookkeepingRecord[]) {
+    setAccounts((current) => [...added, ...current]);
+  }
+
   async function confirmDelete() {
     if (!deletingAccount) return;
     setDeleting(true);
@@ -112,7 +117,10 @@ export default function ChartOfAccountsWorkspace({ accounts: initialAccounts, cu
           <h1 className="mt-1 text-[26px] font-semibold tracking-tight sm:text-3xl">Chart of accounts</h1>
           <p className="mt-1.5 max-w-2xl text-sm text-muted-foreground">Manage the accounts that organize your business activity and journal entries.</p>
         </div>
-        <Button className="gap-2" onClick={openNewAccount}><Plus size={16} />New account</Button>
+        <div className="flex flex-wrap gap-2">
+          <StandardAccountsButton onAdded={handleStandardAdded} />
+          <Button className="gap-2" onClick={openNewAccount}><Plus size={16} />New account</Button>
+        </div>
       </section>
 
       <section aria-label="Accounts by type" className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5">
@@ -209,8 +217,13 @@ export default function ChartOfAccountsWorkspace({ accounts: initialAccounts, cu
             <div className="max-w-sm">
               <span className="mx-auto grid size-11 place-items-center rounded-xl bg-accent text-accent-foreground"><WalletCards size={20} /></span>
               <h3 className="mt-4 text-sm font-semibold">{accounts.length === 0 ? "Start your chart of accounts" : "No matching accounts"}</h3>
-              <p className="mt-1 text-sm text-muted-foreground">{accounts.length === 0 ? "Add the accounts you use to track money in, money out, and balances." : "Try another search or account type."}</p>
-              {accounts.length === 0 ? <Button className="mt-4 gap-2" onClick={openNewAccount}><Plus size={15} />Add first account</Button> : null}
+              <p className="mt-1 text-sm text-muted-foreground">{accounts.length === 0 ? "Start with the standard small-business accounts — cash, bank, credit card, income and common expenses — then rename or add your own." : "Try another search or account type."}</p>
+              {accounts.length === 0 ? (
+                <div className="mt-4 flex flex-wrap justify-center gap-2">
+                  <StandardAccountsButton variant="default" label="Add standard accounts" onAdded={handleStandardAdded} />
+                  <Button variant="outline" className="gap-2" onClick={openNewAccount}><Plus size={15} />Add my own</Button>
+                </div>
+              ) : null}
             </div>
           </div>
         )}

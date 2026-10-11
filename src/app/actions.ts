@@ -14,6 +14,7 @@ import { siteUrl } from "@/lib/site";
 import { isRecordKind, type BookkeepingRecord, type RecordKind } from "@/lib/bookkeeping-types";
 import { paymentAccountType } from "@/lib/payment-accounts";
 import { accountCategoryForType, accountDetailsForType } from "@/lib/account-types";
+import { standardAccounts } from "@/lib/standard-accounts";
 import { budgetActual, budgetExpectedTotal, budgetVariance, parseBudgetLines, parseCsv, recordsWithinBudgetDates, type BudgetCategory, type BudgetLine, type BudgetLineType, type BudgetPeriod } from "@/lib/budget-utils";
 import { calculatePayroll, payrollCsvFields, serializePayroll, type PayrollValues } from "@/lib/payroll-utils";
 import { MAX_ITEM_IMPORT_ROWS, type ItemImportData, type ItemImportRow } from "@/lib/item-import";
@@ -616,6 +617,41 @@ export async function importBookkeepingItems(input: ItemImportRow[]): Promise<Bo
 
   revalidatePath("/app", "layout");
   return created;
+}
+
+/**
+ * Adds the standard small-business chart of accounts. Accounts whose name or
+ * number is already in use are skipped, so this is safe to run more than once.
+ */
+export async function addStandardAccounts(): Promise<{ added: number; records: BookkeepingRecord[] }> {
+  const me = await requireUser();
+
+  return db.transaction(async (transaction) => {
+    const existing = await transaction
+      .select({ data: bookkeepingRecord.data })
+      .from(bookkeepingRecord)
+      .where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "accounts")));
+    const usedNames = new Set(existing.map((account) => account.data.name?.trim().toLowerCase()).filter(Boolean));
+    const usedCodes = new Set(existing.map((account) => account.data.code?.trim().toLowerCase()).filter(Boolean));
+
+    const missing = standardAccounts.filter((account) => !usedNames.has(account.name.toLowerCase()) && !usedCodes.has(account.code.toLowerCase()));
+    if (!missing.length) return { added: 0, records: [] };
+
+    const rows = missing.map((account) => {
+      const category = accountCategoryForType(account.accountType);
+      if (!category || !accountDetailsForType(account.accountType).some((detailType) => detailType === account.detailType)) {
+        throw new Error(`The standard account ${account.name} has an invalid type.`);
+      }
+      return {
+        userId: me.id,
+        kind: "accounts",
+        data: sanitizePayload({ code: account.code, name: account.name, type: category, accountType: account.accountType, detailType: account.detailType }),
+      };
+    });
+    const saved = await transaction.insert(bookkeepingRecord).values(rows).returning();
+    revalidatePath("/app", "layout");
+    return { added: saved.length, records: saved.map(serializeRow) };
+  });
 }
 
 function isBudgetDate(value: unknown): value is string {

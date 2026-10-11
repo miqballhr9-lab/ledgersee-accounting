@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 import Image from "next/image";
 import { ArrowDownToLine, Plus, Search, SlidersHorizontal } from "lucide-react";
 
@@ -36,6 +37,7 @@ import { budgetActualRecords, recordsWithinBudgetDates, type BudgetLine } from "
 import JournalEntryEditor from "@/components/bookkeeping/JournalEntryEditor";
 import ItemsBulkImport from "@/components/bookkeeping/ItemsBulkImport";
 import RecordEditor from "@/components/bookkeeping/RecordEditor";
+import NoAccountsNotice from "@/components/bookkeeping/NoAccountsNotice";
 import { useNewRecordParam } from "@/hooks/use-new-record-param";
 import RecordTable, { type RecordActionKind } from "@/components/bookkeeping/RecordTable";
 
@@ -462,6 +464,7 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
       await recordInvoicePayment(paymentRecord.id, paymentAmount, paymentDate, paymentMethod);
       setPaymentRecord(null);
       setActionMessage("Payment recorded and invoice balance updated.");
+      toast.success("Payment recorded and invoice balance updated.");
       router.refresh();
     } catch (error) {
       setPaymentError(error instanceof Error ? error.message : "We couldn’t record the payment.");
@@ -681,7 +684,7 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
                 <SelectTrigger id="payment-method" className="w-full"><SelectValue placeholder="Choose a payment account" /></SelectTrigger>
                 <SelectContent>{paymentAccounts.map((account) => <SelectItem key={account.id} value={account.id}>{paymentAccountLabel(account)}</SelectItem>)}</SelectContent>
               </Select>
-              {!paymentAccounts.length ? <p className="text-xs leading-5 text-muted-foreground">Add a Cash, Bank, or Credit card account in Chart of accounts before recording payments.</p> : null}
+              {!paymentAccounts.length ? <NoAccountsNotice message="You need a Cash, Bank or Credit card account to record where this payment went." /> : null}
             </div>
             {paymentError ? <p role="alert" className="text-sm text-destructive">{paymentError}</p> : null}
           </form>
