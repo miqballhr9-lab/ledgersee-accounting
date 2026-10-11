@@ -22,6 +22,8 @@ import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
 interface PayrollWorkspaceProps {
   records: BookkeepingRecord[];
   accounts: BookkeepingRecord[];
+  /** Saved employees, offered as a picker that fills in the employee details. */
+  employees?: BookkeepingRecord[];
   asOfDate: string;
   dateRange?: { startDate: string; endDate: string };
 }
@@ -120,7 +122,7 @@ function nextPayrollMonth(month: string) {
   return value === 12 ? `${year + 1}-01` : `${year}-${String(value + 1).padStart(2, "0")}`;
 }
 
-export default function PayrollWorkspace({ records, accounts, asOfDate, dateRange }: PayrollWorkspaceProps) {
+export default function PayrollWorkspace({ records, accounts, employees = [], asOfDate, dateRange }: PayrollWorkspaceProps) {
   const router = useRouter();
   const uploadRef = useRef<HTMLInputElement>(null);
   const currentMonth = asOfDate.slice(0, 7);
@@ -160,6 +162,24 @@ export default function PayrollWorkspace({ records, accounts, asOfDate, dateRang
   function updateField(name: keyof PayrollValues, value: string) {
     setSaveError("");
     setValues((previous) => ({ ...previous, [name]: value }));
+  }
+
+  const activeEmployees = employees.filter((employee) => employee.data.name?.trim() && employee.data.status !== "Inactive");
+
+  function chooseEmployee(employeeRecordId: string) {
+    const employee = employees.find((item) => item.id === employeeRecordId);
+    if (!employee) return;
+    setSaveError("");
+    setValues((previous) => ({
+      ...previous,
+      employeeId: employee.data.employeeId || previous.employeeId,
+      employeeName: employee.data.name || previous.employeeName,
+      employeeEmail: employee.data.email || previous.employeeEmail,
+      cnic: employee.data.cnic || previous.cnic,
+      designation: employee.data.designation || previous.designation,
+      joiningDate: employee.data.joiningDate || previous.joiningDate,
+      baseSalary: employee.data.baseSalary || previous.baseSalary,
+    }));
   }
 
   function openNewEntry() {
@@ -438,6 +458,27 @@ export default function PayrollWorkspace({ records, accounts, asOfDate, dateRang
             <input type="hidden" name="month" value={values.month} />
             <section className="space-y-3">
               <h3 className="text-sm font-semibold">Employee details</h3>
+              <div className="space-y-1.5">
+                <Label htmlFor="payroll-employee-picker">Choose employee</Label>
+                <Select
+                  value={activeEmployees.find((employee) => employee.data.employeeId === values.employeeId && employee.data.name === values.employeeName)?.id ?? null}
+                  onValueChange={(value) => { if (value) chooseEmployee(value); }}
+                >
+                  <SelectTrigger id="payroll-employee-picker" className="w-full">
+                    <SelectValue placeholder={activeEmployees.length ? "Pick from your employees list" : "No employees yet — add them on the Employees page"} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {activeEmployees.map((employee) => (
+                      <SelectItem key={employee.id} value={employee.id}>
+                        {employee.data.name}{employee.data.employeeId ? ` · ${employee.data.employeeId}` : ""}{employee.data.designation ? ` · ${employee.data.designation}` : ""}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Fills in the details below from the <Link href="/app/employees" className="text-primary underline-offset-4 hover:underline">Employees</Link> list. You can still change them for this month.
+                </p>
+              </div>
               <div className="grid gap-4 sm:grid-cols-2">{employeeFields.map(renderInputField)}</div>
               <div className="space-y-1.5">
                 <Label htmlFor="payroll-payment-account">Salary payment account</Label>

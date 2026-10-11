@@ -81,6 +81,11 @@ const columnLabels: Record<string, string> = {
   enabled: "Enabled",
   code: "Code",
   debitAccount: "Debit",
+  employeeId: "Employee ID",
+  designation: "Designation",
+  department: "Department",
+  joiningDate: "Joined",
+  baseSalary: "Base salary",
   creditAccount: "Credit",
   reference: "Reference",
   memo: "Memo",
@@ -124,7 +129,7 @@ function displayValue(record: BookkeepingRecord, key: string) {
     const active = value === "true";
     return <span className={`inline-flex items-center gap-1.5 text-xs ${active ? "text-primary" : "text-muted-foreground"}`}><span className={`size-1.5 rounded-full ${active ? "bg-primary" : "bg-muted-foreground/40"}`} />{active ? key === "matched" ? "Matched" : "On" : key === "matched" ? "To match" : "Off"}</span>;
   }
-  if (["amount", "balance", "paidAmount", "openingBalance", "rate"].includes(key)) {
+  if (["amount", "balance", "paidAmount", "openingBalance", "rate", "baseSalary"].includes(key)) {
     const number = Number(value);
     if (Number.isFinite(number)) {
       const currency = record.data.currency || "USD";

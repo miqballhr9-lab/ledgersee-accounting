@@ -76,6 +76,7 @@ function getInitialValues(module: ModuleDefinition, record: BookkeepingRecord | 
     ])),
     customerId: record?.data.customerId ?? "",
   };
+  if (module.kind === "employees") values.currency = record?.data.currency || defaults.currency || "";
   if (module.kind === "vendors") {
     // Older suppliers kept a separate display name; the form's Display name field edits `name`.
     values.name = record?.data.displayName || record?.data.name || record?.data.company || values.name;

@@ -374,6 +374,25 @@ export const modules: readonly ModuleDefinition[] = [
     ],
   },
   {
+    slug: "employees", kind: "employees", label: "Employee", plural: "Employees",
+    description: "Keep your staff list in one place, then pick them when running payroll.", titleKey: "name",
+    columns: ["employeeId", "name", "designation", "department", "phone", "joiningDate", "baseSalary", "status"],
+    fields: [
+      { key: "employeeId", label: "Employee ID", required: true, placeholder: "EMP-001", section: "Employee" },
+      { key: "name", label: "Full name", required: true, section: "Employee" },
+      { key: "email", label: "Email", type: "email", section: "Employee" },
+      { key: "phone", label: "Phone", section: "Employee" },
+      { key: "cnic", label: "CNIC", placeholder: "12345-1234567-1", section: "Employee" },
+      { key: "designation", label: "Designation", placeholder: "Job title", section: "Job" },
+      { key: "department", label: "Department", section: "Job" },
+      { key: "joiningDate", label: "Joining date", type: "date", section: "Job" },
+      { key: "baseSalary", label: "Monthly base salary", type: "number", section: "Job", help: "Filled in automatically when you add this employee to payroll." },
+      { key: "status", label: "Status", type: "select", options: ["Active", "Inactive"], section: "Job" },
+      { key: "address", label: "Address", type: "textarea", section: "Notes" },
+      { key: "notes", label: "Notes", type: "textarea", section: "Notes" },
+    ],
+  },
+  {
     slug: "team-members", kind: "team-members", label: "Team member", plural: "Users & roles",
     description: "Keep your team directory and role permissions organized.", titleKey: "name",
     columns: ["name", "email", "role", "enabled", "canApprove"],
@@ -459,12 +478,21 @@ export const navigationGroups: NavigationGroup[] = [
     ],
   },
   {
+    label: "Payroll",
+    items: [
+      { slug: "employees", label: "Employees", icon: "Users" },
+      { slug: "payroll", label: "Payroll", icon: "Banknote" },
+    ],
+  },
+  {
+    label: "Budgets",
+    items: [{ slug: "budgets", label: "Budgets", icon: "BarChart3" }],
+  },
+  {
     label: "Organization",
     items: [
-      { slug: "payroll", label: "Payroll", icon: "Banknote" },
       { slug: "team-members", label: "Users & roles", icon: "ShieldCheck" },
       { slug: "settings", label: "Settings", icon: "Settings2" },
-      { slug: "budgets", label: "Budgets", icon: "BarChart3" },
     ],
   },
 ];

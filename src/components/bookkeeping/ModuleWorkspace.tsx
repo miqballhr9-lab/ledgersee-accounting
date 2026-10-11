@@ -223,6 +223,11 @@ function createDefaults(module: ModuleDefinition, records: BookkeepingRecord[], 
     values.status = "Open";
   }
   if (module.kind === "expenses" || module.kind === "transactions" || module.kind === "journals") values.date = dateString(today);
+  if (module.kind === "employees") {
+    values.employeeId = `EMP-${String(records.filter((record) => record.kind === "employees").length + 1).padStart(3, "0")}`;
+    values.status = "Active";
+    values.currency = defaultCurrency;
+  }
   if (module.kind === "journals") {
     values.reference = `JRN-${String(records.filter((record) => record.kind === "journals").length + 1).padStart(4, "0")}`;
   }

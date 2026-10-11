@@ -20,6 +20,7 @@ export const recordKinds = [
   "taxes",
   "budgets",
   "payroll",
+  "employees",
   "team-members",
   "settings",
   "payments",

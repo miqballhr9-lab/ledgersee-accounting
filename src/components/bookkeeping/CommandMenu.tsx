@@ -28,6 +28,7 @@ const createActions = [
   { label: "New supplier", href: "/app/vendors?new=1", keywords: ["vendor"] },
   { label: "New purchase order", href: "/app/purchase-orders?new=1", keywords: ["po", "rfq"] },
   { label: "New supplier credit note", href: "/app/supplier-credits?new=1", keywords: ["vendor credit", "refund", "debit note"] },
+  { label: "New employee", href: "/app/employees?new=1", keywords: ["staff", "payroll", "worker"] },
   { label: "New journal entry", href: "/app/journals?new=1", keywords: ["manual journal", "debit", "credit"] },
 ] as const;
 
