@@ -21,6 +21,7 @@ interface JournalEntryEditorProps {
   currency: string;
   customers: BookkeepingRecord[];
   vendors: BookkeepingRecord[];
+  employeeNames: string[];
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSaved: (record: BookkeepingRecord) => void;
@@ -204,7 +205,7 @@ function contactNames(records: BookkeepingRecord[]) {
   return [...new Set(records.map((record) => record.data.name?.trim() ?? "").filter(Boolean))].sort((a, b) => a.localeCompare(b));
 }
 
-export default function JournalEntryEditor({ accounts, record, defaults, currency, customers, vendors, open, onOpenChange, onSaved, onSaveAndNew }: JournalEntryEditorProps) {
+export default function JournalEntryEditor({ accounts, record, defaults, currency, customers, vendors, employeeNames, open, onOpenChange, onSaved, onSaveAndNew }: JournalEntryEditorProps) {
   const [date, setDate] = useState(defaults.date ?? "");
   const [reference, setReference] = useState(defaults.reference ?? "");
   const [lines, setLines] = useState<JournalLine[]>(() => initialLines(record, accounts));
@@ -223,6 +224,7 @@ export default function JournalEntryEditor({ accounts, record, defaults, currenc
   const accountOptions = accounts.filter((account) => account.data.name?.trim());
   const customerNames = useMemo(() => contactNames(customers), [customers]);
   const supplierNames = useMemo(() => contactNames(vendors), [vendors]);
+  const employeeOptions = useMemo(() => [...new Set(employeeNames)].sort((a, b) => a.localeCompare(b)), [employeeNames]);
 
   useEffect(() => {
     const startingLines = initialLines(record, accounts);
@@ -497,7 +499,7 @@ export default function JournalEntryEditor({ accounts, record, defaults, currenc
                           </SelectTrigger>
                           <SelectContent className="min-w-56">
                             <SelectItem value={NO_NAME} className="text-muted-foreground">No name</SelectItem>
-                            {line.name && !customerNames.includes(line.name) && !supplierNames.includes(line.name) ? <SelectItem value={line.name}>{line.name}</SelectItem> : null}
+                            {line.name && !customerNames.includes(line.name) && !supplierNames.includes(line.name) && !employeeOptions.includes(line.name) ? <SelectItem value={line.name}>{line.name}</SelectItem> : null}
                             {customerNames.length ? (
                               <>
                                 <SelectSeparator />
@@ -516,7 +518,16 @@ export default function JournalEntryEditor({ accounts, record, defaults, currenc
                                 </SelectGroup>
                               </>
                             ) : null}
-                            {!customerNames.length && !supplierNames.length ? <p className="px-2 py-1.5 text-xs text-muted-foreground">Add customers or suppliers to pick them here.</p> : null}
+                            {employeeOptions.some((name) => !customerNames.includes(name) && !supplierNames.includes(name)) ? (
+                              <>
+                                <SelectSeparator />
+                                <SelectGroup>
+                                  <SelectLabel>Employees</SelectLabel>
+                                  {employeeOptions.filter((name) => !customerNames.includes(name) && !supplierNames.includes(name)).map((name) => <SelectItem key={`employee-${name}`} value={name}>{name}</SelectItem>)}
+                                </SelectGroup>
+                              </>
+                            ) : null}
+                            {!customerNames.length && !supplierNames.length && !employeeOptions.length ? <p className="px-2 py-1.5 text-xs text-muted-foreground">Add customers, suppliers or employees to pick them here.</p> : null}
                           </SelectContent>
                         </Select>
                       </td>

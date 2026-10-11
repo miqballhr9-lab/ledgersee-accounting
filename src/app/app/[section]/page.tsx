@@ -117,6 +117,7 @@ export default async function SectionPage({ params, searchParams }: SectionPageP
   if (module.fields.some((field) => field.key === "vendor") || module.kind === "journals") kinds.add("vendors");
   if (["invoices", "bills", "journals", "supplier-credits", "purchase-orders"].includes(module.kind)) kinds.add("accounts");
   if (module.fields.some((field) => field.key === "lineItems")) kinds.add("items");
+  if (module.kind === "journals") kinds.add("payroll");
   const groups = await listBookkeepingRecordGroups([...kinds]);
   const records = groups[module.kind] ?? [];
   const customers = groups.customers ?? [];
@@ -124,6 +125,10 @@ export default async function SectionPage({ params, searchParams }: SectionPageP
   const accounts = groups.accounts ?? [];
   const items = groups.items ?? [];
   const settings = groups.settings ?? [];
+  // Only employee names leave the server here; payroll amounts stay out of this page.
+  const employeeNames = module.kind === "journals"
+    ? [...new Set((groups.payroll ?? []).map((record) => record.data.employeeName?.trim() ?? "").filter(Boolean))]
+    : [];
   const sourceFilter = budgetHead ? { startDate, endDate, budgetHead } : undefined;
-  return <ModuleWorkspace module={module} records={records} customers={customers} vendors={vendors} accounts={accounts} items={items} defaultCurrency={settings[0]?.data.currency || "USD"} sourceFilter={sourceFilter} />;
+  return <ModuleWorkspace module={module} records={records} customers={customers} vendors={vendors} accounts={accounts} items={items} defaultCurrency={settings[0]?.data.currency || "USD"} employeeNames={employeeNames} sourceFilter={sourceFilter} />;
 }

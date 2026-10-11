@@ -51,6 +51,8 @@ interface ModuleWorkspaceProps {
   records: BookkeepingRecord[];
   customers: BookkeepingRecord[];
   vendors: BookkeepingRecord[];
+  /** Names of employees on payroll, offered as journal line names. */
+  employeeNames?: string[];
   accounts: BookkeepingRecord[];
   items: BookkeepingRecord[];
   defaultCurrency: string;
@@ -255,7 +257,7 @@ function formatCurrency(value: number, currency: string) {
   }
 }
 
-export default function ModuleWorkspace({ module, records: initialRecords, customers, vendors, accounts, items, defaultCurrency, sourceFilter }: ModuleWorkspaceProps) {
+export default function ModuleWorkspace({ module, records: initialRecords, customers, vendors, employeeNames = [], accounts, items, defaultCurrency, sourceFilter }: ModuleWorkspaceProps) {
   const router = useRouter();
   const [records, setRecords] = useState(initialRecords);
   const [search, setSearch] = useState("");
@@ -919,6 +921,7 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
           currency={defaultCurrency}
           customers={customers}
           vendors={vendors}
+          employeeNames={employeeNames}
           open={editorOpen}
           onOpenChange={setEditorOpen}
           onSaved={handleSaved}
