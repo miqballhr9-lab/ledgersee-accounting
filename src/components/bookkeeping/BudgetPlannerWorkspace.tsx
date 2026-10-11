@@ -3,7 +3,7 @@
 import { useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowDownToLine, ArrowUpDown, ChevronDown, Copy, Ellipsis, ExternalLink, FileSpreadsheet, FileText, FileUp, GripVertical, ListChecks, Pencil, Plus, Printer, Save, Send, Trash2 } from "lucide-react";
+import { ArrowDownToLine, ArrowUpDown, ChevronDown, Copy, Ellipsis, ExternalLink, FileSpreadsheet, FileText, FileUp, GripVertical, ListChecks, Pencil, Plus, Printer, Save, Send, Trash2, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { readableError } from "@/lib/action-error";
 
@@ -24,6 +24,8 @@ interface BudgetPlannerWorkspaceProps {
   accounts: BookkeepingRecord[];
   currency: string;
   asOfDate: string;
+  /** In Automation mode a new budget fills its expected amounts from the previous period on its own. */
+  automationMode?: boolean;
 }
 
 interface BudgetHeadOption {
@@ -71,6 +73,24 @@ function emptyBudgetLine(): BudgetLine {
 }
 
 /** The sheet always shows at least five lines, like a ledger page; empty ones are left out when saving. */
+/** The period of the same length just before this one (whole months stay whole months). */
+function previousPeriod(startDate: string, endDate: string) {
+  const start = new Date(`${startDate}T12:00:00Z`);
+  const end = new Date(`${endDate}T12:00:00Z`);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return { startDate: "", endDate: "" };
+  const lastDay = new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth() + 1, 0)).getUTCDate();
+  if (start.getUTCDate() === 1 && end.getUTCDate() === lastDay) {
+    const months = (end.getUTCFullYear() - start.getUTCFullYear()) * 12 + end.getUTCMonth() - start.getUTCMonth() + 1;
+    const previousStart = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() - months, 1));
+    const previousEnd = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), 0));
+    return { startDate: previousStart.toISOString().slice(0, 10), endDate: previousEnd.toISOString().slice(0, 10) };
+  }
+  const length = Math.round((end.getTime() - start.getTime()) / 86_400_000) + 1;
+  const previousEnd = new Date(start.getTime() - 86_400_000);
+  const previousStart = new Date(previousEnd.getTime() - (length - 1) * 86_400_000);
+  return { startDate: previousStart.toISOString().slice(0, 10), endDate: previousEnd.toISOString().slice(0, 10) };
+}
+
 function sheetLines(lines: BudgetLine[]) {
   return [...lines, ...Array.from({ length: Math.max(0, 5 - lines.length) }, emptyBudgetLine)];
 }
@@ -123,7 +143,7 @@ function errorMessage(error: unknown) {
   return error instanceof Error ? readableError(error) : "We couldn’t save that budget. Please try again.";
 }
 
-export default function BudgetPlannerWorkspace({ budgets, financialRecords, accounts, currency, asOfDate }: BudgetPlannerWorkspaceProps) {
+export default function BudgetPlannerWorkspace({ budgets, financialRecords, accounts, currency, asOfDate, automationMode = false }: BudgetPlannerWorkspaceProps) {
   const router = useRouter();
   const uploadRef = useRef<HTMLInputElement>(null);
   const [savedBudgets, setSavedBudgets] = useState(budgets);
@@ -146,6 +166,7 @@ export default function BudgetPlannerWorkspace({ budgets, financialRecords, acco
   const [activeActualLine, setActiveActualLine] = useState<BudgetLine | null>(null);
   const [draggedLine, setDraggedLine] = useState<number | null>(null);
   const [editorOpen, setEditorOpen] = useState(false);
+  const [adjustPercent, setAdjustPercent] = useState("0");
   const [search, setSearch] = useState("");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
 
@@ -240,6 +261,48 @@ export default function BudgetPlannerWorkspace({ budgets, financialRecords, acco
   function newBudget() {
     startNewBudget();
     setEditorOpen(true);
+    if (automationMode) {
+      const range = budgetPresetRange("Monthly", asOfDate);
+      const filled = fillFromPreviousPeriod(range, [], 0);
+      if (filled.added) {
+        setLines(sheetLines(filled.lines));
+        toast.success(`Automation filled ${filled.added} budget ${filled.added === 1 ? "line" : "lines"} from ${filled.from} – ${filled.to}.`);
+      }
+    }
+  }
+
+  /**
+   * Builds expected amounts from what actually happened in the period just
+   * before this budget: every head with activity then, plus the heads already
+   * on the sheet, each set to last period's actual adjusted by the percentage.
+   */
+  function fillFromPreviousPeriod(range: { startDate: string; endDate: string }, currentLines: BudgetLine[], percent: number) {
+    const previous = previousPeriod(range.startDate, range.endDate);
+    const records = recordsWithinBudgetDates(financialRecords, previous.startDate, previous.endDate);
+    const factor = 1 + percent / 100;
+    const planned = (line: BudgetLine) => {
+      const actual = budgetActual(resolveBudgetLine(line, accountHeads), records);
+      return actual > 0 ? String(Math.round(actual * factor * 100) / 100) : "";
+    };
+    const kept = currentLines.filter((line) => line.budgetHead.trim()).map((line) => ({ ...line, expected: planned(line) || line.expected }));
+    const candidates = [...salesHeads, ...accountHeads, ...payrollHeads.filter((option) => option.budgetHead === "Gross Salary")];
+    const additions = candidates
+      .filter((option) => !kept.some((line) => line.budgetHead.toLocaleLowerCase() === option.budgetHead.toLocaleLowerCase() && line.category === option.category))
+      .map((option) => ({ category: option.category, budgetHead: option.budgetHead, headKey: option.value, type: option.type, expected: "", description: "" }))
+      .map((line) => ({ ...line, expected: planned(line) }))
+      .filter((line) => line.expected);
+    return { lines: [...kept, ...additions], added: kept.filter((line) => line.expected).length + additions.length, from: previous.startDate, to: previous.endDate };
+  }
+
+  function applyPreviousPeriod() {
+    const percent = Number(adjustPercent) || 0;
+    const filled = fillFromPreviousPeriod(dateRange, lines, percent);
+    if (!filled.added) {
+      toast.info(`No activity found from ${filled.from} to ${filled.to} to base this budget on.`);
+      return;
+    }
+    setLines(sheetLines(filled.lines));
+    toast.success(`Filled ${filled.added} ${filled.added === 1 ? "line" : "lines"} from ${filled.from} – ${filled.to}${percent ? ` ${percent > 0 ? "+" : ""}${percent}%` : ""}.`);
   }
 
   function copyBudget(budget: BookkeepingRecord) {
@@ -646,6 +709,19 @@ export default function BudgetPlannerWorkspace({ budgets, financialRecords, acco
               <div className="space-y-2"><label className="text-xs font-medium" htmlFor="budget-start">Start date</label><Input id="budget-start" type="date" value={dateRange.startDate} onChange={(event) => { setDateRange((current) => ({ ...current, startDate: event.target.value })); setPeriod("Custom"); }} /></div>
               <div className="space-y-2"><label className="text-xs font-medium" htmlFor="budget-end">End date</label><Input id="budget-end" type="date" value={dateRange.endDate} onChange={(event) => { setDateRange((current) => ({ ...current, endDate: event.target.value })); setPeriod("Custom"); }} /></div>
               <div className="space-y-2 sm:col-span-2"><label className="text-xs font-medium" htmlFor="budget-description">Description</label><Textarea id="budget-description" value={description} maxLength={1000} onChange={(event) => setDescription(event.target.value)} placeholder="What this budget covers" className="min-h-20" /></div>
+            </div>
+          </section>
+
+          <section className="flex flex-wrap items-end justify-between gap-3 rounded-lg border border-dashed border-primary/40 bg-primary/5 p-4">
+            <div className="min-w-0">
+              <p className="flex items-center gap-2 text-sm font-semibold"><Sparkles size={15} className="text-primary" />Fill from previous period</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Sets each expected amount to what actually happened {previousPeriod(dateRange.startDate, dateRange.endDate).startDate ? `from ${previousPeriod(dateRange.startDate, dateRange.endDate).startDate} to ${previousPeriod(dateRange.startDate, dateRange.endDate).endDate}` : "in the previous period"}, and adds heads that had activity then.{automationMode ? " Automation mode does this for new budgets on its own." : ""}
+              </p>
+            </div>
+            <div className="flex items-end gap-2">
+              <div className="space-y-1"><label className="text-xs font-medium" htmlFor="budget-adjust">Adjust by %</label><Input id="budget-adjust" type="number" step="1" value={adjustPercent} onChange={(event) => setAdjustPercent(event.target.value)} className="w-24 text-right" /></div>
+              <Button type="button" variant="outline" className="gap-2" onClick={applyPreviousPeriod}><Sparkles size={15} />Fill</Button>
             </div>
           </section>
 

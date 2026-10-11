@@ -50,7 +50,7 @@ export default async function SectionPage({ params, searchParams }: SectionPageP
   }
 
   if (section === "budgets") {
-    const groups = await listBookkeepingRecordGroups(["budgets", "invoices", "bills", "expenses", "payroll", "settings", "accounts"]);
+    const groups = await listBookkeepingRecordGroups(["budgets", "invoices", "bills", "expenses", "payroll", "settings", "accounts", "automation-settings"]);
     const records = [...(groups.invoices ?? []), ...(groups.bills ?? []), ...(groups.expenses ?? []), ...(groups.payroll ?? [])];
     return (
       <BudgetPlannerWorkspace
@@ -59,6 +59,7 @@ export default async function SectionPage({ params, searchParams }: SectionPageP
         accounts={groups.accounts ?? []}
         currency={groups.settings?.[0]?.data.currency || "USD"}
         asOfDate={new Date().toISOString().slice(0, 10)}
+        automationMode={groups["automation-settings"]?.[0]?.data.mode === "Automation"}
       />
     );
   }

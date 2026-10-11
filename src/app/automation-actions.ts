@@ -8,6 +8,7 @@ import { bookkeepingRecord } from "@/db/schema";
 import { deleteBookkeepingRecord, generateRecurringInvoice, saveBookkeepingRecord } from "@/app/actions";
 import { ActionError } from "@/lib/action-error";
 import { requireUser } from "@/lib/auth";
+import { sendEmailOrThrow } from "@/lib/email";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
 import {
   automationTemplate,
@@ -74,6 +75,8 @@ export interface AutomationRuleInput {
   dayOfMonth: string;
   requireApproval: boolean;
   active: boolean;
+  /** Condition values for actions that take them ("days", "minAmount"). */
+  conditions?: Record<string, string>;
 }
 
 function ruleData(input: AutomationRuleInput, previous?: Record<string, string>) {
@@ -93,6 +96,10 @@ function ruleData(input: AutomationRuleInput, previous?: Record<string, string>)
     requireApproval: input.requireApproval ? "true" : "false",
     active: input.active ? "true" : "false",
     nextRun: timingChanged || !previous?.nextRun ? nextExecutionDate(trigger, day, today()) : previous.nextRun,
+    ...Object.fromEntries((template?.conditions ?? []).map((condition) => {
+      const supplied = Number(input.conditions?.[condition.key] ?? previous?.[condition.key] ?? condition.defaultValue);
+      return [condition.key, String(Number.isFinite(supplied) && supplied >= 0 ? Math.min(supplied, 1_000_000_000) : Number(condition.defaultValue))];
+    })),
   };
 }
 
@@ -118,7 +125,7 @@ export async function deleteAutomationRule(id: string): Promise<void> {
 export async function addRecommendedRules(): Promise<void> {
   const me = await requireUser();
   const existing = await rowsOfKind(me.id, "automation-rules");
-  for (const template of [{ action: "monthlyPayroll" as const }, { action: "recurringInvoices" as const }]) {
+  for (const template of [{ action: "monthlyPayroll" as const }, { action: "recurringInvoices" as const }, { action: "bankRules" as const }, { action: "overdueReminders" as const }]) {
     if (existing.some((row) => row.data.action === template.action)) continue;
     const details = automationTemplate(template.action)!;
     await db.insert(bookkeepingRecord).values({
@@ -226,15 +233,114 @@ async function runRecurringInvoices(userId: string) {
   return { items, errors, summary };
 }
 
+/** Marks unmatched bank transactions matched when an enabled bank rule fits their description. */
+async function runBankRules(userId: string) {
+  const [transactions, rules] = await Promise.all([rowsOfKind(userId, "transactions"), rowsOfKind(userId, "bank-rules")]);
+  const enabled = rules.filter((rule) => rule.data.enabled !== "false" && rule.data.contains?.trim());
+  const items: AutomationItem[] = [];
+  for (const transaction of transactions) {
+    if (transaction.data.matched === "true" || transaction.data.reconciled === "true") continue;
+    const description = (transaction.data.description || "").toLowerCase();
+    const rule = enabled.find((candidate) => description.includes(candidate.data.contains.trim().toLowerCase()));
+    if (!rule) continue;
+    const restore = { category: transaction.data.category || "", account: transaction.data.account || "", matched: transaction.data.matched || "false", ruleApplied: transaction.data.ruleApplied || "" };
+    await db
+      .update(bookkeepingRecord)
+      .set({ data: { ...transaction.data, category: transaction.data.category || rule.data.category || "", account: transaction.data.account || rule.data.account || "", matched: "true", ruleApplied: rule.data.name || "Bank rule" }, updatedAt: new Date() })
+      .where(and(eq(bookkeepingRecord.id, transaction.id), eq(bookkeepingRecord.userId, userId)));
+    items.push({ kind: "transactions", id: transaction.id, label: `${transaction.data.description || "Transaction"} · ${transaction.data.amount || ""} → ${rule.data.category || rule.data.name || "rule"}`, status: "Pending approval", onReject: "restore", restore });
+  }
+  const summary = items.length ? `Matched ${items.length} bank ${items.length === 1 ? "transaction" : "transactions"} with bank rules.` : "No unmatched transaction fit a bank rule.";
+  return { items, errors: [] as string[], summary };
+}
+
+function invoiceBalance(data: Record<string, string>) {
+  return Math.max(0, (Number(data.amount) || 0) - (Number(data.paidAmount) || 0) - (Number(data.creditApplied) || 0));
+}
+
+function addDays(date: string, days: number) {
+  const value = new Date(`${date}T12:00:00Z`);
+  value.setUTCDate(value.getUTCDate() + days);
+  return value.toISOString().slice(0, 10);
+}
+
+async function customerEmailFor(userId: string, invoice: Record<string, string>) {
+  const customers = await rowsOfKind(userId, "customers");
+  const name = invoice.customer?.trim().toLowerCase();
+  const customer = customers.find((row) => row.id === invoice.customerId || row.id === invoice.customer) ?? customers.find((row) => row.data.name?.trim().toLowerCase() === name);
+  return { email: customer?.data.email?.trim() || "", name: customer?.data.name || invoice.customer || "there" };
+}
+
+/** Sends one overdue reminder and notes when, so the same invoice isn't chased again within a week. */
+async function sendOverdueReminder(userId: string, invoiceId: string) {
+  const [invoice] = await db.select().from(bookkeepingRecord).where(and(eq(bookkeepingRecord.id, invoiceId), eq(bookkeepingRecord.userId, userId), eq(bookkeepingRecord.kind, "invoices"))).limit(1);
+  if (!invoice) throw new ActionError("That invoice no longer exists.");
+  const balance = invoiceBalance(invoice.data);
+  if (!balance || invoice.data.status === "Paid") throw new ActionError("That invoice has been paid; no reminder sent.");
+  const { email, name } = await customerEmailFor(userId, invoice.data);
+  if (!email) throw new ActionError("Add an email address to this customer to send reminders.");
+  const [settings] = await rowsOfKind(userId, "settings");
+  const company = settings?.data.companyName || "Our company";
+  const escape = (value: string) => value.replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character] ?? character);
+  const amount = `${invoice.data.currency || ""} ${balance.toFixed(2)}`.trim();
+  await sendEmailOrThrow({
+    to: email,
+    subject: `Payment reminder: invoice ${invoice.data.invoiceNumber || ""} from ${company}`,
+    html: `<p>Hello ${escape(name)},</p><p>This is a friendly reminder that invoice ${escape(invoice.data.invoiceNumber || "")} was due on ${escape(invoice.data.dueDate || "")} and ${escape(amount)} is still outstanding.</p><p>If you have already paid, please ignore this message. Thank you.</p><p>${escape(company)}</p>`,
+    fromName: company,
+  });
+  await db.update(bookkeepingRecord).set({ data: { ...invoice.data, reminderSentAt: today() }, updatedAt: new Date() }).where(and(eq(bookkeepingRecord.id, invoice.id), eq(bookkeepingRecord.userId, userId)));
+}
+
+/** Finds unpaid invoices overdue by the rule's days and above its minimum balance; sends or queues a reminder. */
+async function runOverdueReminders(userId: string, rule: StoredRow, sendNow: boolean) {
+  const days = Math.max(0, Number(rule.data.days) || 0);
+  const minAmount = Math.max(0, Number(rule.data.minAmount) || 0);
+  const now = today();
+  const invoices = await rowsOfKind(userId, "invoices");
+  const due = invoices.filter((row) => {
+    if (["Draft", "Paid", "Cancelled"].includes(row.data.status ?? "")) return false;
+    if (!row.data.dueDate || addDays(row.data.dueDate, days) > now) return false;
+    if (row.data.reminderSentAt && addDays(row.data.reminderSentAt, 7) > now) return false;
+    const balance = invoiceBalance(row.data);
+    return balance > 0 && balance >= minAmount;
+  });
+  const items: AutomationItem[] = [];
+  const errors: string[] = [];
+  for (const invoice of due) {
+    const label = `Reminder for ${invoice.data.invoiceNumber || "invoice"} · ${invoice.data.customer || "customer"} · due ${invoice.data.dueDate}`;
+    if (sendNow) {
+      try {
+        await sendOverdueReminder(userId, invoice.id);
+        items.push({ kind: "invoices", id: invoice.id, label, status: "Done", onApprove: "sendReminder", onReject: "skip" });
+      } catch (error) {
+        errors.push(`${invoice.data.invoiceNumber || "Invoice"}: ${error instanceof Error ? error.message : "reminder not sent"}`);
+      }
+    } else {
+      // Queued: hold off re-queuing this invoice for a week while it waits for approval.
+      await db.update(bookkeepingRecord).set({ data: { ...invoice.data, reminderSentAt: now }, updatedAt: new Date() }).where(and(eq(bookkeepingRecord.id, invoice.id), eq(bookkeepingRecord.userId, userId)));
+      items.push({ kind: "invoices", id: invoice.id, label, status: "Pending approval", onApprove: "sendReminder", onReject: "skip" });
+    }
+  }
+  const summary = items.length
+    ? sendNow ? `Sent ${items.length} overdue ${items.length === 1 ? "reminder" : "reminders"}.` : `Queued ${items.length} overdue ${items.length === 1 ? "reminder" : "reminders"} for approval.`
+    : errors.length ? `Couldn’t send ${errors.length} ${errors.length === 1 ? "reminder" : "reminders"}.` : `No unpaid invoice is ${days} or more days overdue.`;
+  return { items, errors, summary };
+}
+
 async function executeRule(userId: string, rule: StoredRow, trigger: "Scheduled" | "Run now") {
   const action = rule.data.action;
+  const needsApproval = rule.data.requireApproval !== "false";
   const result = action === "monthlyPayroll"
     ? await runMonthlyPayroll(userId)
     : action === "recurringInvoices"
       ? await runRecurringInvoices(userId)
-      : { items: [], errors: [`Unknown action ${action}.`], summary: "Nothing ran." };
-  const needsApproval = rule.data.requireApproval !== "false";
-  const items = result.items.map((item) => ({ ...item, status: needsApproval ? "Pending approval" : "Done" }));
+      : action === "bankRules"
+        ? await runBankRules(userId)
+        : action === "overdueReminders"
+          ? await runOverdueReminders(userId, rule, !needsApproval)
+          : { items: [], errors: [`Unknown action ${action}.`], summary: "Nothing ran." };
+  const items = result.items.map((item) => ({ ...item, status: item.status === "Done" ? "Done" : needsApproval ? "Pending approval" : "Done" }));
   await db.insert(bookkeepingRecord).values({
     userId,
     kind: "automation-log",
@@ -299,7 +405,16 @@ async function updateLogItem(logId: string, recordId: string, status: Automation
   const items = parseAutomationItems(log.data.items);
   const item = items.find((entry) => entry.id === recordId);
   if (!item) throw new ActionError("That item is no longer in this run.");
-  if (status === "Rejected") await deleteBookkeepingRecord(item.kind, item.id);
+  if (item.status !== "Pending approval") throw new ActionError("This item has already been handled.");
+  if (status === "Approved" && item.onApprove === "sendReminder") await sendOverdueReminder(me.id, item.id);
+  if (status === "Rejected") {
+    if (item.onReject === "restore" && item.restore) {
+      const [record] = await db.select().from(bookkeepingRecord).where(and(eq(bookkeepingRecord.id, item.id), eq(bookkeepingRecord.userId, me.id))).limit(1);
+      if (record) await db.update(bookkeepingRecord).set({ data: { ...record.data, ...item.restore }, updatedAt: new Date() }).where(and(eq(bookkeepingRecord.id, item.id), eq(bookkeepingRecord.userId, me.id)));
+    } else if (item.onReject !== "skip") {
+      await deleteBookkeepingRecord(item.kind, item.id);
+    }
+  }
   item.status = status;
   await db.update(bookkeepingRecord).set({ data: { ...log.data, items: JSON.stringify(items) }, updatedAt: new Date() }).where(and(eq(bookkeepingRecord.id, logId), eq(bookkeepingRecord.userId, me.id)));
   revalidatePath("/app", "layout");

@@ -40,6 +40,7 @@ interface RuleDraft {
   dayOfMonth: string;
   requireApproval: boolean;
   active: boolean;
+  conditions: Record<string, string>;
 }
 
 function errorText(error: unknown) {
@@ -50,7 +51,20 @@ function when(value: string | undefined) {
   return value ? value.replace("T", " ").slice(0, 16) : "—";
 }
 
-const itemHref: Record<string, string> = { payroll: "/app/payroll", invoices: "/app/invoices" };
+const itemHref: Record<string, { href: string; label: string }> = {
+  payroll: { href: "/app/payroll", label: "Payroll" },
+  invoices: { href: "/app/invoices", label: "Invoices" },
+  transactions: { href: "/app/transactions", label: "Transactions" },
+};
+
+function ruleConditions(rule: BookkeepingRecord) {
+  return Object.fromEntries((automationTemplate(rule.data.action)?.conditions ?? []).map((condition) => [condition.key, rule.data[condition.key] ?? condition.defaultValue]));
+}
+
+function describeConditions(rule: BookkeepingRecord) {
+  const conditions = automationTemplate(rule.data.action)?.conditions ?? [];
+  return conditions.map((condition) => `${condition.label}: ${rule.data[condition.key] ?? condition.defaultValue}`).join(" · ");
+}
 
 export default function AutomationWorkspace({ mode: initialMode, rules, log }: AutomationWorkspaceProps) {
   const router = useRouter();
@@ -82,7 +96,7 @@ export default function AutomationWorkspace({ mode: initialMode, rules, log }: A
 
   function newRule() {
     const template = automationTemplates[0];
-    setDraft({ name: template.name, action: template.action, trigger: template.trigger, dayOfMonth: template.dayOfMonth, requireApproval: true, active: true });
+    setDraft({ name: template.name, action: template.action, trigger: template.trigger, dayOfMonth: template.dayOfMonth, requireApproval: true, active: true, conditions: Object.fromEntries((template.conditions ?? []).map((condition) => [condition.key, condition.defaultValue])) });
   }
 
   function editRule(rule: BookkeepingRecord) {
@@ -94,6 +108,7 @@ export default function AutomationWorkspace({ mode: initialMode, rules, log }: A
       dayOfMonth: rule.data.dayOfMonth || "1",
       requireApproval: rule.data.requireApproval !== "false",
       active: rule.data.active === "true",
+      conditions: ruleConditions(rule),
     });
   }
 
@@ -174,7 +189,7 @@ export default function AutomationWorkspace({ mode: initialMode, rules, log }: A
                         <p className="mt-0.5 max-w-sm text-xs text-muted-foreground">{automationTemplate(rule.data.action)?.description}</p>
                       </td>
                       <td className="px-4 py-3">{rule.data.model || "—"}</td>
-                      <td className="px-4 py-3">{describeTrigger(rule.data.trigger, rule.data.dayOfMonth)}</td>
+                      <td className="px-4 py-3">{describeTrigger(rule.data.trigger, rule.data.dayOfMonth)}{describeConditions(rule) ? <p className="mt-0.5 max-w-xs text-xs text-muted-foreground">{describeConditions(rule)}</p> : null}</td>
                       <td className="px-4 py-3 tabular-nums">{rule.data.active === "true" ? rule.data.nextRun || "—" : "—"}</td>
                       <td className="px-4 py-3"><p className="tabular-nums">{when(rule.data.lastRun)}</p>{rule.data.lastResult ? <p className="mt-0.5 max-w-xs text-xs text-muted-foreground">{rule.data.lastResult}</p> : null}</td>
                       <td className="px-4 py-3">{rule.data.requireApproval !== "false" ? "Needs approval" : "Automatic"}</td>
@@ -189,7 +204,7 @@ export default function AutomationWorkspace({ mode: initialMode, rules, log }: A
                           <DropdownMenuContent align="end" className="min-w-44">
                             <DropdownMenuItem disabled={Boolean(busy)} onClick={() => void act(`run-${rule.id}`, () => runAutomationRule(rule.id), "Rule ran. See the run log for what it did.")}><Play size={14} />Run now</DropdownMenuItem>
                             <DropdownMenuItem onClick={() => editRule(rule)}><Pencil size={14} />Edit</DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => void act(`toggle-${rule.id}`, () => saveAutomationRule({ name: rule.data.name, action: rule.data.action as AutomationAction, trigger: rule.data.trigger === "daily" ? "daily" : "monthly", dayOfMonth: rule.data.dayOfMonth || "1", requireApproval: rule.data.requireApproval !== "false", active: rule.data.active !== "true" }, rule.id))}>
+                            <DropdownMenuItem onClick={() => void act(`toggle-${rule.id}`, () => saveAutomationRule({ name: rule.data.name, action: rule.data.action as AutomationAction, trigger: rule.data.trigger === "daily" ? "daily" : "monthly", dayOfMonth: rule.data.dayOfMonth || "1", requireApproval: rule.data.requireApproval !== "false", active: rule.data.active !== "true", conditions: ruleConditions(rule) }, rule.id))}>
                               {rule.data.active === "true" ? <><CirclePause size={14} />Pause</> : <><Play size={14} />Activate</>}
                             </DropdownMenuItem>
                             <DropdownMenuSeparator />
@@ -201,12 +216,18 @@ export default function AutomationWorkspace({ mode: initialMode, rules, log }: A
                   ))}
                 </tbody>
               </table>
+              {automationTemplates.some((template) => !rules.some((rule) => rule.data.action === template.action)) ? (
+                <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border px-4 py-3 text-sm">
+                  <span className="text-muted-foreground">Some recommended rules aren’t set up yet.</span>
+                  <Button type="button" variant="outline" size="sm" className="gap-1.5" disabled={busy === "recommended"} onClick={() => void act("recommended", () => addRecommendedRules(), "Recommended rules added.")}><Sparkles size={14} />Add the missing ones</Button>
+                </div>
+              ) : null}
             </div>
           ) : (
             <div className="px-5 py-14 text-center">
               <div className="mx-auto grid size-11 place-items-center rounded-full bg-primary/10 text-primary"><Sparkles size={20} /></div>
               <h3 className="mt-4 font-semibold">No automation rules yet</h3>
-              <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">Start with the recommended rules: monthly payroll on the 1st, and recurring invoices every day. Both ask for your approval before anything is kept.</p>
+              <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">Start with the recommended rules: monthly payroll on the 1st, and daily recurring invoices, bank-rule matching and overdue reminders. Each asks for your approval before anything is kept or sent.</p>
               <Button className="mt-4 gap-2" disabled={busy === "recommended"} onClick={() => void act("recommended", () => addRecommendedRules(), "Recommended rules added.")}><Sparkles size={15} />Add recommended rules</Button>
             </div>
           )
@@ -219,11 +240,14 @@ export default function AutomationWorkspace({ mode: initialMode, rules, log }: A
                 <li key={`${run.id}-${item.id}`} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
                   <div className="min-w-0">
                     <p className="font-medium">{item.label}</p>
-                    <p className="mt-0.5 text-xs text-muted-foreground">{run.data.ruleName} · {run.data.trigger} · {when(run.data.ranAt)} · <Link href={itemHref[item.kind] ?? "/app"} className="text-primary underline-offset-4 hover:underline">Open {item.kind === "payroll" ? "Payroll" : "Invoices"}</Link></p>
+                    <p className="mt-0.5 text-xs text-muted-foreground">{run.data.ruleName} · {run.data.trigger} · {when(run.data.ranAt)} · <Link href={itemHref[item.kind]?.href ?? "/app"} className="text-primary underline-offset-4 hover:underline">Open {itemHref[item.kind]?.label ?? "record"}</Link></p>
                   </div>
                   <div className="flex gap-2">
-                    <Button type="button" size="sm" className="gap-1.5" disabled={Boolean(busy)} onClick={() => void act(`approve-${item.id}`, () => approveAutomationItem(run.id, item.id), "Approved.")}><Check size={14} />Approve</Button>
-                    <Button type="button" size="sm" variant="outline" className="gap-1.5" disabled={Boolean(busy)} onClick={() => { if (window.confirm(`Reject and delete “${item.label}”?`)) void act(`reject-${item.id}`, () => rejectAutomationItem(run.id, item.id), "Rejected and deleted."); }}><X size={14} />Reject</Button>
+                    <Button type="button" size="sm" className="gap-1.5" disabled={Boolean(busy)} onClick={() => void act(`approve-${item.id}`, () => approveAutomationItem(run.id, item.id), "Approved.")}><Check size={14} />{item.onApprove === "sendReminder" ? "Approve & send" : "Approve"}</Button>
+                    <Button type="button" size="sm" variant="outline" className="gap-1.5" disabled={Boolean(busy)} onClick={() => {
+                      const message = item.onReject === "restore" ? `Undo this match and put the transaction back as it was?` : item.onReject === "skip" ? `Skip this reminder? Nothing will be sent.` : `Reject and delete “${item.label}”?`;
+                      if (window.confirm(message)) void act(`reject-${item.id}`, () => rejectAutomationItem(run.id, item.id), item.onReject === "restore" ? "Match undone." : item.onReject === "skip" ? "Reminder skipped." : "Rejected and deleted.");
+                    }}><X size={14} />{item.onReject === "restore" ? "Undo match" : item.onReject === "skip" ? "Skip" : "Reject"}</Button>
                   </div>
                 </li>
               ))}
@@ -278,7 +302,7 @@ export default function AutomationWorkspace({ mode: initialMode, rules, log }: A
                 <Label htmlFor="rule-action">Action to do</Label>
                 <Select value={draft.action} onValueChange={(value) => {
                   const template = automationTemplate(value ?? "");
-                  if (template) setDraft({ ...draft, action: template.action, name: draft.id ? draft.name : template.name, trigger: template.trigger, dayOfMonth: template.dayOfMonth });
+                  if (template) setDraft({ ...draft, action: template.action, name: draft.id ? draft.name : template.name, trigger: template.trigger, dayOfMonth: template.dayOfMonth, conditions: Object.fromEntries((template.conditions ?? []).map((condition) => [condition.key, condition.defaultValue])) });
                 }}>
                   <SelectTrigger id="rule-action" className="w-full"><SelectValue /></SelectTrigger>
                   <SelectContent>{automationTemplates.map((template) => <SelectItem key={template.action} value={template.action}>{template.name} · {template.model}</SelectItem>)}</SelectContent>
@@ -306,6 +330,20 @@ export default function AutomationWorkspace({ mode: initialMode, rules, log }: A
                   </div>
                 ) : null}
               </div>
+              {(automationTemplate(draft.action)?.conditions ?? []).length ? (
+                <div className="space-y-3 rounded-md border border-border bg-muted/30 p-3">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Apply when</p>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    {(automationTemplate(draft.action)?.conditions ?? []).map((condition) => (
+                      <div key={condition.key} className="space-y-1.5">
+                        <Label htmlFor={`rule-${condition.key}`}>{condition.label}</Label>
+                        <Input id={`rule-${condition.key}`} type="number" min="0" value={draft.conditions[condition.key] ?? condition.defaultValue} onChange={(event) => setDraft({ ...draft, conditions: { ...draft.conditions, [condition.key]: event.target.value } })} />
+                        <p className="text-xs text-muted-foreground">{condition.help}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
               <label className="flex items-start gap-2 text-sm"><Checkbox checked={draft.requireApproval} onCheckedChange={(checked) => setDraft({ ...draft, requireApproval: checked === true })} /><span><span className="font-medium">Needs approval</span><span className="block text-xs text-muted-foreground">What the rule creates waits in Approvals until you approve or reject it.</span></span></label>
               <label className="flex items-start gap-2 text-sm"><Checkbox checked={draft.active} onCheckedChange={(checked) => setDraft({ ...draft, active: checked === true })} /><span><span className="font-medium">Active</span><span className="block text-xs text-muted-foreground">Runs on schedule while Automation mode is on.</span></span></label>
             </div>

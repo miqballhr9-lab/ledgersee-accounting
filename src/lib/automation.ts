@@ -8,7 +8,7 @@
  */
 
 export type AutomationMode = "Manual" | "Automation";
-export type AutomationAction = "monthlyPayroll" | "recurringInvoices";
+export type AutomationAction = "monthlyPayroll" | "recurringInvoices" | "bankRules" | "overdueReminders";
 export type AutomationTrigger = "monthly" | "daily";
 
 export interface AutomationTemplate {
@@ -18,6 +18,8 @@ export interface AutomationTemplate {
   description: string;
   trigger: AutomationTrigger;
   dayOfMonth: string;
+  /** Conditions this action understands, shown as "Apply when…" fields on the rule. */
+  conditions?: readonly { key: "days" | "minAmount"; label: string; help: string; defaultValue: string }[];
 }
 
 /** The actions a rule can perform. Each one is a ready-made "Action to do", as in Odoo. */
@@ -37,6 +39,26 @@ export const automationTemplates: readonly AutomationTemplate[] = [
     description: "Creates a draft invoice for every active recurring schedule whose next invoice date has arrived, then moves the schedule to its next date.",
     trigger: "daily",
     dayOfMonth: "1",
+  },
+  {
+    action: "bankRules",
+    name: "Match bank transactions with bank rules",
+    model: "Bank transactions",
+    description: "Finds unmatched bank transactions whose description fits an enabled bank rule, fills in the rule's category and account, and marks them matched. Rejecting a match puts the transaction back as it was.",
+    trigger: "daily",
+    dayOfMonth: "1",
+  },
+  {
+    action: "overdueReminders",
+    name: "Email overdue invoice reminders",
+    model: "Invoices",
+    description: "Emails a payment reminder to each customer whose invoice is unpaid past its due date, at most once a week per invoice. With approval on, nothing is sent until you approve it.",
+    trigger: "daily",
+    dayOfMonth: "1",
+    conditions: [
+      { key: "days", label: "Overdue by at least (days)", help: "Only invoices this many days past their due date.", defaultValue: "7" },
+      { key: "minAmount", label: "Balance at least", help: "Skip small balances below this amount.", defaultValue: "0" },
+    ],
   },
 ];
 
@@ -78,6 +100,12 @@ export interface AutomationItem {
   id: string;
   label: string;
   status: "Pending approval" | "Approved" | "Rejected" | "Done";
+  /** What approving does: keep the record (default) or send the queued reminder email. */
+  onApprove?: "keep" | "sendReminder";
+  /** What rejecting does: delete the record (default), restore earlier values, or simply skip. */
+  onReject?: "delete" | "restore" | "skip";
+  /** Field values to put back when a "restore" item is rejected. */
+  restore?: Record<string, string>;
 }
 
 export function parseAutomationItems(value: string | undefined): AutomationItem[] {
@@ -90,7 +118,18 @@ export function parseAutomationItems(value: string | undefined): AutomationItem[
       const entry = item as Record<string, unknown>;
       if (typeof entry.id !== "string" || typeof entry.kind !== "string") return [];
       const status = entry.status === "Approved" || entry.status === "Rejected" || entry.status === "Done" ? entry.status : "Pending approval";
-      return [{ kind: entry.kind, id: entry.id, label: typeof entry.label === "string" ? entry.label : entry.kind, status }];
+      const restore = entry.restore && typeof entry.restore === "object" && !Array.isArray(entry.restore)
+        ? Object.fromEntries(Object.entries(entry.restore as Record<string, unknown>).filter((pair): pair is [string, string] => typeof pair[1] === "string"))
+        : undefined;
+      return [{
+        kind: entry.kind,
+        id: entry.id,
+        label: typeof entry.label === "string" ? entry.label : entry.kind,
+        status,
+        onApprove: entry.onApprove === "sendReminder" ? "sendReminder" : "keep",
+        onReject: entry.onReject === "restore" || entry.onReject === "skip" ? entry.onReject : "delete",
+        restore,
+      }];
     });
   } catch {
     return [];
