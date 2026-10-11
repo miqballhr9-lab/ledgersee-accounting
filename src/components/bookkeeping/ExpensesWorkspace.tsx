@@ -452,7 +452,6 @@ export default function ExpensesWorkspace({ expenses: initialExpenses, bills: in
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex items-center justify-end gap-1">
-                        <Button variant="ghost" size="icon-sm" aria-label={`Edit ${isBill ? "bill" : "expense"}`} onClick={() => openEditTransaction(record)}><Pencil size={14} /></Button>
                         <DropdownMenu>
                           <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" aria-label="More transaction actions"><MoreHorizontal size={15} /></Button>} />
                           <DropdownMenuContent align="end">
@@ -460,7 +459,7 @@ export default function ExpensesWorkspace({ expenses: initialExpenses, bills: in
                             {isUnpaid(record)
                               ? <DropdownMenuItem disabled={bulkPending} onClick={() => setPaymentTargets([record])}><CircleDollarSign size={14} />Record payment</DropdownMenuItem>
                               : <DropdownMenuItem disabled={bulkPending} onClick={() => void undoPayment(record)}><Undo2 size={14} />Undo payment</DropdownMenuItem>}
-                            <DropdownMenuItem disabled={pendingDelete === record.id} onClick={() => void handleDelete(record)}>Delete</DropdownMenuItem>
+                            <DropdownMenuItem variant="destructive" disabled={pendingDelete === record.id} onClick={() => void handleDelete(record)}><Trash2 size={14} />Delete</DropdownMenuItem>
                           </DropdownMenuContent>
                         </DropdownMenu>
                       </div>
