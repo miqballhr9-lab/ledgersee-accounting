@@ -3,13 +3,14 @@
 import { useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowDownToLine, ArrowUpDown, ChevronDown, Copy, Ellipsis, ExternalLink, FileSpreadsheet, FileText, FileUp, GripVertical, Pencil, Plus, Printer, Save, Send, Trash2 } from "lucide-react";
+import { ArrowDownToLine, ArrowUpDown, ChevronDown, Copy, Ellipsis, ExternalLink, FileSpreadsheet, FileText, FileUp, GripVertical, ListChecks, Pencil, Plus, Printer, Save, Send, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { readableError } from "@/lib/action-error";
 
 import { deleteBookkeepingRecord, saveBudgetPlan, sendBudgetSummary } from "@/app/actions";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Checkbox } from "@/components/ui/checkbox";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectSeparator, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -146,6 +147,7 @@ export default function BudgetPlannerWorkspace({ budgets, financialRecords, acco
   const [draggedLine, setDraggedLine] = useState<number | null>(null);
   const [editorOpen, setEditorOpen] = useState(false);
   const [search, setSearch] = useState("");
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
 
   const accountHeads: BudgetHeadOption[] = accounts
     .filter((account) => (account.data.type === "Income" || account.data.type === "Expense") && account.data.name?.trim())
@@ -205,6 +207,7 @@ export default function BudgetPlannerWorkspace({ budgets, financialRecords, acco
       variance: budgetLines.reduce((sum, line, index) => sum + budgetVariance(line, lineActuals[index] ?? 0), 0),
     };
   }), [accountHeads, financialRecords, savedBudgets]);
+  const selectedBudgets = savedBudgets.filter((record) => selectedIds.has(record.id));
   const filteredBudgets = budgetSummaries.filter(({ record }) => !search.trim() || `${record.data.name} ${record.data.description} ${record.data.period}`.toLowerCase().includes(search.trim().toLowerCase()));
 
   function loadBudgetRecord(budget: BookkeepingRecord) {
@@ -355,6 +358,37 @@ export default function BudgetPlannerWorkspace({ budgets, financialRecords, acco
     }
   }
 
+  function exportSelected(format: "csv" | "xlsx") {
+    const rows = selectedBudgets.flatMap((budget, index) => budgetExportRows(budget).slice(index === 0 ? 0 : 1));
+    if (format === "csv") {
+      saveCsv("budgets.csv", rows);
+      return;
+    }
+    void import("xlsx").then((XLSX) => {
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(rows), "Budgets");
+      XLSX.writeFile(workbook, "budgets.xlsx");
+    }).catch(() => toast.error("We couldn’t create the Excel file. Please try again."));
+  }
+
+  async function deleteSelected() {
+    const count = selectedBudgets.length;
+    if (!count || !window.confirm(`Delete ${count} ${count === 1 ? "budget" : "budgets"}? This can’t be undone.`)) return;
+    const deleted: string[] = [];
+    for (const budget of selectedBudgets) {
+      try {
+        await deleteBookkeepingRecord("budgets", budget.id);
+        deleted.push(budget.id);
+      } catch (error) {
+        toast.error(`${budget.data.name || "Budget"}: ${errorMessage(error)}`);
+      }
+    }
+    setSavedBudgets((current) => current.filter((record) => !deleted.includes(record.id)));
+    setSelectedIds(new Set());
+    if (deleted.length) toast.success(`Deleted ${deleted.length} ${deleted.length === 1 ? "budget" : "budgets"}.`);
+    router.refresh();
+  }
+
   async function deleteBudget(budget: BookkeepingRecord) {
     if (!window.confirm(`Delete the budget “${budget.data.name || "Untitled budget"}”? This can’t be undone.`)) return;
     try {
@@ -487,13 +521,34 @@ export default function BudgetPlannerWorkspace({ budgets, financialRecords, acco
             <h2 className="font-semibold">Budget register</h2>
             <p className="mt-1 text-xs text-muted-foreground">{filteredBudgets.length} {filteredBudgets.length === 1 ? "budget" : "budgets"} · {currency}</p>
           </div>
-          <Input aria-label="Search budgets" placeholder="Search budgets…" value={search} onChange={(event) => setSearch(event.target.value)} className="sm:w-64 print:hidden" />
+          <div className="flex flex-wrap items-center gap-2 print:hidden">
+            <Input aria-label="Search budgets" placeholder="Search budgets…" value={search} onChange={(event) => setSearch(event.target.value)} className="sm:w-64" />
+            <DropdownMenu>
+              <DropdownMenuTrigger render={<Button type="button" variant="outline" className="gap-2" disabled={!selectedBudgets.length} title={selectedBudgets.length ? undefined : "Select budgets with the checkboxes first"}><ListChecks size={15} />Actions{selectedBudgets.length ? ` (${selectedBudgets.length})` : ""}<ChevronDown size={14} /></Button>} />
+              <DropdownMenuContent align="end" className="min-w-48">
+                {selectedBudgets.length === 1 ? <DropdownMenuItem onClick={() => openBudget(selectedBudgets[0])}><Pencil size={14} />Open / edit</DropdownMenuItem> : null}
+                {selectedBudgets.length === 1 ? <DropdownMenuItem onClick={() => copyBudget(selectedBudgets[0])}><Copy size={14} />Copy budget</DropdownMenuItem> : null}
+                <DropdownMenuItem onClick={() => exportSelected("csv")}><ArrowDownToLine size={14} />Download CSV</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => exportSelected("xlsx")}><FileSpreadsheet size={14} />Download Excel</DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem variant="destructive" onClick={() => void deleteSelected()}><Trash2 size={14} />Delete</DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
         </div>
         {filteredBudgets.length ? (
           <div className="overflow-x-auto">
             <table className="w-full min-w-[960px] text-sm">
               <thead>
                 <tr className="border-b border-border bg-muted/40 text-left text-xs font-medium text-muted-foreground">
+                  <th className="w-10 pl-4 print:hidden">
+                    <Checkbox
+                      aria-label="Select all budgets shown"
+                      checked={filteredBudgets.length > 0 && filteredBudgets.every(({ record }) => selectedIds.has(record.id))}
+                      indeterminate={filteredBudgets.some(({ record }) => selectedIds.has(record.id)) && !filteredBudgets.every(({ record }) => selectedIds.has(record.id))}
+                      onCheckedChange={(checked) => setSelectedIds(checked ? new Set(filteredBudgets.map(({ record }) => record.id)) : new Set())}
+                    />
+                  </th>
                   <th className="px-4 py-3">Budget name</th>
                   <th className="px-4 py-3">Period</th>
                   <th className="px-4 py-3">Dates</th>
@@ -507,7 +562,19 @@ export default function BudgetPlannerWorkspace({ budgets, financialRecords, acco
               </thead>
               <tbody>
                 {filteredBudgets.map(({ record, lineCount, expected, actual, variance }) => (
-                  <tr key={record.id} className="cursor-pointer border-b border-border last:border-0 hover:bg-muted/30" onClick={(event) => { if (!(event.target as HTMLElement).closest("button, a, [role=menuitem]")) openBudget(record); }}>
+                  <tr key={record.id} className={`cursor-pointer border-b border-border last:border-0 hover:bg-muted/30 ${selectedIds.has(record.id) ? "bg-muted/50" : ""}`} onClick={(event) => { if (!(event.target as HTMLElement).closest("button, a, [role=menuitem], [role=checkbox], label")) openBudget(record); }}>
+                    <td className="w-10 pl-4 print:hidden" onClick={(event) => event.stopPropagation()}>
+                      <Checkbox
+                        aria-label={`Select ${record.data.name || "budget"}`}
+                        checked={selectedIds.has(record.id)}
+                        onCheckedChange={(checked) => setSelectedIds((current) => {
+                          const next = new Set(current);
+                          if (checked) next.add(record.id);
+                          else next.delete(record.id);
+                          return next;
+                        })}
+                      />
+                    </td>
                     <td className="px-4 py-3 font-medium">{record.data.name || "Untitled budget"}</td>
                     <td className="px-4 py-3">{record.data.period || "—"}</td>
                     <td className="px-4 py-3 tabular-nums text-muted-foreground">{record.data.startDate || "…"} – {record.data.endDate || "…"}</td>
@@ -516,7 +583,7 @@ export default function BudgetPlannerWorkspace({ budgets, financialRecords, acco
                     <td className="px-4 py-3 text-right tabular-nums">{formatAmount(actual, currency)}</td>
                     <td className={`px-4 py-3 text-right font-medium tabular-nums ${variance < 0 ? "text-destructive" : "text-primary"}`}>{formatAmount(variance, currency)}</td>
                     <td className="max-w-56 truncate px-4 py-3 text-muted-foreground">{record.data.description || "—"}</td>
-                    <td className="px-2 print:hidden">
+                    <td className="px-2 print:hidden" onClick={(event) => event.stopPropagation()}>
                       <DropdownMenu>
                         <DropdownMenuTrigger render={<Button type="button" variant="ghost" size="icon-sm" aria-label={`More actions for ${record.data.name || "budget"}`}><Ellipsis size={16} /></Button>} />
                         <DropdownMenuContent align="end" className="min-w-48">
