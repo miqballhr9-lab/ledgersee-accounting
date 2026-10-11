@@ -22,6 +22,7 @@ import * as schema from "@/db/schema";
 import { sendEmail, sendEmailOrThrow } from "@/lib/email";
 import { describeAuthError } from "@/lib/errors";
 import { ActionError } from "@/lib/action-error";
+import { currentScheduledUser } from "@/lib/run-as-user";
 
 /**
  * Which origin this app answers on — resolved PER REQUEST, not pinned at build.
@@ -304,6 +305,9 @@ export const getUser = cache(async function getUser() {
  * everything.
  */
 export async function requireUser() {
+  // Set only inside the scheduled automation job; never for a browser request.
+  const scheduled = currentScheduledUser();
+  if (scheduled) return scheduled;
   const user = await getUser();
   // The message is already a sentence worth showing, because it will be: a server
   // action's thrown message is what reaches the browser. Keep it that way — a code
