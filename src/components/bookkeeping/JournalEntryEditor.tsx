@@ -635,11 +635,10 @@ export default function JournalEntryEditor({ accounts, record, defaults, currenc
         <div className="sticky -bottom-4 -mx-4 -mb-4 flex items-center justify-between gap-2 border-t border-border bg-card px-4 py-3">
           <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={pending}>Cancel</Button>
           <div className="flex items-center gap-2">
-            {record ? (
-              <>
-                <Button type="button" variant="ghost" onClick={reverseJournal} disabled={pending} title="Start a new journal with debits and credits swapped">Reverse</Button>
+            <>
+                <Button type="button" variant="ghost" onClick={reverseJournal} disabled={pending || !record} title={record ? "Start a new journal with debits and credits swapped" : "Save the journal first to reverse it"}>Reverse</Button>
                 <DropdownMenu>
-                  <DropdownMenuTrigger render={<Button type="button" variant="ghost" className="gap-1" disabled={pending}>More<ChevronDown size={14} /></Button>} />
+                  <DropdownMenuTrigger render={<Button type="button" variant="ghost" className="gap-1" disabled={pending || !record} title={record ? undefined : "Save the journal first to copy, delete or review it"}>More<ChevronDown size={14} /></Button>} />
                   <DropdownMenuContent align="end" side="top" className="min-w-48">
                     <DropdownMenuItem onClick={copyJournal}><Copy size={14} />Copy</DropdownMenuItem>
                     <DropdownMenuItem variant="destructive" onClick={() => void deleteJournal()}><Trash2 size={14} />Delete</DropdownMenuItem>
@@ -647,8 +646,7 @@ export default function JournalEntryEditor({ accounts, record, defaults, currenc
                     <DropdownMenuItem onClick={() => setInfoView("history")}><History size={14} />Audit history</DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
-              </>
-            ) : null}
+            </>
             <Button type="submit" form="journal-entry-form" variant="outline" disabled={pending || uploading || !accountOptions.length}>{pending ? "Saving…" : "Save"}</Button>
             <div className="flex">
               <Button type="submit" form="journal-entry-form" data-intent="save-and-new" className="rounded-r-none" disabled={pending || uploading || !accountOptions.length}>Save and new</Button>
