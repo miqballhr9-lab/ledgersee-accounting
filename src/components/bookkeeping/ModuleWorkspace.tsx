@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import Image from "next/image";
-import { ArrowDownToLine, ArrowRightLeft, BadgeCheck, ChevronDown, CircleDollarSign, ClipboardList, FileCheck2, FileText, ListChecks, Plus, Receipt, Search, SlidersHorizontal, Trash2, Undo2, WalletCards } from "lucide-react";
+import { ArrowDownToLine, ArrowRightLeft, BadgeCheck, ChevronDown, CircleDollarSign, ClipboardList, FileCheck2, FileText, ListChecks, Plus, Search, SlidersHorizontal, Trash2, Undo2, WalletCards } from "lucide-react";
 import { readableError } from "@/lib/action-error";
 
 import {
@@ -351,13 +351,13 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
   }
 
   // Actions on several checked records at once, offered from the toolbar menu.
-  type BulkAction = "estimates" | "sales-orders" | "invoices" | "bill" | "expense" | "pay" | "undo-payment" | "apply-credit" | "refund" | "delete";
+  type BulkAction = "estimates" | "sales-orders" | "invoices" | "expense" | "pay" | "undo-payment" | "apply-credit" | "refund" | "delete";
   const bulkMenu: { label: string; items: { action: BulkAction; label: string }[] } | null = module.kind === "sales-orders"
     ? { label: "Convert", items: [{ action: "estimates", label: "Convert to estimate" }, { action: "invoices", label: "Convert to invoice" }] }
     : module.kind === "estimates"
       ? { label: "Convert", items: [{ action: "sales-orders", label: "Convert to sales order" }, { action: "invoices", label: "Convert to invoice" }] }
       : module.kind === "purchase-orders"
-      ? { label: "Convert", items: [{ action: "bill", label: "Convert to bill" }, { action: "expense", label: "Convert to expense" }] }
+      ? { label: "Convert", items: [{ action: "expense", label: "Convert to expense" }] }
       : module.kind === "invoices"
         ? { label: "Actions", items: [{ action: "pay", label: "Record payment" }, { action: "undo-payment", label: "Undo payment" }] }
         : module.kind === "credit-notes"
@@ -447,8 +447,7 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
       try {
         if (action === "delete") {
           await deleteBookkeepingRecord(module.kind, record.id);
-        } else if (action === "bill") await convertBookkeepingRecord(record.id);
-        else if (action === "undo-payment") await undoInvoicePayments(record.id);
+        } else if (action === "undo-payment") await undoInvoicePayments(record.id);
         else if (action === "apply-credit") await (module.kind === "supplier-credits" ? applySupplierCredit(record.id) : applyCreditNote(record.id));
         else if (action === "pay") {
           const balance = remainingBalance(record);
@@ -469,7 +468,6 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
       estimates: "converted to estimates",
       "sales-orders": "converted to sales orders",
       invoices: "converted to invoices",
-      bill: "converted to bills",
       expense: "recorded as expenses",
       pay: "marked paid",
       "undo-payment": "reopened as unpaid",
@@ -724,8 +722,7 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
                 />
                 <DropdownMenuContent align="end" className="min-w-48">
                   {bulkMenu.items.map((item) => {
-                    const Icon = item.action === "bill" ? Receipt
-                      : item.action === "expense" ? WalletCards
+                    const Icon = item.action === "expense" ? WalletCards
                       : item.action === "invoices" ? FileText
                       : item.action === "estimates" ? FileCheck2
                         : item.action === "sales-orders" ? ClipboardList
