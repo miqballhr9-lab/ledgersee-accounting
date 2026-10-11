@@ -421,8 +421,8 @@ export async function saveBookkeepingRecord(
         accountId,
         account: accountName,
         accountCode,
-        debit: (debitCents / 100).toFixed(2),
-        credit: (creditCents / 100).toFixed(2),
+        debit: debitCents ? (debitCents / 100).toFixed(2) : "",
+        credit: creditCents ? (creditCents / 100).toFixed(2) : "",
         description,
         name,
       });

@@ -132,6 +132,11 @@ function importedAmount(value: string) {
   return amount.toFixed(2);
 }
 
+/** Older journals saved "0.00" on the unused side; show those cells empty. */
+function blankIfZero(value: string) {
+  return value.trim() && Number(value) === 0 ? "" : value;
+}
+
 function initialLines(record: BookkeepingRecord | null, accounts: BookkeepingRecord[], defaults: Record<string, string> = {}) {
   const savedLinesJson = record ? record.data.lines : defaults.lines;
   if (savedLinesJson) {
@@ -144,8 +149,8 @@ function initialLines(record: BookkeepingRecord | null, accounts: BookkeepingRec
           return [{
             id: index + 1,
             accountId: toText(line.accountId),
-            debit: toText(line.debit),
-            credit: toText(line.credit),
+            debit: blankIfZero(toText(line.debit)),
+            credit: blankIfZero(toText(line.credit)),
             description: toText(line.description),
             name: toText(line.name),
           }];
@@ -256,6 +261,24 @@ export default function JournalEntryEditor({ accounts, record, defaults, currenc
 
   function updateLine(id: number, key: keyof Omit<JournalLine, "id">, value: string) {
     setLines((current) => current.map((line) => line.id === id ? { ...line, [key]: value } : line));
+  }
+
+  /**
+   * Picking an account on an empty line fills in whatever keeps the journal
+   * balanced: the shortfall goes on the debit or credit side that needs it.
+   */
+  function chooseAccount(id: number, accountId: string) {
+    setLines((current) => current.map((line) => {
+      if (line.id !== id) return line;
+      const next = { ...line, accountId };
+      if (!accountId || line.debit.trim() || line.credit.trim()) return next;
+      const others = current.filter((other) => other.id !== id);
+      const debit = others.reduce((sum, other) => sum + cents(other.debit), 0);
+      const credit = others.reduce((sum, other) => sum + cents(other.credit), 0);
+      if (debit > credit) next.credit = amountText(debit - credit);
+      else if (credit > debit) next.debit = amountText(credit - debit);
+      return next;
+    }));
   }
 
   function addLines() {
@@ -501,7 +524,7 @@ export default function JournalEntryEditor({ accounts, record, defaults, currenc
                         <Select
                           value={line.accountId || null}
                           items={accountOptions.map((account) => ({ value: account.id, label: accountLabel(account) }))}
-                          onValueChange={(value) => updateLine(line.id, "accountId", value ?? "")}
+                          onValueChange={(value) => chooseAccount(line.id, value ?? "")}
                         >
                           <SelectTrigger className={`${cellInput} !h-11 justify-between [&_svg]:opacity-0 group-hover:[&_svg]:opacity-60 focus-visible:[&_svg]:opacity-100`} aria-label={`Account for line ${index + 1}`}>
                             <SelectValue placeholder={accountOptions.length ? "" : "Add a chart account first"}>{selectedLabel}</SelectValue>
