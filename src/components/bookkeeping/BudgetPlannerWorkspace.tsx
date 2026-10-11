@@ -3,14 +3,14 @@
 import { useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowDownToLine, ArrowUpDown, ChevronDown, Copy, ExternalLink, FileSpreadsheet, FileText, FileUp, GripVertical, Plus, Printer, Save, Send, Trash2 } from "lucide-react";
+import { ArrowDownToLine, ArrowUpDown, ChevronDown, Copy, Ellipsis, ExternalLink, FileSpreadsheet, FileText, FileUp, GripVertical, Pencil, Plus, Printer, Save, Send, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { readableError } from "@/lib/action-error";
 
 import { deleteBookkeepingRecord, saveBudgetPlan, sendBudgetSummary } from "@/app/actions";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectSeparator, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
@@ -144,6 +144,8 @@ export default function BudgetPlannerWorkspace({ budgets, financialRecords, acco
   const [isImporting, setIsImporting] = useState(false);
   const [activeActualLine, setActiveActualLine] = useState<BudgetLine | null>(null);
   const [draggedLine, setDraggedLine] = useState<number | null>(null);
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [search, setSearch] = useState("");
 
   const accountHeads: BudgetHeadOption[] = accounts
     .filter((account) => (account.data.type === "Income" || account.data.type === "Expense") && account.data.name?.trim())
@@ -191,10 +193,19 @@ export default function BudgetPlannerWorkspace({ budgets, financialRecords, acco
   const actualTotal = actuals.reduce((sum, amount) => sum + amount, 0);
   const varianceTotal = lines.reduce((sum, line, index) => sum + budgetVariance(line, actuals[index] ?? 0), 0);
 
-  function loadBudget(id: string) {
-    const budget = savedBudgets.find((record) => record.id === id);
-    if (budget) loadBudgetRecord(budget);
-  }
+  const budgetSummaries = useMemo(() => savedBudgets.map((record) => {
+    const budgetLines = parseBudgetLines(record.data.lines).map((line) => resolveBudgetLine(line, accountHeads));
+    const records = recordsWithinBudgetDates(financialRecords, record.data.startDate || "", record.data.endDate || "");
+    const lineActuals = budgetLines.map((line) => budgetActual(line, records));
+    return {
+      record,
+      lineCount: budgetLines.length,
+      expected: budgetExpectedTotal(budgetLines),
+      actual: lineActuals.reduce((sum, amount) => sum + amount, 0),
+      variance: budgetLines.reduce((sum, line, index) => sum + budgetVariance(line, lineActuals[index] ?? 0), 0),
+    };
+  }), [accountHeads, financialRecords, savedBudgets]);
+  const filteredBudgets = budgetSummaries.filter(({ record }) => !search.trim() || `${record.data.name} ${record.data.description} ${record.data.period}`.toLowerCase().includes(search.trim().toLowerCase()));
 
   function loadBudgetRecord(budget: BookkeepingRecord) {
     setSelectedBudgetId(budget.id);
@@ -217,10 +228,23 @@ export default function BudgetPlannerWorkspace({ budgets, financialRecords, acco
     setRecipientEmail("");
   }
 
-  function copyBudget() {
+  function openBudget(budget: BookkeepingRecord) {
+    loadBudgetRecord(budget);
+    setRecipientEmail("");
+    setEditorOpen(true);
+  }
+
+  function newBudget() {
+    startNewBudget();
+    setEditorOpen(true);
+  }
+
+  function copyBudget(budget: BookkeepingRecord) {
+    loadBudgetRecord(budget);
     setSelectedBudgetId("");
-    setName(`${name.trim() || "Budget"} copy`);
-    setLines(lines.map((line) => ({ ...line })));
+    setName(`${budget.data.name?.trim() || "Budget"} copy`);
+    setRecipientEmail("");
+    setEditorOpen(true);
     toast.success("Budget copied. Update its dates and save the new version.");
   }
 
@@ -266,6 +290,7 @@ export default function BudgetPlannerWorkspace({ budgets, financialRecords, acco
       const saved = await saveBudgetPlan(saveInput(), selectedBudgetId || undefined);
       setSavedBudget(saved);
       router.refresh();
+      setEditorOpen(false);
       toast.success("Budget saved.");
     } catch (error) {
       toast.error(errorMessage(error));
@@ -287,6 +312,7 @@ export default function BudgetPlannerWorkspace({ budgets, financialRecords, acco
       router.refresh();
       budgetWasSaved = true;
       await sendBudgetSummary(saved.id, recipientEmail);
+      setEditorOpen(false);
       toast.success(`Budget saved and sent to ${recipientEmail.trim()}.`);
     } catch (error) {
       toast.error(budgetWasSaved ? `Budget saved, but email wasn’t sent: ${errorMessage(error)}` : errorMessage(error));
@@ -299,58 +325,49 @@ export default function BudgetPlannerWorkspace({ budgets, financialRecords, acco
     saveCsv("mikledger-budget-template.csv", [["name", "period", "startDate", "endDate", "category", "budgetHead", "expected", "description"]]);
   }
 
-  function budgetExportRows() {
+  function budgetExportRows(budget: BookkeepingRecord) {
+    const budgetLines = parseBudgetLines(budget.data.lines).map((line) => resolveBudgetLine(line, accountHeads));
+    const records = recordsWithinBudgetDates(financialRecords, budget.data.startDate || "", budget.data.endDate || "");
     const rows: (string | number)[][] = [["name", "period", "startDate", "endDate", "category", "budgetHead", "expected", "actual", "variance", "description"]];
-    lines.map((line) => resolveBudgetLine(line, accountHeads)).forEach((line, index) => line.budgetHead.trim() && rows.push([
-      name,
-      period,
-      dateRange.startDate,
-      dateRange.endDate,
-      line.category,
-      line.budgetHead,
-      Number(line.expected) || 0,
-      actuals[index] ?? 0,
-      budgetVariance(line, actuals[index] ?? 0),
-      line.description,
-    ]));
+    budgetLines.forEach((line) => {
+      const actual = budgetActual(line, records);
+      rows.push([budget.data.name || "", budget.data.period || "", budget.data.startDate || "", budget.data.endDate || "", line.category, line.budgetHead, Number(line.expected) || 0, actual, budgetVariance(line, actual), line.description]);
+    });
     return rows;
   }
 
-  function budgetFileName() {
-    return name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "budget";
+  function budgetFileName(budget: BookkeepingRecord) {
+    return (budget.data.name || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "budget";
   }
 
-  function exportBudget() {
-    saveCsv(`${budgetFileName()}.csv`, budgetExportRows());
+  function exportBudget(budget: BookkeepingRecord) {
+    saveCsv(`${budgetFileName(budget)}.csv`, budgetExportRows(budget));
   }
 
-  async function exportBudgetExcel() {
+  async function exportBudgetExcel(budget: BookkeepingRecord) {
     try {
       const XLSX = await import("xlsx");
       const workbook = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(budgetExportRows()), "Budget");
-      XLSX.writeFile(workbook, `${budgetFileName()}.xlsx`);
+      XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(budgetExportRows(budget)), "Budget");
+      XLSX.writeFile(workbook, `${budgetFileName(budget)}.xlsx`);
     } catch {
       toast.error("We couldn’t create the Excel file. Please try again.");
     }
   }
 
-  async function deleteBudget() {
-    const budget = savedBudgets.find((record) => record.id === selectedBudgetId);
-    if (!budget) return;
+  async function deleteBudget(budget: BookkeepingRecord) {
     if (!window.confirm(`Delete the budget “${budget.data.name || "Untitled budget"}”? This can’t be undone.`)) return;
     try {
       await deleteBookkeepingRecord("budgets", budget.id);
-      const remaining = savedBudgets.filter((record) => record.id !== budget.id);
-      setSavedBudgets(remaining);
-      if (remaining[0]) loadBudgetRecord(remaining[0]);
-      else startNewBudget();
+      setSavedBudgets((current) => current.filter((record) => record.id !== budget.id));
+      if (selectedBudgetId === budget.id) setSelectedBudgetId("");
       toast.success("Budget deleted.");
       router.refresh();
     } catch (error) {
       toast.error(errorMessage(error));
     }
   }
+
 
   async function importBudgetFile(file: File) {
     if (file.size > 4_000_000) {
@@ -412,7 +429,7 @@ export default function BudgetPlannerWorkspace({ budgets, financialRecords, acco
         endDate: importedEnd,
         currency,
         lines: importedLines,
-      }, selectedBudgetId || undefined);
+      });
       setSavedBudget(saved);
       setName(importedName);
       setPeriod(importedPeriod);
@@ -442,37 +459,103 @@ export default function BudgetPlannerWorkspace({ budgets, financialRecords, acco
               <DropdownMenuItem onClick={() => uploadRef.current?.click()}><FileUp size={15} />Import CSV</DropdownMenuItem>
               <DropdownMenuItem onClick={downloadTemplate}><FileText size={15} />Blank template</DropdownMenuItem>
               <DropdownMenuSeparator />
-              <DropdownMenuGroup>
-                <DropdownMenuLabel>Download this budget</DropdownMenuLabel>
-                <DropdownMenuItem disabled={!lines.some((line) => line.budgetHead.trim())} onClick={exportBudget}><ArrowDownToLine size={15} />CSV file</DropdownMenuItem>
-                <DropdownMenuItem disabled={!lines.some((line) => line.budgetHead.trim())} onClick={() => void exportBudgetExcel()}><FileSpreadsheet size={15} />Excel (.xlsx)</DropdownMenuItem>
-                <DropdownMenuItem onClick={() => window.print()}><Printer size={15} />Print or save as PDF</DropdownMenuItem>
-              </DropdownMenuGroup>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem variant="destructive" disabled={!selectedBudgetId} onClick={() => void deleteBudget()}><Trash2 size={15} />Delete this budget</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => window.print()}><Printer size={15} />Print or save as PDF</DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
+          <Button type="button" className="gap-2 print:hidden" onClick={newBudget}><Plus size={15} />New budget</Button>
           <input ref={uploadRef} type="file" accept=".csv,text/csv" className="sr-only" aria-label="Import budget CSV file" onChange={(event) => { const file = event.currentTarget.files?.[0]; if (file) void importBudgetFile(file); event.currentTarget.value = ""; }} />
         </div>
       </header>
 
-      <div className="mt-6 grid min-w-0 gap-4 xl:grid-cols-[minmax(0,1fr)_280px]">
-        <div className="min-w-0 space-y-4">
-          <section className="grid gap-4 rounded-lg border border-border bg-card p-4 sm:grid-cols-[minmax(220px,0.8fr)_minmax(0,1.2fr)] sm:items-end">
-            <div className="min-w-0 space-y-2">
-              <label className="text-xs font-medium" htmlFor="saved-budget">Saved budgets</label>
-              {savedBudgets.length ? (
-                <Select value={selectedBudgetId} onValueChange={(value) => loadBudget(value ?? "")}>
-                  <SelectTrigger id="saved-budget" className="w-full"><SelectValue placeholder="Choose a saved budget" /></SelectTrigger>
-                  <SelectContent>{savedBudgets.map((budget) => <SelectItem key={budget.id} value={budget.id}>{budget.data.name || "Untitled budget"}</SelectItem>)}</SelectContent>
-                </Select>
-              ) : <p className="flex h-8 items-center text-sm text-muted-foreground">No saved budgets yet</p>}
+      <section className="mt-6 grid grid-cols-2 gap-3 xl:grid-cols-4" aria-label="Budget summary">
+        {[
+          { label: "Saved budgets", value: String(savedBudgets.length) },
+          { label: "Expected (all budgets)", value: formatAmount(budgetSummaries.reduce((sum, item) => sum + item.expected, 0), currency) },
+          { label: "Actual (all budgets)", value: formatAmount(budgetSummaries.reduce((sum, item) => sum + item.actual, 0), currency) },
+          { label: "Favorable variance", value: formatAmount(budgetSummaries.reduce((sum, item) => sum + item.variance, 0), currency) },
+        ].map((item) => (
+          <div key={item.label} className="rounded-lg border border-border bg-card p-4">
+            <p className="text-xs text-muted-foreground">{item.label}</p>
+            <p className="mt-2 text-xl font-semibold tabular-nums">{item.value}</p>
+          </div>
+        ))}
+      </section>
+
+      <section className="mt-4 rounded-lg border border-border bg-card">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border p-4">
+          <div>
+            <h2 className="font-semibold">Budget register</h2>
+            <p className="mt-1 text-xs text-muted-foreground">{filteredBudgets.length} {filteredBudgets.length === 1 ? "budget" : "budgets"} · {currency}</p>
+          </div>
+          <Input aria-label="Search budgets" placeholder="Search budgets…" value={search} onChange={(event) => setSearch(event.target.value)} className="sm:w-64 print:hidden" />
+        </div>
+        {filteredBudgets.length ? (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[960px] text-sm">
+              <thead>
+                <tr className="border-b border-border bg-muted/40 text-left text-xs font-medium text-muted-foreground">
+                  <th className="px-4 py-3">Budget name</th>
+                  <th className="px-4 py-3">Period</th>
+                  <th className="px-4 py-3">Dates</th>
+                  <th className="px-4 py-3 text-right">Lines</th>
+                  <th className="px-4 py-3 text-right">Expected</th>
+                  <th className="px-4 py-3 text-right">Actual</th>
+                  <th className="px-4 py-3 text-right">Variance</th>
+                  <th className="px-4 py-3">Description</th>
+                  <th className="w-12 print:hidden"><span className="sr-only">Actions</span></th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredBudgets.map(({ record, lineCount, expected, actual, variance }) => (
+                  <tr key={record.id} className="cursor-pointer border-b border-border last:border-0 hover:bg-muted/30" onClick={(event) => { if (!(event.target as HTMLElement).closest("button, a, [role=menuitem]")) openBudget(record); }}>
+                    <td className="px-4 py-3 font-medium">{record.data.name || "Untitled budget"}</td>
+                    <td className="px-4 py-3">{record.data.period || "—"}</td>
+                    <td className="px-4 py-3 tabular-nums text-muted-foreground">{record.data.startDate || "…"} – {record.data.endDate || "…"}</td>
+                    <td className="px-4 py-3 text-right tabular-nums">{lineCount}</td>
+                    <td className="px-4 py-3 text-right tabular-nums">{formatAmount(expected, currency)}</td>
+                    <td className="px-4 py-3 text-right tabular-nums">{formatAmount(actual, currency)}</td>
+                    <td className={`px-4 py-3 text-right font-medium tabular-nums ${variance < 0 ? "text-destructive" : "text-primary"}`}>{formatAmount(variance, currency)}</td>
+                    <td className="max-w-56 truncate px-4 py-3 text-muted-foreground">{record.data.description || "—"}</td>
+                    <td className="px-2 print:hidden">
+                      <DropdownMenu>
+                        <DropdownMenuTrigger render={<Button type="button" variant="ghost" size="icon-sm" aria-label={`More actions for ${record.data.name || "budget"}`}><Ellipsis size={16} /></Button>} />
+                        <DropdownMenuContent align="end" className="min-w-48">
+                          <DropdownMenuItem onClick={() => openBudget(record)}><Pencil size={14} />Open / edit</DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => copyBudget(record)}><Copy size={14} />Copy budget</DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem onClick={() => exportBudget(record)}><ArrowDownToLine size={14} />Download CSV</DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => void exportBudgetExcel(record)}><FileSpreadsheet size={14} />Download Excel</DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem variant="destructive" onClick={() => void deleteBudget(record)}><Trash2 size={14} />Delete</DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="px-5 py-14 text-center">
+            <h3 className="font-semibold">{search ? "No matching budgets" : "No budgets yet"}</h3>
+            <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">{search ? "Try another budget name." : "Create a budget to plan expected income and costs, then compare them with what you record."}</p>
+            {!search ? <Button className="mt-4 gap-2" onClick={newBudget}><Plus size={15} />New budget</Button> : null}
+          </div>
+        )}
+      </section>
+
+      <Dialog open={editorOpen} onOpenChange={(open) => { if (!isSaving && !isSending) setEditorOpen(open); }}>
+        <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-[min(1200px,calc(100vw-3rem))]">
+          <DialogHeader className="pr-8">
+            <DialogTitle className="text-lg">{selectedBudgetId ? "Edit budget" : "New budget"}</DialogTitle>
+            <DialogDescription>Set the budget’s dates and expected amounts; actuals and variance update from your records.</DialogDescription>
+          </DialogHeader>
+          <div className="min-w-0 space-y-4">
+            <div className="grid grid-cols-3 gap-3">
+              <div className="rounded-md bg-muted/50 p-3"><p className="text-xs text-muted-foreground">Expected budget</p><p className="mt-1 font-semibold tabular-nums">{formatAmount(expectedTotal, currency)}</p></div>
+              <div className="rounded-md bg-muted/50 p-3"><p className="text-xs text-muted-foreground">Actual</p><p className="mt-1 font-semibold tabular-nums">{formatAmount(actualTotal, currency)}</p></div>
+              <div className="rounded-md bg-accent/70 p-3"><p className="text-xs text-muted-foreground">Favorable variance</p><p className={`mt-1 font-semibold tabular-nums ${varianceTotal < 0 ? "text-destructive" : "text-primary"}`}>{formatAmount(varianceTotal, currency)}</p></div>
             </div>
-            <div className="flex flex-wrap justify-end gap-2">
-              <Button type="button" variant="outline" className="gap-2" onClick={copyBudget} disabled={!lines.some((line) => line.budgetHead.trim())}><Copy size={15} />Copy budget</Button>
-              <Button type="button" variant="outline" onClick={startNewBudget}>New budget</Button>
-            </div>
-          </section>
 
           <section className="rounded-lg border border-border bg-card p-4 sm:p-5">
             <div className="grid gap-4 sm:grid-cols-2">
@@ -599,28 +682,9 @@ export default function BudgetPlannerWorkspace({ budgets, financialRecords, acco
               </div>
             </div>
           </section>
-        </div>
-
-        <aside className="min-w-0 space-y-4 print:hidden">
-          <section className="rounded-lg border border-border bg-card p-4">
-            <p className="text-xs font-medium uppercase tracking-[0.1em] text-muted-foreground">Budget overview</p>
-            <div className="mt-4 space-y-3">
-              <div className="rounded-md bg-muted/50 p-3"><p className="text-xs text-muted-foreground">Expected budget</p><p className="mt-1 text-lg font-semibold tabular-nums">{formatAmount(expectedTotal, currency)}</p></div>
-              <div className="rounded-md bg-muted/50 p-3"><p className="text-xs text-muted-foreground">Actual</p><p className="mt-1 text-lg font-semibold tabular-nums">{formatAmount(actualTotal, currency)}</p></div>
-              <div className="rounded-md bg-accent/70 p-3"><p className="text-xs text-muted-foreground">Favorable variance</p><p className={`mt-1 text-lg font-semibold tabular-nums ${varianceTotal < 0 ? "text-destructive" : "text-primary"}`}>{formatAmount(varianceTotal, currency)}</p></div>
-            </div>
-            <p className="mt-3 text-xs leading-5 text-muted-foreground">Positive variance means expenses are under budget or income is above target.</p>
-          </section>
-          <section className="rounded-lg border border-border bg-card p-4">
-            <h2 className="text-sm font-semibold">Spreadsheet workflow</h2>
-            <ol className="mt-3 space-y-2 text-xs leading-5 text-muted-foreground">
-              <li>1. Download the blank CSV template.</li>
-              <li>2. Fill in the budget name, dates, budget heads, and expected amounts.</li>
-              <li>3. Import it to save or update this budget.</li>
-            </ol>
-          </section>
-        </aside>
-      </div>
+          </div>
+        </DialogContent>
+      </Dialog>
       <Dialog open={Boolean(activeActualLine)} onOpenChange={(open) => { if (!open) setActiveActualLine(null); }}>
         <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
           <DialogHeader>
