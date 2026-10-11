@@ -1,24 +1,23 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+
+import PayrollSheet from "@/components/bookkeeping/PayrollSheet";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowDownToLine, ArrowUpDown, Banknote, CalendarDays, ChevronDown, CircleDollarSign, Copy, FileSpreadsheet, FileText, FileUp, Mail, Pencil, Plus, Printer, SlidersHorizontal, Trash2, Users } from "lucide-react";
 import { toast } from "sonner";
 import { readableError } from "@/lib/action-error";
 
-import { deleteBookkeepingRecord, importPayrollCsv, saveBookkeepingRecord, sendPayrollSlip } from "@/app/actions";
+import { deleteBookkeepingRecord, importPayrollCsv, sendPayrollSlip } from "@/app/actions";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Textarea } from "@/components/ui/textarea";
-import { calculatePayroll, emptyPayrollValues, payrollCsvFields, type PayrollValues } from "@/lib/payroll-utils";
-import { paymentAccountLabel, paymentAccountType } from "@/lib/payment-accounts";
+import { payrollCsvFields } from "@/lib/payroll-utils";
+import { paymentAccountType } from "@/lib/payment-accounts";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
 
 interface PayrollWorkspaceProps {
@@ -28,66 +27,6 @@ interface PayrollWorkspaceProps {
   employees?: BookkeepingRecord[];
   asOfDate: string;
   dateRange?: { startDate: string; endDate: string };
-}
-
-interface PayrollFieldSpec {
-  name: keyof PayrollValues;
-  label: string;
-  type?: "text" | "number" | "date" | "email";
-  required?: boolean;
-  step?: string;
-  allowNegative?: boolean;
-  placeholder?: string;
-}
-
-const earningsFields: PayrollFieldSpec[] = [
-  { name: "baseSalary", label: "Base salary", type: "number", required: true, step: "0.01" },
-  { name: "increment", label: "Increment", type: "number", step: "0.01" },
-  { name: "incentive", label: "Incentive", type: "number", step: "0.01" },
-  { name: "overtimeAllowance", label: "Overtime allowance", type: "number", step: "0.01" },
-  { name: "gymAllowance", label: "Gym allowance", type: "number", step: "0.01" },
-  { name: "medicalAllowance", label: "Medical allowance", type: "number", step: "0.01" },
-  { name: "otherAllowance", label: "Other allowance", type: "number", step: "0.01" },
-];
-
-const deductionFields: PayrollFieldSpec[] = [
-  { name: "advanceDeduction", label: "Advance deduction", type: "number", step: "0.01" },
-  { name: "loanDeduction", label: "Loan deduction", type: "number", step: "0.01" },
-  { name: "fineDeduction", label: "Fine", type: "number", step: "0.01" },
-  { name: "adjustment", label: "Adjustment (+ / −)", type: "number", step: "0.01", allowNegative: true },
-];
-
-function recordToValues(record: BookkeepingRecord, month: string): PayrollValues {
-  const defaults = emptyPayrollValues(month);
-  const data = record.data;
-  return {
-    ...defaults,
-    employeeId: data.employeeId || "",
-    employeeName: data.employeeName || "",
-    employeeEmail: data.employeeEmail || "",
-    cnic: data.cnic || "",
-    designation: data.designation || "",
-    joiningDate: data.joiningDate || "",
-    month: data.month || month,
-    paymentAccountId: data.paymentAccountId || "",
-    paymentAccountName: data.paymentAccountName || "",
-    paymentMethod: data.paymentMethod || "",
-    baseSalary: data.baseSalary || "0",
-    increment: data.increment || "0",
-    workingDays: data.workingDays || "26",
-    workedDays: data.workedDays || "26",
-    incentive: data.incentive || "0",
-    overtimeAllowance: data.overtimeAllowance || "0",
-    gymAllowance: data.gymAllowance || "0",
-    medicalAllowance: data.medicalAllowance || "0",
-    otherAllowance: data.otherAllowance || "0",
-    taxDeduction: data.taxDeduction || "",
-    advanceDeduction: data.advanceDeduction || "0",
-    loanDeduction: data.loanDeduction || "0",
-    fineDeduction: data.fineDeduction || "0",
-    adjustment: data.adjustment || "0",
-    description: data.description || "",
-  };
 }
 
 function formatRupees(amount: number) {
@@ -185,11 +124,8 @@ export default function PayrollWorkspace({ records, accounts, employees = [], as
   const [customFromDate, setCustomFromDate] = useState(dateRange?.startDate ?? "");
   const [customToDate, setCustomToDate] = useState(dateRange?.endDate ?? "");
   const [search, setSearch] = useState("");
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [editingId, setEditingId] = useState("");
-  const [values, setValues] = useState<PayrollValues>(() => emptyPayrollValues(currentMonth));
-  const [saveError, setSaveError] = useState("");
-  const [isSaving, setIsSaving] = useState(false);
+  const sheetCount = useRef(0);
+  const [sheet, setSheet] = useState<{ key: number; month: string; copyFrom?: BookkeepingRecord } | null>(null);
   const [isDeleting, setIsDeleting] = useState("");
   const [isSending, setIsSending] = useState("");
   const [isImporting, setIsImporting] = useState(false);
@@ -216,7 +152,6 @@ export default function PayrollWorkspace({ records, accounts, employees = [], as
     }
   }
   const paymentAccounts = accounts.filter((account) => paymentAccountType(account));
-  const totals = calculatePayroll(values);
 
   const periodRecords = useMemo(() => savedRecords.filter((record) => {
     if (!customFromDate && !customToDate) return record.data.month === selectedMonth;
@@ -235,114 +170,16 @@ export default function PayrollWorkspace({ records, accounts, employees = [], as
     tax: summary.tax + Number(record.data.taxDeduction || 0),
   }), { gross: 0, payable: 0, tax: 0 }), [periodRecords]);
 
-  function updateField(name: keyof PayrollValues, value: string) {
-    setSaveError("");
-    setValues((previous) => ({ ...previous, [name]: value }));
-  }
-
-  const activeEmployees = employees.filter((employee) => employee.data.name?.trim() && employee.data.status !== "Inactive");
-
-  function chooseEmployee(employeeRecordId: string) {
-    const employee = employees.find((item) => item.id === employeeRecordId);
-    if (!employee) return;
-    setSaveError("");
-    setValues((previous) => ({
-      ...previous,
-      employeeId: employee.data.employeeId || previous.employeeId,
-      employeeName: employee.data.name || previous.employeeName,
-      employeeEmail: employee.data.email || previous.employeeEmail,
-      cnic: employee.data.cnic || previous.cnic,
-      designation: employee.data.designation || previous.designation,
-      joiningDate: employee.data.joiningDate || previous.joiningDate,
-      baseSalary: employee.data.baseSalary || previous.baseSalary,
-      paymentAccountId: accounts.some((account) => account.id === employee.data.paymentAccountId) ? employee.data.paymentAccountId : previous.paymentAccountId,
-    }));
-  }
-
   function openNewEntry() {
-    setEditingId("");
-    setSaveError("");
-    setCustomFromDate("");
-    setCustomToDate("");
-    setValues(emptyPayrollValues(selectedMonth));
-    setDialogOpen(true);
+    setSheet({ key: ++sheetCount.current, month: selectedMonth });
   }
 
   function openEditEntry(record: BookkeepingRecord) {
-    setEditingId(record.id);
-    setSaveError("");
-    setValues(recordToValues(record, selectedMonth));
-    setDialogOpen(true);
+    setSheet({ key: ++sheetCount.current, month: record.data.month || selectedMonth });
   }
 
   function openCopiedEntry(record: BookkeepingRecord) {
-    const month = nextPayrollMonth(record.data.month || selectedMonth);
-    setEditingId("");
-    setSaveError("");
-    setCustomFromDate("");
-    setCustomToDate("");
-    setSelectedMonth(month);
-    setValues({ ...recordToValues(record, month), month });
-    setDialogOpen(true);
-  }
-
-  function renderInputField(spec: PayrollFieldSpec) {
-    const inputId = `payroll-${spec.name}`;
-    return (
-      <div key={spec.name} className="space-y-1.5">
-        <Label htmlFor={inputId}>{spec.label}{spec.required ? <span className="text-destructive"> *</span> : null}</Label>
-        <Input
-          id={inputId}
-          name={spec.name}
-          type={spec.type || "text"}
-          value={values[spec.name]}
-          onChange={(event) => updateField(spec.name, event.target.value)}
-          required={spec.required}
-          min={spec.type === "number" && !spec.allowNegative ? "0" : undefined}
-          step={spec.step}
-          placeholder={spec.placeholder}
-        />
-      </div>
-    );
-  }
-
-  async function handleSave(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const submitter = (event.nativeEvent as SubmitEvent).submitter;
-    const shouldSend = submitter instanceof HTMLButtonElement && submitter.value === "save-send";
-    setIsSaving(true);
-    setSaveError("");
-    if (shouldSend && !values.employeeEmail.trim()) {
-      const message = "Add the employee’s email address before saving and sending the salary slip.";
-      setSaveError(message);
-      toast.error(message);
-      setIsSaving(false);
-      return;
-    }
-    try {
-      const payload: Record<string, string> = { ...values };
-      const saved = await saveBookkeepingRecord("payroll", payload, editingId || undefined);
-      setSavedRecords((previous) => [saved, ...previous.filter((record) => record.id !== saved.id)]);
-      setSelectedMonth(saved.data.month);
-      setDialogOpen(false);
-      router.refresh();
-      if (shouldSend) {
-        try {
-          await sendPayrollSlip(saved.id);
-          toast.success("Payroll saved and salary slip sent.");
-        } catch (error) {
-          toast.error(`Payroll saved, but the salary slip wasn’t sent: ${errorMessage(error)}`);
-        }
-      } else {
-        toast.success(editingId ? "Payroll entry updated." : "Payroll entry saved.");
-      }
-    } catch (error) {
-      const message = errorMessage(error);
-      setSaveError(message);
-      toast.error(message);
-    } finally {
-      setIsSaving(false);
-    }
+    setSheet({ key: ++sheetCount.current, month: nextPayrollMonth(record.data.month || selectedMonth), copyFrom: record });
   }
 
   async function handleSendSlip(record: BookkeepingRecord) {
@@ -410,15 +247,6 @@ export default function PayrollWorkspace({ records, accounts, employees = [], as
       setIsDeleting("");
     }
   }
-
-  const employeeFields: PayrollFieldSpec[] = [
-    { name: "employeeId", label: "Employee ID", required: true, placeholder: "EMP-001" },
-    { name: "employeeName", label: "Employee name", required: true, placeholder: "Full name" },
-    { name: "employeeEmail", label: "Employee email", type: "email", placeholder: "employee@example.com" },
-    { name: "cnic", label: "CNIC", required: true, placeholder: "12345-1234567-1" },
-    { name: "designation", label: "Designation", required: true, placeholder: "Job title" },
-    { name: "joiningDate", label: "Joining date", type: "date" },
-  ];
 
   return (
     <main className="space-y-6 px-4 py-6 sm:px-7 lg:px-8">
@@ -558,121 +386,25 @@ export default function PayrollWorkspace({ records, accounts, employees = [], as
 
       <p className="text-xs leading-5 text-muted-foreground">Tax is estimated from Pakistan’s Tax Year 2027 salaried-income slabs using annualized monthly gross pay, assuming salary is more than 75% of taxable income. Review exemptions, benefits, and final withholding with your tax adviser.</p>
 
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-[min(980px,calc(100vw-3rem))]">
-          <DialogHeader className="pr-8">
-            <DialogTitle>{editingId ? "Edit payroll entry" : "Add payroll entry"}</DialogTitle>
-            <DialogDescription>Enter the employee’s salary and attendance. Gross pay, estimated tax, deductions, and payable salary update below.</DialogDescription>
-          </DialogHeader>
-          <form onSubmit={handleSave} className="space-y-6">
-            <input type="hidden" name="month" value={values.month} />
-            <section className="space-y-4">
-              <h3 className="border-b border-border pb-2 pt-1 text-sm font-semibold">Employee details</h3>
-              <div className="space-y-1.5">
-                <Label htmlFor="payroll-employee-picker">Choose employee</Label>
-                <Select
-                  value={activeEmployees.find((employee) => employee.data.employeeId === values.employeeId && employee.data.name === values.employeeName)?.id ?? null}
-                  onValueChange={(value) => { if (value) chooseEmployee(value); }}
-                >
-                  <SelectTrigger id="payroll-employee-picker" className="w-full">
-                    <SelectValue placeholder={activeEmployees.length ? "Pick from your employees list" : "No employees yet — add them on the Employees page"} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {activeEmployees.map((employee) => (
-                      <SelectItem key={employee.id} value={employee.id}>
-                        {employee.data.name}{employee.data.employeeId ? ` · ${employee.data.employeeId}` : ""}{employee.data.designation ? ` · ${employee.data.designation}` : ""}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <p className="text-xs text-muted-foreground">
-                  Fills in the details below from the <Link href="/app/employees" className="text-primary underline-offset-4 hover:underline">Employees</Link> list. You can still change them for this month.
-                </p>
-              </div>
-              <div className="grid gap-x-6 gap-y-4 sm:grid-cols-2 md:grid-cols-3">{employeeFields.map(renderInputField)}</div>
-              <div className="space-y-1.5">
-                <Label htmlFor="payroll-payment-account">Salary payment account</Label>
-                <Select value={values.paymentAccountId || null} onValueChange={(value) => updateField("paymentAccountId", value ?? "")}>
-                  <SelectTrigger id="payroll-payment-account" className="w-full">
-                    <SelectValue placeholder={paymentAccounts.length ? "Choose a Cash, Bank, or Credit card account" : "Add an account in Chart of Accounts first"} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {paymentAccounts.map((account) => <SelectItem key={account.id} value={account.id}>{paymentAccountLabel(account)}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-                {!paymentAccounts.length ? <p className="text-xs text-muted-foreground">Create a Cash, Bank, or Credit card account in Chart of Accounts to record how salary is paid.</p> : <p className="text-xs text-muted-foreground">Optional. Choose the account used to pay this employee.</p>}
-              </div>
-            </section>
-
-            <section className="space-y-4">
-              <h3 className="border-b border-border pb-2 pt-1 text-sm font-semibold">Payroll period</h3>
-              <div className="grid gap-x-6 gap-y-4 sm:grid-cols-3">
-                <div className="space-y-1.5">
-                  <Label htmlFor="payroll-month">Payroll month</Label>
-                  <Input id="payroll-month" type="month" value={values.month} onChange={(event) => updateField("month", event.target.value)} required />
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="payroll-working-days">Total working days</Label>
-                  <Input id="payroll-working-days" type="number" min="1" max="31" step="1" value={values.workingDays} onChange={(event) => updateField("workingDays", event.target.value)} required />
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="payroll-worked-days">Worked days</Label>
-                  <Input id="payroll-worked-days" type="number" min="0" max="31" step="1" value={values.workedDays} onChange={(event) => updateField("workedDays", event.target.value)} required />
-                </div>
-              </div>
-            </section>
-
-            <section className="space-y-4">
-              <h3 className="border-b border-border pb-2 pt-1 text-sm font-semibold">Earnings</h3>
-              <div className="grid gap-x-6 gap-y-4 sm:grid-cols-2 md:grid-cols-3">{earningsFields.map(renderInputField)}</div>
-              <div className="grid gap-4 rounded-lg border border-border bg-muted/40 p-4 sm:grid-cols-3">
-                <div><p className="text-xs text-muted-foreground">After increment</p><p className="mt-1 font-semibold tabular-nums">{formatRupees(totals.revisedSalary)}</p></div>
-                <div><p className="text-xs text-muted-foreground">Attendance-adjusted basic</p><p className="mt-1 font-semibold tabular-nums">{formatRupees(totals.proratedSalary)}</p></div>
-                <div><p className="text-xs text-muted-foreground">Gross salary</p><p className="mt-1 font-semibold tabular-nums">{formatRupees(totals.grossSalary)}</p></div>
-              </div>
-            </section>
-
-            <section className="space-y-4">
-              <h3 className="border-b border-border pb-2 pt-1 text-sm font-semibold">Tax and deductions</h3>
-              <div className="grid gap-x-6 gap-y-4 sm:grid-cols-2 md:grid-cols-3">
-                <div className="space-y-1.5">
-                  <div className="flex items-center justify-between gap-2">
-                    <Label htmlFor="payroll-tax">Income tax (PKR)</Label>
-                    <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => updateField("taxDeduction", "")}>Use estimate</Button>
-                  </div>
-                  <Input id="payroll-tax" type="number" min="0" step="0.01" value={values.taxDeduction || totals.estimatedTax.toFixed(2)} onChange={(event) => updateField("taxDeduction", event.target.value)} />
-                  <p className="text-xs text-muted-foreground">Estimate: {formatRupees(totals.estimatedTax)} / month</p>
-                </div>
-                {deductionFields.map(renderInputField)}
-              </div>
-              <p className="text-xs text-muted-foreground">Use a positive adjustment to add pay, or a negative value to reduce it.</p>
-            </section>
-
-            <section className="space-y-4">
-              <h3 className="border-b border-border pb-2 pt-1 text-sm font-semibold">Description</h3>
-              <div className="space-y-1.5">
-                <Label htmlFor="payroll-description">Notes for this payroll entry</Label>
-                <Textarea id="payroll-description" rows={3} maxLength={1000} value={values.description} onChange={(event) => updateField("description", event.target.value)} placeholder="Add a note about attendance, incentive, or an adjustment" />
-              </div>
-            </section>
-
-            <section className="flex flex-col gap-2 rounded-lg border border-primary/20 bg-primary/5 p-4 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <p className="text-xs font-medium text-muted-foreground">Final payable salary</p>
-                <p className="mt-1 text-2xl font-semibold tabular-nums text-foreground">{formatRupees(totals.payableSalary)}</p>
-              </div>
-              <p className="text-xs text-muted-foreground">Gross pay − tax − advance − loan − fines + adjustment</p>
-            </section>
-
-            {saveError ? <p role="alert" className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">{saveError}</p> : null}
-            <div className="flex flex-col-reverse gap-2 border-t border-border pt-4 sm:flex-row sm:justify-end">
-              <Button type="button" variant="outline" onClick={() => setDialogOpen(false)} disabled={isSaving}>Cancel</Button>
-              <Button type="submit" variant="outline" name="intent" value="save-send" disabled={isSaving}><Mail size={15} />Save & send</Button>
-              <Button type="submit" disabled={isSaving}>{isSaving ? "Saving…" : editingId ? "Save changes" : "Save payroll entry"}</Button>
-            </div>
-          </form>
-        </DialogContent>
-      </Dialog>
+      {sheet ? (
+        <PayrollSheet
+          key={sheet.key}
+          open
+          onOpenChange={(next) => { if (!next) setSheet(null); }}
+          month={sheet.month}
+          copyFrom={sheet.copyFrom}
+          employees={employees}
+          paymentAccounts={paymentAccounts}
+          existingRecords={savedRecords}
+          onSaved={(saved, month) => {
+            setSavedRecords((previous) => [...saved, ...previous.filter((record) => !saved.some((item) => item.id === record.id))]);
+            setSelectedMonth(month);
+            setCustomFromDate("");
+            setCustomToDate("");
+            router.refresh();
+          }}
+        />
+      ) : null}
     </main>
   );
 }
