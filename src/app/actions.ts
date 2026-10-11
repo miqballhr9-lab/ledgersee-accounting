@@ -5,6 +5,7 @@ import { randomBytes } from "node:crypto";
 import { revalidatePath } from "next/cache";
 
 import { db } from "@/db";
+import { ActionError } from "@/lib/action-error";
 import { bookkeepingRecord, user } from "@/db/schema";
 import { requireUser } from "@/lib/auth";
 import { sendEmailOrThrow } from "@/lib/email";
@@ -90,12 +91,12 @@ function serializeRow(row: StoredRow): BookkeepingRecord {
 
 function sanitizePayload(input: Record<string, string>): Record<string, string> {
   const entries = Object.entries(input);
-  if (entries.length > 60) throw new Error("This record has too many fields.");
+  if (entries.length > 60) throw new ActionError("This record has too many fields.");
 
   return Object.fromEntries(
     entries.map(([key, value]) => {
       if (!/^[a-zA-Z][a-zA-Z0-9]*$/.test(key) || typeof value !== "string") {
-        throw new Error("One of the values needs to be checked.");
+        throw new ActionError("One of the values needs to be checked.");
       }
       return [key, value.trim().slice(0, key === "emailTemplate" ? 12000 : key === "lines" || key === "lineItems" ? 30000 : 4000)];
     }),
@@ -104,7 +105,7 @@ function sanitizePayload(input: Record<string, string>): Record<string, string> 
 
 function amountFromLineItems(data: Record<string, string>, kind: string): Record<string, string> {
   const categoryLines = kind === "expenses" || kind === "bills" || kind === "supplier-credits";
-  if (categoryLines && !data.lineItems?.trim()) throw new Error(`Add at least one ${kind === "bills" ? "bill" : kind === "supplier-credits" ? "credit" : "expense"} line with a category and amount.`);
+  if (categoryLines && !data.lineItems?.trim()) throw new ActionError(`Add at least one ${kind === "bills" ? "bill" : kind === "supplier-credits" ? "credit" : "expense"} line with a category and amount.`);
   if (!data.lineItems?.trim()) return data;
 
   const lines = parseInvoiceLines(data.lineItems);
@@ -113,14 +114,14 @@ function amountFromLineItems(data: Record<string, string>, kind: string): Record
     const rate = Number(line.rate);
     return !line.name.trim() || !Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(rate) || rate < (categoryLines ? Number.EPSILON : 0);
   })) {
-    throw new Error(categoryLines ? "Each line needs a category and an amount greater than zero." : "Check that each item has a name, quantity, and non-negative rate.");
+    throw new ActionError(categoryLines ? "Each line needs a category and an amount greater than zero." : "Check that each item has a name, quantity, and non-negative rate.");
   }
 
   const subtotal = lines.reduce((total, line) => total + Number(line.quantity) * Number(line.rate), 0);
   const taxRate = Math.max(0, Number(data.taxRate) || 0);
   const discount = Math.max(0, Number(data.discount) || 0);
-  if (taxRate > 100) throw new Error("Tax rate can’t be greater than 100%.");
-  if (Number(data.taxRate) < 0 || Number(data.discount) < 0) throw new Error("Tax and discount values can’t be negative.");
+  if (taxRate > 100) throw new ActionError("Tax rate can’t be greater than 100%.");
+  if (Number(data.taxRate) < 0 || Number(data.discount) < 0) throw new ActionError("Tax and discount values can’t be negative.");
   const taxAmount = subtotal * (taxRate / 100);
 
   return {
@@ -161,17 +162,17 @@ function normalizePayrollData(data: Record<string, string>): Record<string, stri
   };
 
   if (!values.employeeId || !values.employeeName || !values.cnic || !values.designation || !values.baseSalary) {
-    throw new Error("Enter the employee ID, name, CNIC, designation, and base salary.");
+    throw new ActionError("Enter the employee ID, name, CNIC, designation, and base salary.");
   }
-  if (!/^\d{5}-?\d{7}-?\d$/.test(values.cnic)) throw new Error("Enter a valid 13-digit CNIC.");
+  if (!/^\d{5}-?\d{7}-?\d$/.test(values.cnic)) throw new ActionError("Enter a valid 13-digit CNIC.");
   if (values.employeeEmail && (values.employeeEmail.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(values.employeeEmail))) {
-    throw new Error("Enter a valid employee email address.");
+    throw new ActionError("Enter a valid employee email address.");
   }
-  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(values.month)) throw new Error("Choose a valid payroll month.");
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(values.month)) throw new ActionError("Choose a valid payroll month.");
   if (values.joiningDate) {
     const joiningDate = new Date(`${values.joiningDate}T00:00:00.000Z`);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(values.joiningDate) || !Number.isFinite(joiningDate.getTime()) || joiningDate.toISOString().slice(0, 10) !== values.joiningDate) {
-      throw new Error("Choose a valid employee joining date.");
+      throw new ActionError("Choose a valid employee joining date.");
     }
   }
 
@@ -183,22 +184,22 @@ function normalizePayrollData(data: Record<string, string>): Record<string, stri
     const value = values[key].trim();
     if (!value) continue;
     const number = Number(value);
-    if (!Number.isFinite(number) || Math.abs(number) > 1_000_000_000_000) throw new Error("Enter valid salary amounts and working days.");
-    if (key !== "adjustment" && number < 0) throw new Error("Salary, allowances, days, tax, and deductions can’t be negative.");
+    if (!Number.isFinite(number) || Math.abs(number) > 1_000_000_000_000) throw new ActionError("Enter valid salary amounts and working days.");
+    if (key !== "adjustment" && number < 0) throw new ActionError("Salary, allowances, days, tax, and deductions can’t be negative.");
   }
 
   const workingDays = Number(values.workingDays);
   const workedDays = Number(values.workedDays);
-  if (!Number.isInteger(workingDays) || workingDays < 1 || workingDays > 31) throw new Error("Total working days must be from 1 to 31.");
-  if (!Number.isInteger(workedDays) || workedDays < 0 || workedDays > workingDays) throw new Error("Worked days can’t exceed total working days.");
-  if (calculatePayroll(values).payableSalary < 0) throw new Error("Deductions exceed the gross salary. Adjust the deductions or adjustment.");
+  if (!Number.isInteger(workingDays) || workingDays < 1 || workingDays > 31) throw new ActionError("Total working days must be from 1 to 31.");
+  if (!Number.isInteger(workedDays) || workedDays < 0 || workedDays > workingDays) throw new ActionError("Worked days can’t exceed total working days.");
+  if (calculatePayroll(values).payableSalary < 0) throw new ActionError("Deductions exceed the gross salary. Adjust the deductions or adjustment.");
 
   return serializePayroll(values);
 }
 
 export async function listBookkeepingRecords(kind: string): Promise<BookkeepingRecord[]> {
   const me = await requireUser();
-  if (!isRecordKind(kind)) throw new Error("That section isn’t available.");
+  if (!isRecordKind(kind)) throw new ActionError("That section isn’t available.");
 
   const rows = await db
     .select()
@@ -213,7 +214,7 @@ export async function listBookkeepingRecordGroups(
   kinds: string[],
 ): Promise<Partial<Record<RecordKind, BookkeepingRecord[]>>> {
   const uniqueKinds = [...new Set(kinds)];
-  if (uniqueKinds.some((kind) => !isRecordKind(kind))) throw new Error("That section isn’t available.");
+  if (uniqueKinds.some((kind) => !isRecordKind(kind))) throw new ActionError("That section isn’t available.");
   if (!uniqueKinds.length) return {};
 
   const me = await requireUser();
@@ -247,8 +248,8 @@ export async function saveBookkeepingRecord(
   id?: string,
 ): Promise<BookkeepingRecord> {
   const me = await requireUser();
-  if (!isRecordKind(kind)) throw new Error("That section isn’t available.");
-  if (kind === "reconciliations") throw new Error("Completed reconciliations can only be created from the reconciliation screen.");
+  if (!isRecordKind(kind)) throw new ActionError("That section isn’t available.");
+  if (kind === "reconciliations") throw new ActionError("Completed reconciliations can only be created from the reconciliation screen.");
   let data = amountFromLineItems(sanitizePayload(input), kind);
   if (kind === "purchase-orders" && !id) data = { ...data, status: "Draft" };
   if (kind === "payroll") {
@@ -260,7 +261,7 @@ export async function saveBookkeepingRecord(
         .where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "accounts"), eq(bookkeepingRecord.id, data.paymentAccountId)))
         .limit(1);
       const accountType = paymentAccount ? paymentAccountType({ kind: "accounts", data: paymentAccount.data }) : null;
-      if (!paymentAccount || !accountType) throw new Error("Choose an available Cash, Bank, or Credit card account from Chart of Accounts.");
+      if (!paymentAccount || !accountType) throw new ActionError("Choose an available Cash, Bank, or Credit card account from Chart of Accounts.");
       data = {
         ...data,
         paymentAccountId: paymentAccount.id,
@@ -274,19 +275,19 @@ export async function saveBookkeepingRecord(
       .select()
       .from(bookkeepingRecord)
       .where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "payroll")));
-    if (id && !payrollRows.some((row) => row.id === id)) throw new Error("We couldn’t find that payroll entry. Refresh and try again.");
+    if (id && !payrollRows.some((row) => row.id === id)) throw new ActionError("We couldn’t find that payroll entry. Refresh and try again.");
     const duplicate = payrollRows.some((row) =>
       row.id !== id &&
       row.data.month === data.month &&
       row.data.employeeId?.toLowerCase() === data.employeeId.toLowerCase(),
     );
-    if (duplicate) throw new Error("That employee already has a payroll entry for this month.");
+    if (duplicate) throw new ActionError("That employee already has a payroll entry for this month.");
   }
   if (kind === "invoices") {
     const paymentTerms = data.paymentTerms || "30 days";
-    if (!["Due on receipt", "15 days", "30 days", "60 days"].includes(paymentTerms)) throw new Error("Choose one of the available payment terms.");
+    if (!["Due on receipt", "15 days", "30 days", "60 days"].includes(paymentTerms)) throw new ActionError("Choose one of the available payment terms.");
     const calculatedDueDate = dueDateForTerms(data.issueDate ?? "", paymentTerms);
-    if (!calculatedDueDate) throw new Error("Choose an issue date and valid payment terms.");
+    if (!calculatedDueDate) throw new ActionError("Choose an issue date and valid payment terms.");
     data = { ...data, paymentTerms, dueDate: calculatedDueDate };
   }
   if (!id && (kind === "bills" || kind === "supplier-credits") && !data.status) data = { ...data, status: "Open" };
@@ -300,7 +301,7 @@ export async function saveBookkeepingRecord(
         .where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "accounts"), eq(bookkeepingRecord.id, selectedAccountId)))
         .limit(1);
       const accountType = paymentAccount ? paymentAccountType({ kind: "accounts", data: paymentAccount.data }) : null;
-      if (!paymentAccount || !accountType) throw new Error("Choose a Cash, Bank, or Credit card account from Chart of Accounts.");
+      if (!paymentAccount || !accountType) throw new ActionError("Choose a Cash, Bank, or Credit card account from Chart of Accounts.");
       paymentMethod = accountType;
       data = { ...data, paymentAccountId: paymentAccount.id, paymentAccountName: paymentAccount.data.name || paymentAccount.data.code || "Account" };
     } else {
@@ -309,7 +310,7 @@ export async function saveBookkeepingRecord(
     data = { ...data, paymentMethod };
     if (paymentMethod !== "Credit") {
       const amount = Number(data.amount);
-      if (!Number.isFinite(amount) || amount <= 0) throw new Error("Enter an amount greater than zero for a paid transaction.");
+      if (!Number.isFinite(amount) || amount <= 0) throw new ActionError("Enter an amount greater than zero for a paid transaction.");
       data = { ...data, paidAmount: amount.toFixed(2), status: "Paid" };
     }
   }
@@ -319,39 +320,39 @@ export async function saveBookkeepingRecord(
       .from(bookkeepingRecord)
       .where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "accounts")));
     const existing = id ? accountRows.find((account) => account.id === id) : undefined;
-    if (id && !existing) throw new Error("We couldn’t find that account. Refresh and try again.");
+    if (id && !existing) throw new ActionError("We couldn’t find that account. Refresh and try again.");
 
     if (existing?.data.locked === "true") {
-      if (data.locked !== "false") throw new Error("This account is locked. Unlock it before changing its details.");
+      if (data.locked !== "false") throw new ActionError("This account is locked. Unlock it before changing its details.");
       data = { ...existing.data, locked: "false" };
     } else {
       const allowedFields = new Set(["code", "name", "type", "accountType", "detailType", "subAccount", "parentAccount", "openingBalance", "openingBalanceDate", "description", "locked"]);
       data = Object.fromEntries(Object.entries(data).filter(([key]) => allowedFields.has(key)));
       const category = accountCategoryForType(data.accountType ?? "");
-      if (!data.name?.trim()) throw new Error("Enter an account name.");
-      if (!category) throw new Error("Choose an account type.");
+      if (!data.name?.trim()) throw new ActionError("Enter an account name.");
+      if (!category) throw new ActionError("Choose an account type.");
       if (!accountDetailsForType(data.accountType ?? "").some((detailType) => detailType === data.detailType)) {
-        throw new Error("Choose a detail type that matches this account type.");
+        throw new ActionError("Choose a detail type that matches this account type.");
       }
       data.name = data.name.trim();
       data.code = data.code?.trim() ?? "";
       data.type = category;
       if (!data.openingBalance) data.openingBalanceDate = "";
-      if (data.openingBalance && !Number.isFinite(Number(data.openingBalance))) throw new Error("Enter a valid opening balance.");
-      if (data.openingBalance && !data.openingBalanceDate) throw new Error("Choose an opening balance date.");
+      if (data.openingBalance && !Number.isFinite(Number(data.openingBalance))) throw new ActionError("Enter a valid opening balance.");
+      if (data.openingBalance && !data.openingBalanceDate) throw new ActionError("Choose an opening balance date.");
       if (data.openingBalanceDate) {
         const parsedOpeningDate = new Date(`${data.openingBalanceDate}T00:00:00.000Z`);
         if (!/^\d{4}-\d{2}-\d{2}$/.test(data.openingBalanceDate) || Number.isNaN(parsedOpeningDate.getTime()) || parsedOpeningDate.toISOString().slice(0, 10) !== data.openingBalanceDate) {
-          throw new Error("Choose a valid opening balance date.");
+          throw new ActionError("Choose a valid opening balance date.");
         }
       }
       if (data.code && accountRows.some((account) => account.id !== id && account.data.code?.trim().toLowerCase() === data.code.toLowerCase())) {
-        throw new Error("That account number is already in use.");
+        throw new ActionError("That account number is already in use.");
       }
       if (data.subAccount === "true") {
         const parent = accountRows.find((account) => account.id === data.parentAccount);
-        if (!parent || parent.id === id) throw new Error("Choose a valid parent account.");
-        if (parent.data.type !== category || parent.data.subAccount === "true") throw new Error("Choose a parent account with the same account type.");
+        if (!parent || parent.id === id) throw new ActionError("Choose a valid parent account.");
+        if (parent.data.type !== category || parent.data.subAccount === "true") throw new ActionError("Choose a parent account with the same account type.");
       } else {
         data.parentAccount = "";
       }
@@ -359,18 +360,18 @@ export async function saveBookkeepingRecord(
     }
   }
   if (["invoices", "estimates", "sales-orders", "credit-notes", "recurring-invoices", "purchase-orders"].includes(kind) && !data.lineItems?.trim()) {
-    throw new Error("Add at least one item or service before saving.");
+    throw new ActionError("Add at least one item or service before saving.");
   }
   if (kind === "journals" && data.lines) {
-    if (!data.date || !data.reference) throw new Error("Enter the journal date and number.");
+    if (!data.date || !data.reference) throw new ActionError("Enter the journal date and number.");
 
     let submittedLines: unknown;
     try {
       submittedLines = JSON.parse(data.lines);
     } catch {
-      throw new Error("Check the journal lines and try again.");
+      throw new ActionError("Check the journal lines and try again.");
     }
-    if (!Array.isArray(submittedLines) || submittedLines.length > 50) throw new Error("A journal can include up to 50 lines.");
+    if (!Array.isArray(submittedLines) || submittedLines.length > 50) throw new ActionError("A journal can include up to 50 lines.");
 
     const accountRows = await db
       .select()
@@ -390,7 +391,7 @@ export async function saveBookkeepingRecord(
     let creditTotalCents = 0;
 
     for (const [index, entry] of submittedLines.entries()) {
-      if (!entry || typeof entry !== "object" || Array.isArray(entry)) throw new Error(`Check journal line ${index + 1}.`);
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) throw new ActionError(`Check journal line ${index + 1}.`);
       const line = entry as Record<string, unknown>;
       const accountId = typeof line.accountId === "string" ? line.accountId.trim() : "";
       const debitText = typeof line.debit === "string" ? line.debit.trim() : "";
@@ -398,21 +399,21 @@ export async function saveBookkeepingRecord(
       const description = typeof line.description === "string" ? line.description.trim().slice(0, 300) : "";
       const name = typeof line.name === "string" ? line.name.trim().slice(0, 160) : "";
       if (!accountId && !debitText && !creditText && !description && !name) continue;
-      if (!accountId) throw new Error(`Choose a chart account for journal line ${index + 1}.`);
+      if (!accountId) throw new ActionError(`Choose a chart account for journal line ${index + 1}.`);
 
       const account = accountsById.get(accountId);
-      if (!account) throw new Error(`The account on journal line ${index + 1} is no longer available.`);
+      if (!account) throw new ActionError(`The account on journal line ${index + 1} is no longer available.`);
 
       const debit = Number(debitText || 0);
       const credit = Number(creditText || 0);
       if (!Number.isFinite(debit) || !Number.isFinite(credit) || debit < 0 || credit < 0) {
-        throw new Error(`Journal line ${index + 1} must use non-negative amounts.`);
+        throw new ActionError(`Journal line ${index + 1} must use non-negative amounts.`);
       }
       const debitCents = Math.round(debit * 100);
       const creditCents = Math.round(credit * 100);
-      if (!Number.isSafeInteger(debitCents) || !Number.isSafeInteger(creditCents)) throw new Error("Journal amounts are too large.");
-      if (debitCents === 0 && creditCents === 0) throw new Error(`Enter a debit or credit for journal line ${index + 1}.`);
-      if (debitCents > 0 && creditCents > 0) throw new Error(`Use either debit or credit on journal line ${index + 1}, not both.`);
+      if (!Number.isSafeInteger(debitCents) || !Number.isSafeInteger(creditCents)) throw new ActionError("Journal amounts are too large.");
+      if (debitCents === 0 && creditCents === 0) throw new ActionError(`Enter a debit or credit for journal line ${index + 1}.`);
+      if (debitCents > 0 && creditCents > 0) throw new ActionError(`Use either debit or credit on journal line ${index + 1}, not both.`);
 
       const accountName = account.data.name || account.data.code || "Account";
       const accountCode = account.data.code || "";
@@ -429,8 +430,8 @@ export async function saveBookkeepingRecord(
       creditTotalCents += creditCents;
     }
 
-    if (journalLines.length < 2) throw new Error("Add at least two journal lines.");
-    if (debitTotalCents === 0 || debitTotalCents !== creditTotalCents) throw new Error("Total debits and credits must match.");
+    if (journalLines.length < 2) throw new ActionError("Add at least two journal lines.");
+    if (debitTotalCents === 0 || debitTotalCents !== creditTotalCents) throw new ActionError("Total debits and credits must match.");
 
     const firstDebit = journalLines.find((line) => Number(line.debit) > 0);
     const firstCredit = journalLines.find((line) => Number(line.credit) > 0);
@@ -444,8 +445,8 @@ export async function saveBookkeepingRecord(
     };
   } else if (kind === "journals") {
     const amount = Number(data.amount);
-    if (!Number.isFinite(amount) || amount <= 0) throw new Error("Journal amounts must be greater than zero.");
-    if (data.debitAccount && data.debitAccount === data.creditAccount) throw new Error("Choose different debit and credit accounts.");
+    if (!Number.isFinite(amount) || amount <= 0) throw new ActionError("Journal amounts must be greater than zero.");
+    if (data.debitAccount && data.debitAccount === data.creditAccount) throw new ActionError("Choose different debit and credit accounts.");
   }
 
   if (id && kind === "transactions") {
@@ -454,7 +455,7 @@ export async function saveBookkeepingRecord(
       .from(bookkeepingRecord)
       .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "transactions")))
       .limit(1);
-    if (existing?.data.reconciled === "true") throw new Error("This transaction is part of a completed reconciliation and can’t be edited.");
+    if (existing?.data.reconciled === "true") throw new ActionError("This transaction is part of a completed reconciliation and can’t be edited.");
   }
 
   if (kind === "transactions" && data.description) {
@@ -486,9 +487,9 @@ export async function saveBookkeepingRecord(
           .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, kind)))
           .for("update")
           .limit(1);
-        if (!existing) throw new Error("We couldn’t find that purchase order. Refresh and try again.");
+        if (!existing) throw new ActionError("We couldn’t find that purchase order. Refresh and try again.");
         const status = existing.data.status === "Sent" ? "RFQ Sent" : existing.data.status || "Draft";
-        if (!["Draft", "RFQ Sent"].includes(status)) throw new Error("Confirmed purchase orders can’t be edited. Cancel the order or create a new one.");
+        if (!["Draft", "RFQ Sent"].includes(status)) throw new ActionError("Confirmed purchase orders can’t be edited. Cancel the order or create a new one.");
         const [saved] = await transaction
           .update(bookkeepingRecord)
           .set({ data: { ...existing.data, ...data, status }, updatedAt: new Date() })
@@ -507,7 +508,7 @@ export async function saveBookkeepingRecord(
         .from(bookkeepingRecord)
         .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "invoices")))
         .limit(1);
-      if (!existing) throw new Error("We couldn’t find that invoice. Refresh and try again.");
+      if (!existing) throw new ActionError("We couldn’t find that invoice. Refresh and try again.");
       updatedData = { ...existing.data, ...data };
       if (!data.shareToken && existing.data.shareToken) updatedData.shareToken = existing.data.shareToken;
     }
@@ -516,7 +517,7 @@ export async function saveBookkeepingRecord(
       .set({ data: updatedData, updatedAt: new Date() })
       .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, kind)))
       .returning();
-    if (!updated) throw new Error("We couldn’t find that record. Refresh and try again.");
+    if (!updated) throw new ActionError("We couldn’t find that record. Refresh and try again.");
     revalidatePath("/app", "layout");
     return serializeRow(updated);
   }
@@ -565,7 +566,7 @@ export async function saveBookkeepingRecord(
 export async function importBookkeepingItems(input: ItemImportRow[]): Promise<BookkeepingRecord[]> {
   const me = await requireUser();
   if (!Array.isArray(input) || input.length === 0 || input.length > MAX_ITEM_IMPORT_ROWS) {
-    throw new Error(`Choose between 1 and ${MAX_ITEM_IMPORT_ROWS} item rows to import.`);
+    throw new ActionError(`Choose between 1 and ${MAX_ITEM_IMPORT_ROWS} item rows to import.`);
   }
 
   const rows: ItemImportRow[] = [];
@@ -574,31 +575,31 @@ export async function importBookkeepingItems(input: ItemImportRow[]): Promise<Bo
 
   for (const [index, entry] of input.entries()) {
     if (!entry || typeof entry !== "object" || !Number.isInteger(entry.rowNumber) || entry.rowNumber < 2 || !entry.data || typeof entry.data !== "object") {
-      throw new Error(`Check the item details on import row ${index + 2}.`);
+      throw new ActionError(`Check the item details on import row ${index + 2}.`);
     }
 
     const data = {} as ItemImportData;
     for (const key of ["name", "sku", "itemType", "rate", "unit", "taxRate", "cost", "reorderPoint"] as const) {
       const value = entry.data[key];
-      if (typeof value !== "string") throw new Error(`Check ${key} on spreadsheet row ${entry.rowNumber}.`);
+      if (typeof value !== "string") throw new ActionError(`Check ${key} on spreadsheet row ${entry.rowNumber}.`);
       data[key] = value.trim();
-      if (data[key].length > 250) throw new Error(`${key} is too long on spreadsheet row ${entry.rowNumber}.`);
+      if (data[key].length > 250) throw new ActionError(`${key} is too long on spreadsheet row ${entry.rowNumber}.`);
     }
 
     data.itemType = data.itemType || "Product";
-    if (!data.name) throw new Error(`Add a name on spreadsheet row ${entry.rowNumber}.`);
-    if (!["Product", "Service"].includes(data.itemType)) throw new Error(`Choose Product or Service on spreadsheet row ${entry.rowNumber}.`);
+    if (!data.name) throw new ActionError(`Add a name on spreadsheet row ${entry.rowNumber}.`);
+    if (!["Product", "Service"].includes(data.itemType)) throw new ActionError(`Choose Product or Service on spreadsheet row ${entry.rowNumber}.`);
     for (const key of numericFields) {
       const value = data[key];
       if (!value && key !== "rate") continue;
       const amount = Number(value);
       if (!Number.isFinite(amount) || amount < 0 || amount > 1_000_000_000_000) {
-        throw new Error(`Enter a valid non-negative ${key === "rate" ? "rate" : key === "taxRate" ? "tax rate" : key === "cost" ? "unit cost" : "reorder point"} on spreadsheet row ${entry.rowNumber}.`);
+        throw new ActionError(`Enter a valid non-negative ${key === "rate" ? "rate" : key === "taxRate" ? "tax rate" : key === "cost" ? "unit cost" : "reorder point"} on spreadsheet row ${entry.rowNumber}.`);
       }
     }
 
     const skuKey = data.sku.toLocaleLowerCase();
-    if (skuKey && uploadedSkus.has(skuKey)) throw new Error(`The SKU ${data.sku} appears more than once in the spreadsheet.`);
+    if (skuKey && uploadedSkus.has(skuKey)) throw new ActionError(`The SKU ${data.sku} appears more than once in the spreadsheet.`);
     if (skuKey) uploadedSkus.add(skuKey);
     rows.push({ rowNumber: entry.rowNumber, data });
   }
@@ -611,7 +612,7 @@ export async function importBookkeepingItems(input: ItemImportRow[]): Promise<Bo
         .where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "items")));
       const existingSkus = new Set(existingItems.map((item) => item.data.sku?.trim().toLocaleLowerCase()).filter(Boolean));
       const duplicate = rows.find((row) => row.data.sku && existingSkus.has(row.data.sku.toLocaleLowerCase()));
-      if (duplicate) throw new Error(`SKU ${duplicate.data.sku} on spreadsheet row ${duplicate.rowNumber} already exists in Items & services.`);
+      if (duplicate) throw new ActionError(`SKU ${duplicate.data.sku} on spreadsheet row ${duplicate.rowNumber} already exists in Items & services.`);
     }
 
     const saved = await transaction
@@ -646,7 +647,7 @@ export async function addStandardAccounts(): Promise<{ added: number; records: B
     const rows = missing.map((account) => {
       const category = accountCategoryForType(account.accountType);
       if (!category || !accountDetailsForType(account.accountType).some((detailType) => detailType === account.detailType)) {
-        throw new Error(`The standard account ${account.name} has an invalid type.`);
+        throw new ActionError(`The standard account ${account.name} has an invalid type.`);
       }
       return {
         userId: me.id,
@@ -668,7 +669,7 @@ function isBudgetDate(value: unknown): value is string {
 
 export async function saveBudgetPlan(input: unknown, id?: string): Promise<BookkeepingRecord> {
   await requireUser();
-  if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("Check the budget details and try again.");
+  if (!input || typeof input !== "object" || Array.isArray(input)) throw new ActionError("Check the budget details and try again.");
   const form = input as Record<string, unknown>;
   const name = typeof form.name === "string" ? form.name.trim().slice(0, 100) : "";
   const description = typeof form.description === "string" ? form.description.trim().slice(0, 1000) : "";
@@ -676,29 +677,29 @@ export async function saveBudgetPlan(input: unknown, id?: string): Promise<Bookk
   const startDate = form.startDate;
   const endDate = form.endDate;
   const currency = typeof form.currency === "string" ? form.currency.trim().slice(0, 3).toUpperCase() : "USD";
-  if (!name) throw new Error("Give this budget a name.");
-  if (!(period === "Monthly" || period === "Quarterly" || period === "Annual" || period === "Custom")) throw new Error("Choose a budget period.");
-  if (!isBudgetDate(startDate) || !isBudgetDate(endDate) || startDate > endDate) throw new Error("Choose a valid start and end date.");
-  if (!/^[A-Z]{3}$/.test(currency)) throw new Error("Choose a valid currency.");
-  if (!Array.isArray(form.lines) || form.lines.length < 1 || form.lines.length > 50) throw new Error("Add between 1 and 50 budget lines.");
+  if (!name) throw new ActionError("Give this budget a name.");
+  if (!(period === "Monthly" || period === "Quarterly" || period === "Annual" || period === "Custom")) throw new ActionError("Choose a budget period.");
+  if (!isBudgetDate(startDate) || !isBudgetDate(endDate) || startDate > endDate) throw new ActionError("Choose a valid start and end date.");
+  if (!/^[A-Z]{3}$/.test(currency)) throw new ActionError("Choose a valid currency.");
+  if (!Array.isArray(form.lines) || form.lines.length < 1 || form.lines.length > 50) throw new ActionError("Add between 1 and 50 budget lines.");
 
   const lines: BudgetLine[] = form.lines.map((value, index) => {
-    if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`Check budget line ${index + 1}.`);
+    if (!value || typeof value !== "object" || Array.isArray(value)) throw new ActionError(`Check budget line ${index + 1}.`);
     const line = value as Record<string, unknown>;
     const legacyBudgetHead = typeof line.category === "string" && line.category !== "Sales" && line.category !== "Expenses" && line.category !== "Payroll" ? line.category.trim().slice(0, 120) : "";
     const budgetHead = typeof line.budgetHead === "string" ? line.budgetHead.trim().slice(0, 120) : legacyBudgetHead;
     const descriptionText = typeof line.description === "string" ? line.description.trim().slice(0, 300) : "";
-    const suppliedType: BudgetLineType = line.type === "Income" ? "Income" : line.type === "Expense" ? "Expense" : (() => { throw new Error(`Choose income or expense for line ${index + 1}.`); })();
+    const suppliedType: BudgetLineType = line.type === "Income" ? "Income" : line.type === "Expense" ? "Expense" : (() => { throw new ActionError(`Choose income or expense for line ${index + 1}.`); })();
     const category: BudgetCategory = line.category === "Sales" || line.category === "Expenses" || line.category === "Payroll"
       ? line.category
       : line.category === undefined || (typeof line.category === "string" && line.category !== "Sales" && line.category !== "Expenses" && line.category !== "Payroll")
         ? suppliedType === "Income" ? "Sales" : "Expenses"
-        : (() => { throw new Error(`Choose Sales or Expenses for line ${index + 1}.`); })();
+        : (() => { throw new ActionError(`Choose Sales or Expenses for line ${index + 1}.`); })();
     const type: BudgetLineType = category === "Sales" ? "Income" : "Expense";
     const amount = typeof line.expected === "string" || typeof line.expected === "number" ? Number(line.expected) : Number.NaN;
-    if (!budgetHead) throw new Error(`Choose a budget head for line ${index + 1}.`);
-    if (category === "Payroll" && budgetHead.toLocaleLowerCase() !== "gross salary") throw new Error(`Choose Gross Salary for payroll line ${index + 1}.`);
-    if (!Number.isFinite(amount) || amount < 0 || amount > 1_000_000_000_000) throw new Error(`Enter a valid expected amount for line ${index + 1}.`);
+    if (!budgetHead) throw new ActionError(`Choose a budget head for line ${index + 1}.`);
+    if (category === "Payroll" && budgetHead.toLocaleLowerCase() !== "gross salary") throw new ActionError(`Choose Gross Salary for payroll line ${index + 1}.`);
+    if (!Number.isFinite(amount) || amount < 0 || amount > 1_000_000_000_000) throw new ActionError(`Enter a valid expected amount for line ${index + 1}.`);
     return { category, budgetHead, type, expected: (Math.round(amount * 100) / 100).toFixed(2), description: descriptionText };
   });
 
@@ -715,15 +716,15 @@ export async function saveBudgetPlan(input: unknown, id?: string): Promise<Bookk
 
 export async function importPayrollCsv(input: string): Promise<{ created: number; updated: number; records: BookkeepingRecord[] }> {
   const me = await requireUser();
-  if (input.length > 2_000_000) throw new Error("The payroll CSV is too large. Keep it under 2 MB.");
+  if (input.length > 2_000_000) throw new ActionError("The payroll CSV is too large. Keep it under 2 MB.");
   const [rawHeaders, ...rows] = parseCsv(input);
-  if (!rawHeaders || !rows.length) throw new Error("The payroll CSV needs a header row and at least one employee.");
-  if (rows.length > 500) throw new Error("Import up to 500 payroll rows at a time.");
+  if (!rawHeaders || !rows.length) throw new ActionError("The payroll CSV needs a header row and at least one employee.");
+  if (rows.length > 500) throw new ActionError("Import up to 500 payroll rows at a time.");
 
   const headerIndexes = new Map(rawHeaders.map((header, index) => [header.replace(/^\uFEFF/, "").trim().toLowerCase().replace(/[^a-z0-9]/g, ""), index]));
   const requiredFields: (keyof PayrollValues)[] = ["employeeId", "employeeName", "cnic", "designation", "month", "baseSalary", "workingDays", "workedDays"];
   const missingFields = requiredFields.filter((fieldName) => !headerIndexes.has(fieldName.toLowerCase()));
-  if (missingFields.length) throw new Error(`The payroll CSV is missing these columns: ${missingFields.join(", ")}.`);
+  if (missingFields.length) throw new ActionError(`The payroll CSV is missing these columns: ${missingFields.join(", ")}.`);
 
   const imported = rows.map((row, index) => {
     const payload: Record<string, string> = {};
@@ -735,7 +736,7 @@ export async function importPayrollCsv(input: string): Promise<{ created: number
       return normalizePayrollData(payload);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Check this row’s payroll details.";
-      throw new Error(`CSV row ${index + 2}: ${message}`);
+      throw new ActionError(`CSV row ${index + 2}: ${message}`);
     }
   });
 
@@ -745,16 +746,16 @@ export async function importPayrollCsv(input: string): Promise<{ created: number
     .where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "accounts")));
   for (const [index, data] of imported.entries()) {
     if (!data.paymentAccountName && !data.paymentMethod) continue;
-    if (!data.paymentAccountName) throw new Error(`CSV row ${index + 2}: add the payment account name, not just its type.`);
+    if (!data.paymentAccountName) throw new ActionError(`CSV row ${index + 2}: add the payment account name, not just its type.`);
     const accountName = data.paymentAccountName.trim().toLowerCase();
     const matches = accountRows.filter((account) =>
       [account.data.name, account.data.code].some((value) => value?.trim().toLowerCase() === accountName),
     );
-    if (matches.length !== 1) throw new Error(`CSV row ${index + 2}: the payment account must match one account in Chart of Accounts.`);
+    if (matches.length !== 1) throw new ActionError(`CSV row ${index + 2}: the payment account must match one account in Chart of Accounts.`);
     const paymentAccount = matches[0];
     const accountType = paymentAccountType({ kind: "accounts", data: paymentAccount.data });
     if (!accountType || (data.paymentMethod && data.paymentMethod !== accountType)) {
-      throw new Error(`CSV row ${index + 2}: choose a matching Cash, Bank, or Credit card account.`);
+      throw new ActionError(`CSV row ${index + 2}: choose a matching Cash, Bank, or Credit card account.`);
     }
     data.paymentAccountId = paymentAccount.id;
     data.paymentAccountName = paymentAccount.data.name || paymentAccount.data.code || "Account";
@@ -764,7 +765,7 @@ export async function importPayrollCsv(input: string): Promise<{ created: number
   const seenEmployees = new Set<string>();
   for (const data of imported) {
     const key = `${data.month}:${data.employeeId.toLowerCase()}`;
-    if (seenEmployees.has(key)) throw new Error(`The payroll CSV repeats employee ${data.employeeId} for ${data.month}.`);
+    if (seenEmployees.has(key)) throw new ActionError(`The payroll CSV repeats employee ${data.employeeId} for ${data.month}.`);
     seenEmployees.add(key);
   }
 
@@ -812,11 +813,11 @@ export async function sendPayrollSlip(id: string): Promise<void> {
     .from(bookkeepingRecord)
     .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "payroll")))
     .limit(1);
-  if (!record) throw new Error("We couldn’t find that payroll entry. Refresh and try again.");
+  if (!record) throw new ActionError("We couldn’t find that payroll entry. Refresh and try again.");
   const data = record.data;
   const recipient = data.employeeEmail?.trim().toLowerCase();
   if (!recipient || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipient)) {
-    throw new Error("Add a valid employee email in the payroll details before sending the salary slip.");
+    throw new ActionError("Add a valid employee email in the payroll details before sending the salary slip.");
   }
 
   const escapeHtml = (value: string) => value.replace(/[&<>"']/g, (character) => {
@@ -849,13 +850,13 @@ function escapeBudgetHtml(value: string) {
 export async function sendBudgetSummary(id: string, recipient: string): Promise<void> {
   const me = await requireUser();
   const email = recipient.trim().toLowerCase();
-  if (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error("Enter a valid recipient email address.");
+  if (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new ActionError("Enter a valid recipient email address.");
   const [budgetRow] = await db
     .select()
     .from(bookkeepingRecord)
     .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "budgets")))
     .limit(1);
-  if (!budgetRow) throw new Error("That budget wasn’t found. Save it and try again.");
+  if (!budgetRow) throw new ActionError("That budget wasn’t found. Save it and try again.");
 
   const budget = serializeRow(budgetRow);
   const sourceRows = await db
@@ -885,8 +886,8 @@ export async function sendBudgetSummary(id: string, recipient: string): Promise<
 
 export async function deleteBookkeepingRecord(kind: string, id: string): Promise<void> {
   const me = await requireUser();
-  if (!isRecordKind(kind)) throw new Error("That section isn’t available.");
-  if (kind === "reconciliations") throw new Error("Completed reconciliations can’t be deleted.");
+  if (!isRecordKind(kind)) throw new ActionError("That section isn’t available.");
+  if (kind === "reconciliations") throw new ActionError("Completed reconciliations can’t be deleted.");
   if (kind === "bills" || kind === "expenses") {
     await db.transaction(async (transaction) => {
       const [record] = await transaction
@@ -895,7 +896,7 @@ export async function deleteBookkeepingRecord(kind: string, id: string): Promise
         .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, kind)))
         .for("update")
         .limit(1);
-      if (!record) throw new Error("We couldn’t find that record. Refresh and try again.");
+      if (!record) throw new ActionError("We couldn’t find that record. Refresh and try again.");
 
       if (record.data.sourcePurchaseOrderId) {
         const [order] = await transaction
@@ -924,8 +925,8 @@ export async function deleteBookkeepingRecord(kind: string, id: string): Promise
       .from(bookkeepingRecord)
       .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, kind)))
       .limit(1);
-    if (!order) throw new Error("We couldn’t find that purchase order. Refresh and try again.");
-    if (!["Draft", "Cancelled"].includes(order.data.status || "Draft")) throw new Error("Only draft or cancelled purchase orders can be deleted.");
+    if (!order) throw new ActionError("We couldn’t find that purchase order. Refresh and try again.");
+    if (!["Draft", "Cancelled"].includes(order.data.status || "Draft")) throw new ActionError("Only draft or cancelled purchase orders can be deleted.");
   }
   if (kind === "accounts") {
     const [existing] = await db
@@ -933,8 +934,8 @@ export async function deleteBookkeepingRecord(kind: string, id: string): Promise
       .from(bookkeepingRecord)
       .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, kind)))
       .limit(1);
-    if (!existing) throw new Error("We couldn’t find that account. Refresh and try again.");
-    if (existing.data.locked === "true") throw new Error("Unlock this account before deleting it.");
+    if (!existing) throw new ActionError("We couldn’t find that account. Refresh and try again.");
+    if (existing.data.locked === "true") throw new ActionError("Unlock this account before deleting it.");
 
     const journals = await db
       .select()
@@ -951,7 +952,7 @@ export async function deleteBookkeepingRecord(kind: string, id: string): Promise
         return false;
       }
     });
-    if (isReferenced) throw new Error("This account is used by a journal entry and can’t be deleted.");
+    if (isReferenced) throw new ActionError("This account is used by a journal entry and can’t be deleted.");
   }
   if (kind === "transactions") {
     const [existing] = await db
@@ -959,13 +960,13 @@ export async function deleteBookkeepingRecord(kind: string, id: string): Promise
       .from(bookkeepingRecord)
       .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, kind)))
       .limit(1);
-    if (existing?.data.reconciled === "true") throw new Error("This transaction is part of a completed reconciliation and can’t be deleted.");
+    if (existing?.data.reconciled === "true") throw new ActionError("This transaction is part of a completed reconciliation and can’t be deleted.");
   }
   const [deleted] = await db
     .delete(bookkeepingRecord)
     .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, kind)))
     .returning({ id: bookkeepingRecord.id });
-  if (!deleted) throw new Error("We couldn’t find that record. Refresh and try again.");
+  if (!deleted) throw new ActionError("We couldn’t find that record. Refresh and try again.");
   revalidatePath("/app", "layout");
 }
 
@@ -977,7 +978,7 @@ export async function recordInvoicePayment(
 ): Promise<void> {
   const me = await requireUser();
   const amount = Number(amountInput);
-  if (!Number.isFinite(amount) || amount <= 0) throw new Error("Enter a payment amount greater than zero.");
+  if (!Number.isFinite(amount) || amount <= 0) throw new ActionError("Enter a payment amount greater than zero.");
 
   const [paymentAccount] = await db
     .select()
@@ -985,20 +986,20 @@ export async function recordInvoicePayment(
     .where(and(eq(bookkeepingRecord.id, accountId), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "accounts")))
     .limit(1);
   const method = paymentAccount ? paymentAccountType({ kind: "accounts", data: paymentAccount.data }) : null;
-  if (!paymentAccount || !method) throw new Error("Choose a Cash, Bank, or Credit card account from Chart of Accounts.");
+  if (!paymentAccount || !method) throw new ActionError("Choose a Cash, Bank, or Credit card account from Chart of Accounts.");
 
   const [invoice] = await db
     .select()
     .from(bookkeepingRecord)
     .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "invoices")))
     .limit(1);
-  if (!invoice) throw new Error("We couldn’t find that invoice. Refresh and try again.");
+  if (!invoice) throw new ActionError("We couldn’t find that invoice. Refresh and try again.");
 
   const data = invoice.data;
   const total = Number(data.amount) || 0;
   const paid = Number(data.paidAmount) || 0;
   const credited = Number(data.creditApplied) || 0;
-  if (amount > total - paid - credited + 0.005) throw new Error("That payment is greater than the remaining balance.");
+  if (amount > total - paid - credited + 0.005) throw new ActionError("That payment is greater than the remaining balance.");
 
   const updatedPaid = paid + amount;
   const updatedData = {
@@ -1044,8 +1045,8 @@ export async function undoInvoicePayments(id: string): Promise<void> {
       .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "invoices")))
       .for("update")
       .limit(1);
-    if (!invoice) throw new Error("We couldn’t find that invoice. Refresh and try again.");
-    if (!(Number(invoice.data.paidAmount) > 0)) throw new Error(`${invoice.data.invoiceNumber || "This invoice"} has no payment to undo.`);
+    if (!invoice) throw new ActionError("We couldn’t find that invoice. Refresh and try again.");
+    if (!(Number(invoice.data.paidAmount) > 0)) throw new ActionError(`${invoice.data.invoiceNumber || "This invoice"} has no payment to undo.`);
     await transaction
       .delete(bookkeepingRecord)
       .where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "payments"), sql`${bookkeepingRecord.data}->>'invoiceId' = ${id}`));
@@ -1075,7 +1076,7 @@ async function findPaymentAccount(userId: string, accountId: string) {
     .where(and(eq(bookkeepingRecord.id, accountId), eq(bookkeepingRecord.userId, userId), eq(bookkeepingRecord.kind, "accounts")))
     .limit(1);
   const method = account ? paymentAccountType({ kind: "accounts", data: account.data }) : null;
-  if (!account || !method) throw new Error("Choose a Cash, Bank, or Credit card account from Chart of Accounts.");
+  if (!account || !method) throw new ActionError("Choose a Cash, Bank, or Credit card account from Chart of Accounts.");
   return { account, method, name: account.data.name || account.data.code || "Account" };
 }
 
@@ -1086,7 +1087,7 @@ function isPaymentDate(value: string) {
 /** Pays a bill's remaining balance from a Cash, Bank or Credit card account and records where it came from. */
 export async function recordBillPayment(id: string, paymentDate: string, accountId: string): Promise<void> {
   const me = await requireUser();
-  if (!isPaymentDate(paymentDate)) throw new Error("Choose a payment date.");
+  if (!isPaymentDate(paymentDate)) throw new ActionError("Choose a payment date.");
   const { account, method, name } = await findPaymentAccount(me.id, accountId);
   await db.transaction(async (transaction) => {
     const [bill] = await transaction
@@ -1095,11 +1096,11 @@ export async function recordBillPayment(id: string, paymentDate: string, account
       .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "bills")))
       .for("update")
       .limit(1);
-    if (!bill) throw new Error("We couldn’t find that bill. Refresh and try again.");
-    if (bill.data.status === "Cancelled") throw new Error(`${bill.data.billNumber || "This bill"} is cancelled.`);
+    if (!bill) throw new ActionError("We couldn’t find that bill. Refresh and try again.");
+    if (bill.data.status === "Cancelled") throw new ActionError(`${bill.data.billNumber || "This bill"} is cancelled.`);
     const paid = Number(bill.data.paidAmount) || 0;
     const due = (Number(bill.data.amount) || 0) - paid - (Number(bill.data.creditApplied) || 0);
-    if (due <= 0.005) throw new Error(`${bill.data.billNumber || "This bill"} is already paid.`);
+    if (due <= 0.005) throw new ActionError(`${bill.data.billNumber || "This bill"} is already paid.`);
     await transaction
       .update(bookkeepingRecord)
       .set({
@@ -1126,8 +1127,8 @@ export async function undoBillPayments(id: string): Promise<void> {
       .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "bills")))
       .for("update")
       .limit(1);
-    if (!bill) throw new Error("We couldn’t find that bill. Refresh and try again.");
-    if (!(Number(bill.data.paidAmount) > 0)) throw new Error(`${bill.data.billNumber || "This bill"} has no payment to undo.`);
+    if (!bill) throw new ActionError("We couldn’t find that bill. Refresh and try again.");
+    if (!(Number(bill.data.paidAmount) > 0)) throw new ActionError(`${bill.data.billNumber || "This bill"} has no payment to undo.`);
     await transaction
       .delete(bookkeepingRecord)
       .where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "payments"), sql`${bookkeepingRecord.data}->>'billId' = ${id}`));
@@ -1145,15 +1146,15 @@ export async function undoBillPayments(id: string): Promise<void> {
 /** Records which Cash, Bank or Credit card account paid an expense. */
 export async function recordExpensePayment(id: string, paymentDate: string, accountId: string): Promise<void> {
   const me = await requireUser();
-  if (!isPaymentDate(paymentDate)) throw new Error("Choose a payment date.");
+  if (!isPaymentDate(paymentDate)) throw new ActionError("Choose a payment date.");
   const { account, method, name } = await findPaymentAccount(me.id, accountId);
   const [expense] = await db
     .select()
     .from(bookkeepingRecord)
     .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "expenses")))
     .limit(1);
-  if (!expense) throw new Error("We couldn’t find that expense. Refresh and try again.");
-  if (expense.data.status === "Paid") throw new Error(`${expense.data.description || "This expense"} is already paid.`);
+  if (!expense) throw new ActionError("We couldn’t find that expense. Refresh and try again.");
+  if (expense.data.status === "Paid") throw new ActionError(`${expense.data.description || "This expense"} is already paid.`);
   await db
     .update(bookkeepingRecord)
     .set({ data: { ...expense.data, status: "Paid", paymentAccount: `${method} · ${name}`, paymentAccountId: account.id, paymentDate }, updatedAt: new Date() })
@@ -1169,7 +1170,7 @@ export async function undoExpensePayment(id: string): Promise<void> {
     .from(bookkeepingRecord)
     .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "expenses")))
     .limit(1);
-  if (!expense) throw new Error("We couldn’t find that expense. Refresh and try again.");
+  if (!expense) throw new ActionError("We couldn’t find that expense. Refresh and try again.");
   await db
     .update(bookkeepingRecord)
     .set({ data: { ...expense.data, status: "Unpaid", paymentAccount: "", paymentAccountId: "", paymentDate: "" }, updatedAt: new Date() })
@@ -1180,15 +1181,15 @@ export async function undoExpensePayment(id: string): Promise<void> {
 /** Records a supplier credit note as refunded into a Cash, Bank or Credit card account. */
 export async function refundSupplierCredit(id: string, refundDate: string, accountId: string): Promise<void> {
   const me = await requireUser();
-  if (!isPaymentDate(refundDate)) throw new Error("Choose a refund date.");
+  if (!isPaymentDate(refundDate)) throw new ActionError("Choose a refund date.");
   const { account, method, name } = await findPaymentAccount(me.id, accountId);
   const [credit] = await db
     .select()
     .from(bookkeepingRecord)
     .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "supplier-credits")))
     .limit(1);
-  if (!credit) throw new Error("We couldn’t find that credit note. Refresh and try again.");
-  if (["Applied", "Refunded"].includes(credit.data.status ?? "")) throw new Error(`${credit.data.creditNumber || "This credit note"} has already been ${credit.data.status?.toLowerCase()}.`);
+  if (!credit) throw new ActionError("We couldn’t find that credit note. Refresh and try again.");
+  if (["Applied", "Refunded"].includes(credit.data.status ?? "")) throw new ActionError(`${credit.data.creditNumber || "This credit note"} has already been ${credit.data.status?.toLowerCase()}.`);
   await db
     .update(bookkeepingRecord)
     .set({ data: { ...credit.data, status: "Refunded", refundDate, refundMethod: method, refundAccountId: account.id, refundAccountName: `${method} · ${name}` }, updatedAt: new Date() })
@@ -1198,13 +1199,13 @@ export async function refundSupplierCredit(id: string, refundDate: string, accou
 
 export async function markRecordPaid(kind: string, id: string): Promise<void> {
   const me = await requireUser();
-  if (kind !== "bills" && kind !== "invoices") throw new Error("That payment action isn’t available here.");
+  if (kind !== "bills" && kind !== "invoices") throw new ActionError("That payment action isn’t available here.");
   const [row] = await db
     .select()
     .from(bookkeepingRecord)
     .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, kind)))
     .limit(1);
-  if (!row) throw new Error("We couldn’t find that record. Refresh and try again.");
+  if (!row) throw new ActionError("We couldn’t find that record. Refresh and try again.");
   // Pay what is left after any supplier or customer credit already applied.
   const due = Math.max(0, (Number(row.data.amount) || 0) - (Number(row.data.creditApplied) || 0));
   const data = { ...row.data, paidAmount: due.toFixed(2), status: "Paid" };
@@ -1224,15 +1225,15 @@ export async function convertBookkeepingRecord(id: string, target?: string): Pro
       .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id)))
       .for("update")
       .limit(1);
-    if (!source) throw new Error("We couldn’t find that record. Refresh and try again.");
+    if (!source) throw new ActionError("We couldn’t find that record. Refresh and try again.");
     const sourceKind = source.kind as RecordKind;
     const defaultTarget = convertTargets[sourceKind];
     const targetKind = target && target !== defaultTarget
       ? optionalConvertTargets[sourceKind]?.find((kind) => kind === target)
       : defaultTarget;
-    if (!targetKind) throw new Error("This record can’t be converted to that document.");
+    if (!targetKind) throw new ActionError("This record can’t be converted to that document.");
     if (sourceKind !== "purchase-orders" && source.data.status === "Converted") {
-      throw new Error(`${source.data.orderNumber || source.data.estimateNumber || "This record"} has already been converted.`);
+      throw new ActionError(`${source.data.orderNumber || source.data.estimateNumber || "This record"} has already been converted.`);
     }
     const targetCount = targetKind === "estimates" || targetKind === "sales-orders"
       ? (await transaction.select({ id: bookkeepingRecord.id }).from(bookkeepingRecord)
@@ -1240,10 +1241,10 @@ export async function convertBookkeepingRecord(id: string, target?: string): Pro
       : 0;
     if (sourceKind === "purchase-orders") {
       if (source.data.convertedRecordId || source.data.convertedKind) {
-        throw new Error("This purchase order has already been recorded as a bill or expense.");
+        throw new ActionError("This purchase order has already been recorded as a bill or expense.");
       }
       if (!(["Purchase Order", "Received"].includes(source.data.status || ""))) {
-        throw new Error("Confirm this purchase order before creating its bill.");
+        throw new ActionError("Confirm this purchase order before creating its bill.");
       }
     }
 
@@ -1343,12 +1344,12 @@ export async function convertPurchaseOrderToExpense(
       .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "purchase-orders")))
       .for("update")
       .limit(1);
-    if (!order) throw new Error("We couldn’t find that purchase order. Refresh and try again.");
+    if (!order) throw new ActionError("We couldn’t find that purchase order. Refresh and try again.");
     if (!["Purchase Order", "Received"].includes(order.data.status || "")) {
-      throw new Error("Confirm this purchase order before recording it as an expense.");
+      throw new ActionError("Confirm this purchase order before recording it as an expense.");
     }
     if (order.data.convertedRecordId || order.data.convertedKind) {
-      throw new Error("This purchase order has already been recorded as a bill or expense.");
+      throw new ActionError("This purchase order has already been recorded as a bill or expense.");
     }
 
     const [expenseAccount] = await transaction
@@ -1357,7 +1358,7 @@ export async function convertPurchaseOrderToExpense(
       .where(and(eq(bookkeepingRecord.id, expenseAccountId), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "accounts")))
       .limit(1);
     if (!expenseAccount || expenseAccount.data.type !== "Expense" || expenseAccount.data.locked === "true") {
-      throw new Error("Choose an available Expense category from Chart of Accounts.");
+      throw new ActionError("Choose an available Expense category from Chart of Accounts.");
     }
 
     let paymentAccountData = { paymentAccountId: "", paymentAccountName: "", paymentMethod: "" };
@@ -1368,7 +1369,7 @@ export async function convertPurchaseOrderToExpense(
         .where(and(eq(bookkeepingRecord.id, paymentAccountId), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "accounts")))
         .limit(1);
       const accountType = paymentAccount ? paymentAccountType({ kind: "accounts", data: paymentAccount.data }) : null;
-      if (!paymentAccount || !accountType) throw new Error("Choose an available Cash, Bank, or Credit card account.");
+      if (!paymentAccount || !accountType) throw new ActionError("Choose an available Cash, Bank, or Credit card account.");
       paymentAccountData = {
         paymentAccountId: paymentAccount.id,
         paymentAccountName: paymentAccount.data.name || paymentAccount.data.code || "Account",
@@ -1379,7 +1380,7 @@ export async function convertPurchaseOrderToExpense(
     const lines = parseInvoiceLines(order.data.lineItems || "");
     const orderAmount = Number(order.data.amount);
     if (!lines.length || !Number.isFinite(orderAmount) || orderAmount <= 0) {
-      throw new Error("Add valid items and an amount to this purchase order before recording it as an expense.");
+      throw new ActionError("Add valid items and an amount to this purchase order before recording it as an expense.");
     }
     const lineSummary = lines
       .map((line) => [line.name, line.description].filter(Boolean).join(" — "))
@@ -1432,13 +1433,13 @@ export async function createInventoryMovement(input: {
   const reference = (input.reference || "").trim().slice(0, 100);
   const notes = (input.notes || "").trim().slice(0, 500);
 
-  if (!["Receipt", "Delivery", "Adjustment"].includes(input.movementType)) throw new Error("Choose a valid stock movement.");
-  if (!itemId) throw new Error("Choose a product to continue.");
+  if (!["Receipt", "Delivery", "Adjustment"].includes(input.movementType)) throw new ActionError("Choose a valid stock movement.");
+  if (!itemId) throw new ActionError("Choose a product to continue.");
   if (!Number.isFinite(quantity) || quantity < 0 || (input.movementType !== "Adjustment" && quantity === 0)) {
-    throw new Error("Enter a valid quantity greater than zero.");
+    throw new ActionError("Enter a valid quantity greater than zero.");
   }
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(new Date(`${date}T00:00:00.000Z`).getTime())) {
-    throw new Error("Choose a valid movement date.");
+    throw new ActionError("Choose a valid movement date.");
   }
 
   const movement = await db.transaction(async (transaction) => {
@@ -1449,9 +1450,9 @@ export async function createInventoryMovement(input: {
       .for("update")
       .limit(1);
 
-    if (!item || item.data.itemType !== "Product") throw new Error("Choose a saved product from Items & services.");
+    if (!item || item.data.itemType !== "Product") throw new ActionError("Choose a saved product from Items & services.");
     const previousStock = Number(item.data.stock || 0);
-    if (!Number.isFinite(previousStock) || previousStock < 0) throw new Error("This product has an invalid stock balance. Correct its count before continuing.");
+    if (!Number.isFinite(previousStock) || previousStock < 0) throw new ActionError("This product has an invalid stock balance. Correct its count before continuing.");
 
     const change = input.movementType === "Receipt"
       ? quantity
@@ -1459,8 +1460,8 @@ export async function createInventoryMovement(input: {
         ? -quantity
         : quantity - previousStock;
     const nextStock = previousStock + change;
-    if (input.movementType === "Delivery" && nextStock < 0) throw new Error("There isn’t enough stock for this delivery.");
-    if (input.movementType === "Adjustment" && change === 0) throw new Error("The counted stock matches the current balance.");
+    if (input.movementType === "Delivery" && nextStock < 0) throw new ActionError("There isn’t enough stock for this delivery.");
+    if (input.movementType === "Adjustment" && change === 0) throw new ActionError("The counted stock matches the current balance.");
 
     const updatedAt = new Date();
     await transaction
@@ -1503,17 +1504,17 @@ export async function advancePurchaseOrder(
   action: "send-rfq" | "confirm" | "receive" | "cancel",
 ): Promise<{ status: string }> {
   const me = await requireUser();
-  if (!["send-rfq", "confirm", "receive", "cancel"].includes(action)) throw new Error("That purchase order action isn’t available.");
+  if (!["send-rfq", "confirm", "receive", "cancel"].includes(action)) throw new ActionError("That purchase order action isn’t available.");
   const [order] = await db
     .select()
     .from(bookkeepingRecord)
     .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "purchase-orders")))
     .limit(1);
-  if (!order) throw new Error("We couldn’t find that purchase order. Refresh and try again.");
+  if (!order) throw new ActionError("We couldn’t find that purchase order. Refresh and try again.");
 
   const currentStatus = order.data.status === "Sent" ? "RFQ Sent" : order.data.status || "Draft";
   if (action === "send-rfq") {
-    if (currentStatus !== "Draft") throw new Error("Only a draft request can be sent to the vendor.");
+    if (currentStatus !== "Draft") throw new ActionError("Only a draft request can be sent to the vendor.");
     const vendorRows = await db
       .select()
       .from(bookkeepingRecord)
@@ -1521,7 +1522,7 @@ export async function advancePurchaseOrder(
     const vendorName = order.data.vendor?.trim().toLowerCase();
     const vendor = vendorRows.find((row) => row.id === order.data.vendorId || row.id === order.data.vendor)
       ?? vendorRows.find((row) => row.data.name?.trim().toLowerCase() === vendorName);
-    if (!vendor?.data.email) throw new Error("Add an email address to this vendor before sending the RFQ.");
+    if (!vendor?.data.email) throw new ActionError("Add an email address to this vendor before sending the RFQ.");
 
     const [settings] = await db
       .select()
@@ -1553,7 +1554,7 @@ export async function advancePurchaseOrder(
       .set({ data: { ...order.data, status: "RFQ Sent", sentAt: new Date().toISOString() }, updatedAt: new Date() })
       .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "purchase-orders"), eq(bookkeepingRecord.data, order.data)))
       .returning({ id: bookkeepingRecord.id });
-    if (!updated) throw new Error("The purchase order changed while the RFQ was being sent. Refresh and try again.");
+    if (!updated) throw new ActionError("The purchase order changed while the RFQ was being sent. Refresh and try again.");
     revalidatePath("/app", "layout");
     return { status: "RFQ Sent" };
   }
@@ -1565,12 +1566,12 @@ export async function advancePurchaseOrder(
       .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "purchase-orders")))
       .for("update")
       .limit(1);
-    if (!lockedOrder) throw new Error("We couldn’t find that purchase order. Refresh and try again.");
+    if (!lockedOrder) throw new ActionError("We couldn’t find that purchase order. Refresh and try again.");
     const status = lockedOrder.data.status === "Sent" ? "RFQ Sent" : lockedOrder.data.status || "Draft";
     const updatedAt = new Date();
 
     if (action === "confirm") {
-      if (!["Draft", "RFQ Sent"].includes(status)) throw new Error("Only a draft order can be confirmed.");
+      if (!["Draft", "RFQ Sent"].includes(status)) throw new ActionError("Only a draft order can be confirmed.");
       await transaction.update(bookkeepingRecord)
         .set({ data: { ...lockedOrder.data, status: "Purchase Order", confirmedAt: updatedAt.toISOString() }, updatedAt })
         .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "purchase-orders")));
@@ -1578,13 +1579,13 @@ export async function advancePurchaseOrder(
     }
 
     if (action === "receive") {
-      if (status !== "Purchase Order") throw new Error("Confirm this purchase order before receiving its items.");
+      if (status !== "Purchase Order") throw new ActionError("Confirm this purchase order before receiving its items.");
       const lines = parseInvoiceLines(lockedOrder.data.lineItems || "");
       const quantities = new Map<string, number>();
       for (const line of lines) {
         if (!line.itemId) continue;
         const quantity = Number(line.quantity);
-        if (!Number.isFinite(quantity) || quantity <= 0) throw new Error("Check the ordered quantities before receiving items.");
+        if (!Number.isFinite(quantity) || quantity <= 0) throw new ActionError("Check the ordered quantities before receiving items.");
         quantities.set(line.itemId, (quantities.get(line.itemId) || 0) + quantity);
       }
       const itemIds = [...quantities.keys()];
@@ -1592,13 +1593,13 @@ export async function advancePurchaseOrder(
         const linkedItems = await transaction.select().from(bookkeepingRecord)
           .where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "items"), inArray(bookkeepingRecord.id, itemIds)))
           .for("update");
-        if (linkedItems.length !== itemIds.length) throw new Error("A linked item is no longer available. Update the purchase order before receiving it.");
+        if (linkedItems.length !== itemIds.length) throw new ActionError("A linked item is no longer available. Update the purchase order before receiving it.");
         for (const item of linkedItems) {
           if (item.data.itemType !== "Product") continue;
           const previousStock = Number(item.data.stock || 0);
           const receivedQuantity = quantities.get(item.id) || 0;
           const nextStock = previousStock + receivedQuantity;
-          if (!Number.isFinite(nextStock)) throw new Error(`Check the stock quantity for ${item.data.name || "this item"}.`);
+          if (!Number.isFinite(nextStock)) throw new ActionError(`Check the stock quantity for ${item.data.name || "this item"}.`);
           await transaction.update(bookkeepingRecord)
             .set({ data: { ...item.data, stock: String(nextStock) }, updatedAt })
             .where(and(eq(bookkeepingRecord.id, item.id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "items")));
@@ -1634,7 +1635,7 @@ export async function advancePurchaseOrder(
       "RFQ Sent",
       "Purchase Order",
     ].includes(status) || lockedOrder.data.convertedRecordId || lockedOrder.data.convertedKind) {
-      throw new Error("This purchase order can no longer be cancelled.");
+      throw new ActionError("This purchase order can no longer be cancelled.");
     }
     await transaction.update(bookkeepingRecord)
       .set({ data: { ...lockedOrder.data, status: "Cancelled", cancelledAt: updatedAt.toISOString() }, updatedAt })
@@ -1653,7 +1654,7 @@ export async function toggleTransactionMatch(id: string): Promise<void> {
     .from(bookkeepingRecord)
     .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "transactions")))
     .limit(1);
-  if (!transaction) throw new Error("We couldn’t find that transaction. Refresh and try again.");
+  if (!transaction) throw new ActionError("We couldn’t find that transaction. Refresh and try again.");
   await db
     .update(bookkeepingRecord)
     .set({
@@ -1674,12 +1675,12 @@ export async function completeBankReconciliation(
   const endingBalance = Number(endingBalanceInput);
   const parsedStatementDate = new Date(`${statementDate}T00:00:00.000Z`);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(statementDate) || Number.isNaN(parsedStatementDate.getTime()) || parsedStatementDate.toISOString().slice(0, 10) !== statementDate) {
-    throw new Error("Choose a valid statement ending date.");
+    throw new ActionError("Choose a valid statement ending date.");
   }
-  if (!Number.isFinite(endingBalance)) throw new Error("Enter the ending balance shown on your bank statement.");
-  if (!Array.isArray(transactionIds) || transactionIds.length > 500) throw new Error("Select up to 500 transactions at a time.");
+  if (!Number.isFinite(endingBalance)) throw new ActionError("Enter the ending balance shown on your bank statement.");
+  if (!Array.isArray(transactionIds) || transactionIds.length > 500) throw new ActionError("Select up to 500 transactions at a time.");
   const uniqueTransactionIds = [...new Set(transactionIds)];
-  if (uniqueTransactionIds.length !== transactionIds.length) throw new Error("A transaction was selected more than once.");
+  if (uniqueTransactionIds.length !== transactionIds.length) throw new ActionError("A transaction was selected more than once.");
 
   const created = await db.transaction(async (tx) => {
     const [bankAccount] = await tx
@@ -1688,14 +1689,14 @@ export async function completeBankReconciliation(
       .where(and(eq(bookkeepingRecord.id, bankAccountId), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "bank-accounts")))
       .for("update")
       .limit(1);
-    if (!bankAccount || !bankAccount.data.name) throw new Error("Choose a bank account from your Banking section.");
+    if (!bankAccount || !bankAccount.data.name) throw new ActionError("Choose a bank account from your Banking section.");
 
     const bankAccounts = await tx
       .select()
       .from(bookkeepingRecord)
       .where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "bank-accounts")));
     if (bankAccounts.filter((record) => record.data.name === bankAccount.data.name).length > 1) {
-      throw new Error("Bank account names must be unique before they can be reconciled.");
+      throw new ActionError("Bank account names must be unique before they can be reconciled.");
     }
 
     const reconciliationRows = await tx
@@ -1704,17 +1705,17 @@ export async function completeBankReconciliation(
       .where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "reconciliations")));
     const accountReconciliations = reconciliationRows.filter((record) => record.data.bankAccountId === bankAccount.id);
     if (accountReconciliations.some((record) => record.data.statementDate === statementDate)) {
-      throw new Error("This statement date has already been reconciled for that account.");
+      throw new ActionError("This statement date has already been reconciled for that account.");
     }
     if (accountReconciliations.some((record) => record.data.statementDate > statementDate)) {
-      throw new Error("Reconcile this account’s statements in date order, starting with the earliest one.");
+      throw new ActionError("Reconcile this account’s statements in date order, starting with the earliest one.");
     }
     const priorReconciliation = accountReconciliations
       .filter((record) => record.data.statementDate < statementDate)
       .sort((first, second) => second.data.statementDate.localeCompare(first.data.statementDate))[0];
     const openingBalanceInput = priorReconciliation?.data.endingBalance ?? bankAccount.data.openingBalance ?? "0";
     const openingBalance = Number(openingBalanceInput);
-    if (!Number.isFinite(openingBalance)) throw new Error("Update this account’s opening balance before reconciling.");
+    if (!Number.isFinite(openingBalance)) throw new ActionError("Update this account’s opening balance before reconciling.");
 
     const transactionRows = await tx
       .select()
@@ -1722,7 +1723,7 @@ export async function completeBankReconciliation(
       .where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "transactions")))
       .for("update");
     const selectedRows = uniqueTransactionIds.map((id) => transactionRows.find((record) => record.id === id));
-    if (selectedRows.some((record) => !record)) throw new Error("One or more selected transactions aren’t available in this account.");
+    if (selectedRows.some((record) => !record)) throw new ActionError("One or more selected transactions aren’t available in this account.");
 
     const selectedTransactions = selectedRows.filter((record): record is (typeof transactionRows)[number] => Boolean(record));
     const openingCents = Math.round(openingBalance * 100);
@@ -1733,12 +1734,12 @@ export async function completeBankReconciliation(
 
     for (const transaction of selectedTransactions) {
       const amount = Number(transaction.data.amount);
-      if (transaction.data.account !== bankAccount.data.name) throw new Error("Each selected transaction must belong to the chosen bank account.");
-      if (transaction.data.reconciled === "true") throw new Error("A selected transaction is already part of a completed reconciliation.");
+      if (transaction.data.account !== bankAccount.data.name) throw new ActionError("Each selected transaction must belong to the chosen bank account.");
+      if (transaction.data.reconciled === "true") throw new ActionError("A selected transaction is already part of a completed reconciliation.");
       if (!transaction.data.date || transaction.data.date > statementDate || (priorReconciliation && transaction.data.date <= priorReconciliation.data.statementDate)) {
-        throw new Error("Selected transactions must fall within this statement period.");
+        throw new ActionError("Selected transactions must fall within this statement period.");
       }
-      if (!Number.isFinite(amount) || amount <= 0) throw new Error("Every selected transaction needs a valid amount greater than zero.");
+      if (!Number.isFinite(amount) || amount <= 0) throw new ActionError("Every selected transaction needs a valid amount greater than zero.");
       const amountCents = Math.round(amount * 100);
       if (transaction.data.type === "Withdrawal") {
         netClearedCents -= amountCents;
@@ -1747,12 +1748,12 @@ export async function completeBankReconciliation(
         netClearedCents += amountCents;
         depositCents += amountCents;
       } else {
-        throw new Error("Choose Deposit or Withdrawal for each selected transaction.");
+        throw new ActionError("Choose Deposit or Withdrawal for each selected transaction.");
       }
     }
 
     const differenceCents = endingCents - openingCents - netClearedCents;
-    if (differenceCents !== 0) throw new Error("The selected transactions don’t balance to the statement ending balance yet.");
+    if (differenceCents !== 0) throw new ActionError("The selected transactions don’t balance to the statement ending balance yet.");
 
     const [reconciliation] = await tx
       .insert(bookkeepingRecord)
@@ -1798,23 +1799,23 @@ export async function applyCreditNote(id: string): Promise<void> {
     .from(bookkeepingRecord)
     .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "credit-notes")))
     .limit(1);
-  if (!creditNote) throw new Error("We couldn’t find that credit note. Refresh and try again.");
-  if (creditNote.data.status === "Applied" || creditNote.data.status === "Refunded") throw new Error("This credit note has already been used.");
-  if (!creditNote.data.invoiceNumber) throw new Error("Add an invoice number to this credit note first.");
+  if (!creditNote) throw new ActionError("We couldn’t find that credit note. Refresh and try again.");
+  if (creditNote.data.status === "Applied" || creditNote.data.status === "Refunded") throw new ActionError("This credit note has already been used.");
+  if (!creditNote.data.invoiceNumber) throw new ActionError("Add an invoice number to this credit note first.");
 
   const invoices = await db
     .select()
     .from(bookkeepingRecord)
     .where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "invoices")));
   const invoice = invoices.find((item) => item.data.invoiceNumber === creditNote.data.invoiceNumber);
-  if (!invoice) throw new Error("We couldn’t find an invoice with that number in this account.");
+  if (!invoice) throw new ActionError("We couldn’t find an invoice with that number in this account.");
 
   const creditAmount = Number(creditNote.data.amount) || 0;
   const paid = Number(invoice.data.paidAmount) || 0;
   const alreadyCredited = Number(invoice.data.creditApplied) || 0;
   const remaining = Number(invoice.data.amount) - paid - alreadyCredited;
-  if (!Number.isFinite(creditAmount) || creditAmount <= 0) throw new Error("Enter a credit amount greater than zero.");
-  if (creditAmount > remaining + 0.005) throw new Error("The credit is greater than this invoice’s remaining balance.");
+  if (!Number.isFinite(creditAmount) || creditAmount <= 0) throw new ActionError("Enter a credit amount greater than zero.");
+  if (creditAmount > remaining + 0.005) throw new ActionError("The credit is greater than this invoice’s remaining balance.");
 
   const newCredit = alreadyCredited + creditAmount;
   await db
@@ -1840,10 +1841,10 @@ export async function applySupplierCredit(id: string): Promise<void> {
       .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "supplier-credits")))
       .for("update")
       .limit(1);
-    if (!credit) throw new Error("We couldn’t find that credit note. Refresh and try again.");
-    if (credit.data.status === "Applied") throw new Error("This credit note has already been applied.");
+    if (!credit) throw new ActionError("We couldn’t find that credit note. Refresh and try again.");
+    if (credit.data.status === "Applied") throw new ActionError("This credit note has already been applied.");
     const billNumber = credit.data.billNumber?.trim();
-    if (!billNumber) throw new Error("Add the bill number this credit applies to, then try again.");
+    if (!billNumber) throw new ActionError("Add the bill number this credit applies to, then try again.");
 
     const bills = await transaction
       .select()
@@ -1852,15 +1853,15 @@ export async function applySupplierCredit(id: string): Promise<void> {
       .for("update");
     const vendor = credit.data.vendor?.trim().toLowerCase();
     const bill = bills.find((row) => row.data.billNumber?.trim() === billNumber && (!vendor || row.data.vendor?.trim().toLowerCase() === vendor));
-    if (!bill) throw new Error(`We couldn’t find bill ${billNumber} from ${credit.data.vendor || "this supplier"}.`);
-    if (bill.data.status === "Cancelled") throw new Error("That bill is cancelled.");
+    if (!bill) throw new ActionError(`We couldn’t find bill ${billNumber} from ${credit.data.vendor || "this supplier"}.`);
+    if (bill.data.status === "Cancelled") throw new ActionError("That bill is cancelled.");
 
     const creditAmount = Number(credit.data.amount) || 0;
     const paid = Number(bill.data.paidAmount) || 0;
     const alreadyCredited = Number(bill.data.creditApplied) || 0;
     const remaining = (Number(bill.data.amount) || 0) - paid - alreadyCredited;
-    if (!Number.isFinite(creditAmount) || creditAmount <= 0) throw new Error("This credit note needs an amount greater than zero.");
-    if (creditAmount > remaining + 0.005) throw new Error(`The credit is more than bill ${billNumber}’s remaining balance.`);
+    if (!Number.isFinite(creditAmount) || creditAmount <= 0) throw new ActionError("This credit note needs an amount greater than zero.");
+    if (creditAmount > remaining + 0.005) throw new ActionError(`The credit is more than bill ${billNumber}’s remaining balance.`);
 
     const newCredit = alreadyCredited + creditAmount;
     const settled = paid + newCredit >= (Number(bill.data.amount) || 0) - 0.005;
@@ -1883,8 +1884,8 @@ export async function generateRecurringInvoice(id: string): Promise<void> {
     .from(bookkeepingRecord)
     .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "recurring-invoices")))
     .limit(1);
-  if (!schedule) throw new Error("We couldn’t find that recurring invoice. Refresh and try again.");
-  if (schedule.data.status === "Paused") throw new Error("Resume this schedule before generating its invoice.");
+  if (!schedule) throw new ActionError("We couldn’t find that recurring invoice. Refresh and try again.");
+  if (schedule.data.status === "Paused") throw new ActionError("Resume this schedule before generating its invoice.");
 
   const [settings] = await db
     .select()
@@ -1934,7 +1935,7 @@ export async function sendInvoiceRecord(id: string): Promise<string> {
     .from(bookkeepingRecord)
     .where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "invoices"), eq(bookkeepingRecord.id, id)))
     .limit(1);
-  if (!invoice) throw new Error("We couldn’t find that invoice. Refresh and try again.");
+  if (!invoice) throw new ActionError("We couldn’t find that invoice. Refresh and try again.");
   const customerName = invoice.data.customer?.trim().toLowerCase();
   const customers = await db
     .select()
@@ -1942,7 +1943,7 @@ export async function sendInvoiceRecord(id: string): Promise<string> {
     .where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "customers")));
   const customer = customers.find((row) => row.id === invoice.data.customerId || row.id === invoice.data.customer)
     ?? customers.find((row) => row.data.name?.trim().toLowerCase() === customerName);
-  if (!customer?.data.email) throw new Error("Add an email address to this customer before sending the invoice.");
+  if (!customer?.data.email) throw new ActionError("Add an email address to this customer before sending the invoice.");
 
   const escapeHtml = (value: string) => value.replace(/[&<>"']/g, (character) => {
     const entities: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
@@ -1986,7 +1987,7 @@ export async function createInvoiceShareLink(id: string): Promise<string> {
     .from(bookkeepingRecord)
     .where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "invoices"), eq(bookkeepingRecord.id, id)))
     .limit(1);
-  if (!invoice) throw new Error("We couldn’t find that invoice. Refresh and try again.");
+  if (!invoice) throw new ActionError("We couldn’t find that invoice. Refresh and try again.");
   const shareToken = invoice.data.shareToken || randomBytes(32).toString("hex");
   if (shareToken !== invoice.data.shareToken) {
     await db
@@ -2013,7 +2014,7 @@ export async function createCustomerDocumentShareLink(id: string, kind: Customer
     .from(bookkeepingRecord)
     .where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, kind), eq(bookkeepingRecord.id, id)))
     .limit(1);
-  if (!document) throw new Error(`We couldn’t find that ${customerDocumentDetails[kind].label.toLowerCase()}. Refresh and try again.`);
+  if (!document) throw new ActionError(`We couldn’t find that ${customerDocumentDetails[kind].label.toLowerCase()}. Refresh and try again.`);
 
   const shareToken = document.data.shareToken || randomBytes(32).toString("hex");
   if (shareToken !== document.data.shareToken) {
@@ -2033,7 +2034,7 @@ export async function sendCustomerDocumentRecord(id: string, kind: CustomerDocum
     .from(bookkeepingRecord)
     .where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, kind), eq(bookkeepingRecord.id, id)))
     .limit(1);
-  if (!document) throw new Error(`We couldn’t find that ${customerDocumentDetails[kind].label.toLowerCase()}. Refresh and try again.`);
+  if (!document) throw new ActionError(`We couldn’t find that ${customerDocumentDetails[kind].label.toLowerCase()}. Refresh and try again.`);
 
   const customers = await db
     .select()
@@ -2041,7 +2042,7 @@ export async function sendCustomerDocumentRecord(id: string, kind: CustomerDocum
     .where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "customers")));
   const customer = customers.find((row) => row.id === document.data.customerId || row.id === document.data.customer)
     ?? customers.find((row) => row.data.name?.trim().toLowerCase() === document.data.customer?.trim().toLowerCase());
-  if (!customer?.data.email) throw new Error("Add an email address to this customer before sending.");
+  if (!customer?.data.email) throw new ActionError("Add an email address to this customer before sending.");
 
   const details = customerDocumentDetails[kind];
   const [settings] = await db
@@ -2084,7 +2085,7 @@ export async function duplicateCustomerDocumentRecord(id: string, kind: Customer
     .from(bookkeepingRecord)
     .where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, kind), eq(bookkeepingRecord.id, id)))
     .limit(1);
-  if (!document) throw new Error(`We couldn’t find that ${customerDocumentDetails[kind].label.toLowerCase()}. Refresh and try again.`);
+  if (!document) throw new ActionError(`We couldn’t find that ${customerDocumentDetails[kind].label.toLowerCase()}. Refresh and try again.`);
 
   const existing = await db
     .select()
@@ -2125,7 +2126,7 @@ export async function duplicateInvoiceRecord(id: string): Promise<BookkeepingRec
     .from(bookkeepingRecord)
     .where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "invoices"), eq(bookkeepingRecord.id, id)))
     .limit(1);
-  if (!invoice) throw new Error("We couldn’t find that invoice. Refresh and try again.");
+  if (!invoice) throw new ActionError("We couldn’t find that invoice. Refresh and try again.");
 
   const [settings] = await db
     .select()
@@ -2164,7 +2165,7 @@ export async function getAttachmentUploadTarget(
   size: number,
 ): Promise<{ uploadUrl: string; publicUrl: string }> {
   await requireUser();
-  if (size > 10 * 1024 * 1024) throw new Error("Attachments must be 10 MB or smaller.");
+  if (size > 10 * 1024 * 1024) throw new ActionError("Attachments must be 10 MB or smaller.");
   const target = await createUploadUrl({ filename, contentType, size });
   return { uploadUrl: target.uploadUrl, publicUrl: target.publicUrl };
 }
@@ -2178,18 +2179,18 @@ export async function saveBulkInventoryCount(input: {
   const seenItemIds = new Set<string>();
 
   if (!input || !Array.isArray(input.rows) || input.rows.length === 0 || input.rows.length > MAX_INVENTORY_COUNT_ROWS) {
-    throw new Error(`Choose between 1 and ${MAX_INVENTORY_COUNT_ROWS} product counts to save.`);
+    throw new ActionError(`Choose between 1 and ${MAX_INVENTORY_COUNT_ROWS} product counts to save.`);
   }
 
   for (const [index, value] of input.rows.entries()) {
-    if (!value || typeof value !== "object") throw new Error(`Check the product on count row ${index + 2}.`);
+    if (!value || typeof value !== "object") throw new ActionError(`Check the product on count row ${index + 2}.`);
     const itemId = typeof value.itemId === "string" ? value.itemId.trim() : "";
     const quantity = typeof value.quantity === "string" ? value.quantity.trim() : "";
     const parsedQuantity = Number(quantity);
     if (!itemId || !quantity || !Number.isFinite(parsedQuantity) || parsedQuantity < 0 || parsedQuantity > 1_000_000_000_000) {
-      throw new Error(`Enter a valid non-negative counted quantity on count row ${index + 2}.`);
+      throw new ActionError(`Enter a valid non-negative counted quantity on count row ${index + 2}.`);
     }
-    if (seenItemIds.has(itemId)) throw new Error(`A product appears more than once on count row ${index + 2}.`);
+    if (seenItemIds.has(itemId)) throw new ActionError(`A product appears more than once on count row ${index + 2}.`);
     seenItemIds.add(itemId);
     rows.push({ itemId, quantity: String(parsedQuantity) });
   }
@@ -2197,7 +2198,7 @@ export async function saveBulkInventoryCount(input: {
   const date = typeof input.date === "string" ? input.date.trim() : "";
   const parsedDate = /^\d{4}-\d{2}-\d{2}$/.test(date) ? new Date(`${date}T00:00:00.000Z`) : null;
   if (!parsedDate || Number.isNaN(parsedDate.getTime()) || parsedDate.toISOString().slice(0, 10) !== date) {
-    throw new Error("Choose a valid stock count date.");
+    throw new ActionError("Choose a valid stock count date.");
   }
   const reference = typeof input.reference === "string" ? input.reference.trim().slice(0, 100) : "";
 
@@ -2211,7 +2212,7 @@ export async function saveBulkInventoryCount(input: {
       .for("update");
 
     if (items.length !== rows.length || items.some((item) => item.data.itemType !== "Product")) {
-      throw new Error("The spreadsheet includes a product that is no longer in your inventory. Download a fresh template and try again.");
+      throw new ActionError("The spreadsheet includes a product that is no longer in your inventory. Download a fresh template and try again.");
     }
 
     const countedById = new Map(rows.map((row) => [row.itemId, Number(row.quantity)]));
@@ -2220,10 +2221,10 @@ export async function saveBulkInventoryCount(input: {
 
     for (const item of items) {
       const countedStock = countedById.get(item.id);
-      if (countedStock === undefined) throw new Error("The count sheet has changed. Download a fresh template and try again.");
+      if (countedStock === undefined) throw new ActionError("The count sheet has changed. Download a fresh template and try again.");
       const previousStock = Number(item.data.stock || 0);
       if (!Number.isFinite(previousStock) || previousStock < 0) {
-        throw new Error(`${item.data.name || "A product"} has an invalid current stock balance. Fix its count before importing.`);
+        throw new ActionError(`${item.data.name || "A product"} has an invalid current stock balance. Fix its count before importing.`);
       }
       const change = countedStock - previousStock;
       if (change === 0) continue;

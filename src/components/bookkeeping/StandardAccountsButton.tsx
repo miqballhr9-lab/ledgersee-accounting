@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { ListTree } from "lucide-react";
 import { toast } from "sonner";
+import { readableError } from "@/lib/action-error";
 
 import { addStandardAccounts } from "@/app/actions";
 import { Button } from "@/components/ui/button";
@@ -35,7 +36,7 @@ export default function StandardAccountsButton({ label = "Add standard accounts"
       }
       router.refresh();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "We couldn’t add the standard accounts. Please try again.");
+      toast.error(error instanceof Error ? readableError(error) : "We couldn’t add the standard accounts. Please try again.");
     } finally {
       setPending(false);
     }

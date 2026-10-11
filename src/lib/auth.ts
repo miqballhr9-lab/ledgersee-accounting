@@ -21,6 +21,7 @@ import { db } from "@/db";
 import * as schema from "@/db/schema";
 import { sendEmail, sendEmailOrThrow } from "@/lib/email";
 import { describeAuthError } from "@/lib/errors";
+import { ActionError } from "@/lib/action-error";
 
 /**
  * Which origin this app answers on — resolved PER REQUEST, not pinned at build.
@@ -307,6 +308,6 @@ export async function requireUser() {
   // The message is already a sentence worth showing, because it will be: a server
   // action's thrown message is what reaches the browser. Keep it that way — a code
   // or a stack trace here becomes a code or a stack trace on someone's screen.
-  if (!user) throw new Error(describeAuthError("NOT_SIGNED_IN").message);
+  if (!user) throw new ActionError(describeAuthError("NOT_SIGNED_IN").message);
   return user;
 }

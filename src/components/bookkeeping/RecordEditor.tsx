@@ -4,6 +4,7 @@ import { Fragment, useEffect, useRef, useState, type FormEvent } from "react";
 import { toast } from "sonner";
 import Link from "next/link";
 import { ChevronDown, Copy, LoaderCircle, Mail, MessageCircle, MessageSquareText, Plus, Printer, Share2, Trash2, UploadCloud } from "lucide-react";
+import { readableError } from "@/lib/action-error";
 
 import {
   createCustomerDocumentShareLink,
@@ -222,7 +223,7 @@ export default function RecordEditor({ module, record, customers, vendors, items
         setNotice(`Your ${module.label.toLowerCase()} link is ready below to copy and share.`);
       }
     } catch (shareError) {
-      setError(shareError instanceof Error ? shareError.message : `We couldn’t create the ${module.label.toLowerCase()} link.`);
+      setError(shareError instanceof Error ? readableError(shareError) : `We couldn’t create the ${module.label.toLowerCase()} link.`);
     } finally {
       setSharing(false);
     }
@@ -242,7 +243,7 @@ export default function RecordEditor({ module, record, customers, vendors, items
       if (!response.ok) throw new Error("The upload didn’t finish. Please try again.");
       setValues((current) => ({ ...current, [key]: target.publicUrl, [`${key}Name`]: file.name }));
     } catch (uploadError) {
-      setError(uploadError instanceof Error ? uploadError.message : "The upload didn’t finish. Please try again.");
+      setError(uploadError instanceof Error ? readableError(uploadError) : "The upload didn’t finish. Please try again.");
     } finally {
       setUploading(null);
     }
@@ -403,7 +404,7 @@ export default function RecordEditor({ module, record, customers, vendors, items
         } catch (sendError) {
           sendWindow.current?.close();
           sendWindow.current = null;
-          setError(`${module.label} saved, but it couldn’t be sent: ${sendError instanceof Error ? sendError.message : "Please try again."}`);
+          setError(`${module.label} saved, but it couldn’t be sent: ${sendError instanceof Error ? readableError(sendError) : "Please try again."}`);
           return;
         }
       }
@@ -414,7 +415,7 @@ export default function RecordEditor({ module, record, customers, vendors, items
         onOpenChange(false);
       }
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : "We couldn’t save this record. Please try again.");
+      setError(saveError instanceof Error ? readableError(saveError) : "We couldn’t save this record. Please try again.");
     } finally {
       setPending(false);
     }

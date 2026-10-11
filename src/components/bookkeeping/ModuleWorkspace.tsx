@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import Image from "next/image";
 import { ArrowDownToLine, ArrowRightLeft, BadgeCheck, ChevronDown, CircleDollarSign, ClipboardList, FileCheck2, FileText, ListChecks, Plus, Receipt, Search, SlidersHorizontal, Trash2, Undo2, WalletCards } from "lucide-react";
+import { readableError } from "@/lib/action-error";
 
 import {
   advancePurchaseOrder,
@@ -345,7 +346,7 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
       setRecords((current) => current.filter((item) => item.id !== record.id));
       setActionMessage(`${module.label} deleted.`);
     } catch (error) {
-      setActionMessage(error instanceof Error ? error.message : "We couldn’t delete that record.");
+      setActionMessage(error instanceof Error ? readableError(error) : "We couldn’t delete that record.");
     }
   }
 
@@ -379,7 +380,7 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
         await refundSupplierCredit(record.id, date, accountId);
         done += 1;
       } catch (error) {
-        failed.push(error instanceof Error ? error.message : `${record.data.creditNumber || "Credit note"} couldn’t be refunded.`);
+        failed.push(error instanceof Error ? readableError(error) : `${record.data.creditNumber || "Credit note"} couldn’t be refunded.`);
       }
     }
     setBulkPending(false);
@@ -457,7 +458,7 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
         } else await convertBookkeepingRecord(record.id, action);
         done.push(record.id);
       } catch (error) {
-        const message = error instanceof Error ? error.message : "it couldn’t be processed.";
+        const message = error instanceof Error ? readableError(error) : "it couldn’t be processed.";
         failed.push(message.includes(title) ? message : `${title}: ${message}`);
       }
     }
@@ -501,7 +502,7 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
         toast.success(`Payment removed from ${record.data.invoiceNumber || "the invoice"}. You can now edit it or record a new payment.`);
         router.refresh();
       } catch (error) {
-        toast.error(error instanceof Error ? error.message : "We couldn’t undo that payment.");
+        toast.error(error instanceof Error ? readableError(error) : "We couldn’t undo that payment.");
       }
       return;
     }
@@ -583,7 +584,7 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
       }
       router.refresh();
     } catch (error) {
-      setActionMessage(error instanceof Error ? error.message : "That action couldn’t be completed.");
+      setActionMessage(error instanceof Error ? readableError(error) : "That action couldn’t be completed.");
     } finally {
       setPendingAction(false);
     }
@@ -601,7 +602,7 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
       toast.success("Payment recorded and invoice balance updated.");
       router.refresh();
     } catch (error) {
-      setPaymentError(error instanceof Error ? error.message : "We couldn’t record the payment.");
+      setPaymentError(error instanceof Error ? readableError(error) : "We couldn’t record the payment.");
     } finally {
       setPendingAction(false);
     }
@@ -624,7 +625,7 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
           await convertPurchaseOrderToExpense(id, expenseCategoryId, expensePaymentAccountId || undefined);
           done += 1;
         } catch (error) {
-          failed.push(`${order?.data.poNumber || "Purchase order"}: ${error instanceof Error ? error.message : "it couldn’t be recorded."}`);
+          failed.push(`${order?.data.poNumber || "Purchase order"}: ${error instanceof Error ? readableError(error) : "it couldn’t be recorded."}`);
         }
       }
       setBulkExpenseIds([]);
@@ -642,7 +643,7 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
       setActionMessage("Purchase order recorded as an expense.");
       router.refresh();
     } catch (error) {
-      setExpenseConversionError(error instanceof Error ? error.message : "We couldn’t record this purchase order as an expense.");
+      setExpenseConversionError(error instanceof Error ? readableError(error) : "We couldn’t record this purchase order as an expense.");
     } finally {
       setPendingAction(false);
     }

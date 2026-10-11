@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Download, LockKeyhole, Save, UserRound } from "lucide-react";
+import { readableError } from "@/lib/action-error";
 
 import { exportMyAccountData, updateProfileName } from "@/app/actions";
 import { Button } from "@/components/ui/button";
@@ -32,7 +33,7 @@ export default function ProfilePrivacyWorkspace({ initialName, email }: ProfileP
       setName(result.name);
       setNotice("Your profile name has been saved.");
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "We couldn’t save your profile. Try again.");
+      setNotice(error instanceof Error ? readableError(error) : "We couldn’t save your profile. Try again.");
     } finally {
       setIsSaving(false);
     }

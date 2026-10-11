@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { ArrowDownToLine, ArrowUpFromLine, Boxes, ClipboardCheck, History, Package, Search } from "lucide-react";
+import { readableError } from "@/lib/action-error";
 
 import { createInventoryMovement } from "@/app/actions";
 import InventoryBulkCount from "@/components/bookkeeping/InventoryBulkCount";
@@ -115,7 +116,7 @@ export default function InventoryWorkspace({ products: productRecords, movements
       toast.success(movementType === "Receipt" ? "Stock received." : movementType === "Delivery" ? "Delivery recorded." : "Stock count saved.");
       router.refresh();
     } catch (error) {
-      setFormError(error instanceof Error ? error.message : "We couldn’t save this stock movement.");
+      setFormError(error instanceof Error ? readableError(error) : "We couldn’t save this stock movement.");
     } finally {
       setIsSaving(false);
     }

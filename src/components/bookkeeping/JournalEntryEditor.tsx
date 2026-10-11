@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { Plus, Trash2 } from "lucide-react";
+import { readableError } from "@/lib/action-error";
 
 import { saveBookkeepingRecord } from "@/app/actions";
 import { Button } from "@/components/ui/button";
@@ -271,7 +272,7 @@ export default function JournalEntryEditor({ accounts, record, defaults, open, o
       setNextLineId((current) => current + importedLines.length + Math.max(0, 8 - combinedLines.length));
       setStatus(`Imported ${importedLines.length} ${importedLines.length === 1 ? "line" : "lines"}. Review the totals before saving.`);
     } catch (importError) {
-      setError(importError instanceof Error ? importError.message : "We couldn’t read that CSV file.");
+      setError(importError instanceof Error ? readableError(importError) : "We couldn’t read that CSV file.");
     }
   }
 
@@ -318,7 +319,7 @@ export default function JournalEntryEditor({ accounts, record, defaults, open, o
       onSaved(saved);
       onOpenChange(false);
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : "We couldn’t save this journal. Please try again.");
+      setError(saveError instanceof Error ? readableError(saveError) : "We couldn’t save this journal. Please try again.");
     } finally {
       setPending(false);
     }

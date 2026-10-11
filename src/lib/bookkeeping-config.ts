@@ -253,7 +253,7 @@ export const modules: readonly ModuleDefinition[] = [
     ],
   },
   {
-    slug: "supplier-credits", kind: "supplier-credits", label: "Supplier credit note", plural: "Supplier credit notes",
+    slug: "supplier-credits", kind: "supplier-credits", label: "Credit note", plural: "Credit notes",
     description: "Record credits and refunds from suppliers and apply them to their bills.", titleKey: "creditNumber",
     columns: ["creditNumber", "vendor", "date", "billNumber", "amount", "refundAccountName", "status"],
     fields: [

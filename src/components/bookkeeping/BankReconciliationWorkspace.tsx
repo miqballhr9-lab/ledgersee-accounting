@@ -4,6 +4,7 @@ import { useMemo, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowDownRight, ArrowUpRight, Check, CircleAlert, CircleCheck, Landmark, MoveRight } from "lucide-react";
+import { readableError } from "@/lib/action-error";
 
 import { completeBankReconciliation } from "@/app/actions";
 import { Badge } from "@/components/ui/badge";
@@ -150,7 +151,7 @@ export default function BankReconciliationWorkspace({ accounts, transactions: in
       setNotice(`Statement reconciled for ${bankAccount?.data.name}.`);
       router.refresh();
     } catch (caughtError) {
-      setError(caughtError instanceof Error ? caughtError.message : "That statement couldn’t be reconciled. Please try again.");
+      setError(caughtError instanceof Error ? readableError(caughtError) : "That statement couldn’t be reconciled. Please try again.");
     } finally {
       setPending(false);
     }

@@ -10,6 +10,7 @@
  * from a server action, a server component, or `@/lib/auth`.
  */
 import "server-only";
+import { ActionError } from "@/lib/action-error";
 
 type SendEmail = {
   to: string;
@@ -42,7 +43,7 @@ type SendEmail = {
 export async function sendEmailOrThrow(input: SendEmail): Promise<void> {
   const sent = await sendEmail(input);
   if (!sent) {
-    throw new Error(
+    throw new ActionError(
       "Couldn't send that email just now. Please try again in a moment.",
     );
   }

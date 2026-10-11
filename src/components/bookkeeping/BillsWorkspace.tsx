@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowDownToLine, CircleDollarSign, MoreHorizontal, Pencil, Plus, Search, Trash2, Undo2 } from "lucide-react";
+import { readableError } from "@/lib/action-error";
 
 import { deleteBookkeepingRecord, recordBillPayment, undoBillPayments } from "@/app/actions";
 import PaymentDialog from "@/components/bookkeeping/PaymentDialog";
@@ -188,7 +189,7 @@ export default function BillsWorkspace({ records: initialRecords, vendors, accou
         else if (payment) await recordBillPayment(record.id, payment.date, payment.accountId);
         done.push(record.id);
       } catch (error) {
-        const message = error instanceof Error ? error.message : "it couldn’t be updated.";
+        const message = error instanceof Error ? readableError(error) : "it couldn’t be updated.";
         failed.push(message.includes(title) ? message : `${title}: ${message}`);
       }
     }
@@ -220,7 +221,7 @@ export default function BillsWorkspace({ records: initialRecords, vendors, accou
       setRecords((current) => current.filter((item) => item.id !== record.id));
       setActionMessage("Bill deleted.");
     } catch (error) {
-      setActionMessage(error instanceof Error ? error.message : "We couldn’t delete that bill.");
+      setActionMessage(error instanceof Error ? readableError(error) : "We couldn’t delete that bill.");
     } finally {
       setPendingAction(false);
     }

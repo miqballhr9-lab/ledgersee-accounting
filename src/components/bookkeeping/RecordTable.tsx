@@ -161,7 +161,6 @@ function rowActions(
   if (["estimates", "sales-orders", "credit-notes"].includes(module.kind)) actions.push({ kind: "send", label: `Send ${module.label.toLowerCase()}`, icon: Mail });
   if (module.kind === "bills") actions.push({ kind: "mark-paid", label: "Mark paid", icon: Check });
   if (module.kind === "credit-notes" && !["Applied", "Refunded"].includes(record.data.status ?? "")) actions.push({ kind: "apply-credit", label: "Apply credit", icon: BadgeCheck });
-  if (module.kind === "supplier-credits" && !["Applied", "Refunded"].includes(record.data.status ?? "")) actions.push({ kind: "apply-credit", label: "Apply to bill", icon: BadgeCheck });
   if (module.kind === "recurring-invoices") actions.push({ kind: "generate", label: "Generate invoice", icon: Play });
   if (module.kind === "transactions") actions.push({ kind: "match", label: record.data.matched === "true" ? "Mark unmatched" : "Match transaction", icon: Check });
 
@@ -186,6 +185,14 @@ function rowActions(
             {canCancelPurchaseOrder ? <DropdownMenuItem className="text-destructive focus:text-destructive" onClick={() => onAction("cancel-order", record)}><Ban size={14} />Cancel purchase order</DropdownMenuItem> : null}
             {row.canDelete ? <DropdownMenuItem variant="destructive" onClick={row.onDelete}><Trash2 size={14} />Delete</DropdownMenuItem> : null}
             {!row.canEdit && !row.canDelete && !canCancelPurchaseOrder && !canConvertPurchaseOrder ? <DropdownMenuItem disabled>No more actions</DropdownMenuItem> : null}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      ) : module.kind === "supplier-credits" ? (
+        <DropdownMenu>
+          <DropdownMenuTrigger render={<Button type="button" variant="ghost" size="icon-sm" aria-label={`More actions for ${record.data.creditNumber || "credit note"}`}><Ellipsis size={15} /></Button>} />
+          <DropdownMenuContent align="end" className="min-w-40">
+            <DropdownMenuItem onClick={row.onEdit}><Pencil size={14} />Edit</DropdownMenuItem>
+            <DropdownMenuItem variant="destructive" onClick={row.onDelete}><Trash2 size={14} />Delete</DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       ) : ["invoices", "estimates", "sales-orders", "credit-notes"].includes(module.kind) ? (
@@ -262,8 +269,8 @@ export default function RecordTable({ module, records, columns = module.columns,
                 <TableCell className="whitespace-nowrap text-right">
                   <div className="flex items-center justify-end gap-1.5">
                     {rowActions(module, record, onAction, { canEdit, canDelete, onEdit: () => onEdit(record), onDelete: () => onDelete(record) })}
-                    {canEdit && module.kind !== "purchase-orders" ? <Button type="button" variant="ghost" size="icon-sm" aria-label={`Edit ${module.label.toLowerCase()}`} onClick={() => onEdit(record)}><Pencil size={14} /></Button> : null}
-                    {canDelete && module.kind !== "purchase-orders" ? <Button type="button" variant="ghost" size="icon-sm" aria-label={`Delete ${module.label.toLowerCase()}`} className="text-muted-foreground hover:text-destructive" onClick={() => onDelete(record)}><Trash2 size={14} /></Button> : null}
+                    {canEdit && !["purchase-orders", "supplier-credits"].includes(module.kind) ? <Button type="button" variant="ghost" size="icon-sm" aria-label={`Edit ${module.label.toLowerCase()}`} onClick={() => onEdit(record)}><Pencil size={14} /></Button> : null}
+                    {canDelete && !["purchase-orders", "supplier-credits"].includes(module.kind) ? <Button type="button" variant="ghost" size="icon-sm" aria-label={`Delete ${module.label.toLowerCase()}`} className="text-muted-foreground hover:text-destructive" onClick={() => onDelete(record)}><Trash2 size={14} /></Button> : null}
                   </div>
                 </TableCell>
               </TableRow>

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowDownToLine, Banknote, CalendarDays, CircleDollarSign, Copy, FileUp, Mail, Pencil, Plus, Trash2, Users } from "lucide-react";
 import { toast } from "sonner";
+import { readableError } from "@/lib/action-error";
 
 import { deleteBookkeepingRecord, importPayrollCsv, saveBookkeepingRecord, sendPayrollSlip } from "@/app/actions";
 import { Button } from "@/components/ui/button";
@@ -100,7 +101,7 @@ function monthLabel(month: string) {
 }
 
 function errorMessage(error: unknown) {
-  return error instanceof Error ? error.message : "We couldn’t save this payroll entry. Please try again.";
+  return error instanceof Error ? readableError(error) : "We couldn’t save this payroll entry. Please try again.";
 }
 
 function saveCsv(filename: string, rows: string[][]) {

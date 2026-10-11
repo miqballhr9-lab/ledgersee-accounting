@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowDownToLine, CalendarDays, CircleDollarSign, Undo2, Filter, MoreHorizontal, Pencil, Plus, Search, Trash2 } from "lucide-react";
 import { toast } from "sonner";
+import { readableError } from "@/lib/action-error";
 
 import { deleteBookkeepingRecord, recordBillPayment, recordExpensePayment, undoBillPayments, undoExpensePayment } from "@/app/actions";
 import PaymentDialog from "@/components/bookkeeping/PaymentDialog";
@@ -240,7 +241,7 @@ export default function ExpensesWorkspace({ expenses: initialExpenses, bills: in
       toast.success(`Payment removed from ${title}.`);
       router.refresh();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "We couldn’t undo that payment.");
+      toast.error(error instanceof Error ? readableError(error) : "We couldn’t undo that payment.");
     } finally {
       setBulkPending(false);
     }
@@ -271,7 +272,7 @@ export default function ExpensesWorkspace({ expenses: initialExpenses, bills: in
         else if (payment) await (record.kind === "bills" ? recordBillPayment(record.id, payment.date, payment.accountId) : recordExpensePayment(record.id, payment.date, payment.accountId));
         done.push(`${record.kind}-${record.id}`);
       } catch (error) {
-        const message = error instanceof Error ? error.message : "it couldn’t be updated.";
+        const message = error instanceof Error ? readableError(error) : "it couldn’t be updated.";
         failed.push(message.includes(title) ? message : `${title}: ${message}`);
       }
     }
@@ -294,7 +295,7 @@ export default function ExpensesWorkspace({ expenses: initialExpenses, bills: in
       router.refresh();
       setActionMessage(`${record.kind === "bills" ? "Bill" : "Expense"} deleted.`);
     } catch (error) {
-      setActionMessage(error instanceof Error ? error.message : "That transaction couldn’t be deleted.");
+      setActionMessage(error instanceof Error ? readableError(error) : "That transaction couldn’t be deleted.");
     } finally {
       setPendingDelete(null);
     }

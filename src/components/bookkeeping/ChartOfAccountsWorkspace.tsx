@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { LockKeyhole, Pencil, Plus, Search, Trash2, WalletCards } from "lucide-react";
+import { readableError } from "@/lib/action-error";
 
 import { deleteBookkeepingRecord } from "@/app/actions";
 import { Badge } from "@/components/ui/badge";
@@ -103,7 +104,7 @@ export default function ChartOfAccountsWorkspace({ accounts: initialAccounts, cu
       setAccounts((current) => current.filter((account) => account.id !== deletingAccount.id));
       setDeletingAccount(null);
     } catch (error) {
-      setDeleteError(error instanceof Error ? error.message : "We couldn’t delete this account. Please try again.");
+      setDeleteError(error instanceof Error ? readableError(error) : "We couldn’t delete this account. Please try again.");
     } finally {
       setDeleting(false);
     }

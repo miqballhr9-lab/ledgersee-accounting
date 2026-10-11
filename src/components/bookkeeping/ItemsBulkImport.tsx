@@ -2,6 +2,7 @@
 
 import { useRef, useState } from "react";
 import { ArrowDownToLine, FileSpreadsheet, FileUp } from "lucide-react";
+import { readableError } from "@/lib/action-error";
 
 import { importBookkeepingItems } from "@/app/actions";
 import { Button } from "@/components/ui/button";
@@ -148,7 +149,7 @@ export default function ItemsBulkImport({ onImported }: ItemsBulkImportProps) {
       const created = await importBookkeepingItems(importedRows);
       onImported(created);
     } catch (error) {
-      setErrors([error instanceof Error ? error.message : "We couldn’t import this Excel file. Check the template and try again."]);
+      setErrors([error instanceof Error ? readableError(error) : "We couldn’t import this Excel file. Check the template and try again."]);
     } finally {
       setIsBusy(false);
     }

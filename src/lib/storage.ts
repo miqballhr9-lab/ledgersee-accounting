@@ -31,6 +31,7 @@
  *   // then save target.publicUrl on the user's row
  */
 import "server-only";
+import { ActionError } from "@/lib/action-error";
 
 export type UploadTarget = {
   /** One-shot PUT URL. Expires in minutes — mint it when the user is ready, not in advance. */
@@ -81,7 +82,7 @@ export async function createUploadUrl(input: {
 }): Promise<UploadTarget> {
   const base = process.env.IMAGINE_SERVICES_URL;
   const token = process.env.IMAGINE_APP_TOKEN;
-  if (!base || !token) throw new Error("File storage is not available for this app.");
+  if (!base || !token) throw new ActionError("File storage is not available for this app.");
 
   const response = await fetch(`${base}/storage/sign`, {
     method: "POST",
@@ -98,9 +99,9 @@ export async function createUploadUrl(input: {
   if (!response.ok) {
     const reason = await response.json().catch(() => null);
     const code = reason?.detail?.code ?? String(response.status);
-    if (code === "unsupported_type") throw new Error("That file type isn't supported.");
-    if (code === "too_large") throw new Error("That file is too large.");
-    throw new Error("Couldn't prepare the upload. Please try again.");
+    if (code === "unsupported_type") throw new ActionError("That file type isn't supported.");
+    if (code === "too_large") throw new ActionError("That file is too large.");
+    throw new ActionError("Couldn't prepare the upload. Please try again.");
   }
 
   const data = await response.json();

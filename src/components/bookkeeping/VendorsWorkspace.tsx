@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowDownToLine, MoreHorizontal, Pencil, Plus, Search, Trash2 } from "lucide-react";
+import { readableError } from "@/lib/action-error";
 
 import { deleteBookkeepingRecord } from "@/app/actions";
 import RecordEditor from "@/components/bookkeeping/RecordEditor";
@@ -136,7 +137,7 @@ export default function VendorsWorkspace({ records: initialRecords, bills, accou
       setRecords((current) => current.filter((record) => record.id !== vendor.id));
       setActionMessage("Supplier deleted. Existing bills were kept.");
     } catch (error) {
-      setActionMessage(error instanceof Error ? error.message : "We couldn’t delete that supplier.");
+      setActionMessage(error instanceof Error ? readableError(error) : "We couldn’t delete that supplier.");
     } finally {
       setPendingDelete(null);
     }

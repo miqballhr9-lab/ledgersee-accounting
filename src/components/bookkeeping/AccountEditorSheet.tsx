@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { ChevronDown, LockKeyhole } from "lucide-react";
+import { readableError } from "@/lib/action-error";
 
 import { saveBookkeepingRecord } from "@/app/actions";
 import { Button } from "@/components/ui/button";
@@ -152,7 +153,7 @@ export default function AccountEditorSheet({ accounts, currency, open, record, o
         onOpenChange(false);
       }
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : "We couldn’t save this account. Please try again.");
+      setError(saveError instanceof Error ? readableError(saveError) : "We couldn’t save this account. Please try again.");
     } finally {
       setPending(false);
     }

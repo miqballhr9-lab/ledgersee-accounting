@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { ArrowDownToLine, FileSpreadsheet, FileUp } from "lucide-react";
+import { readableError } from "@/lib/action-error";
 
 import { saveBulkInventoryCount } from "@/app/actions";
 import { Button } from "@/components/ui/button";
@@ -156,7 +157,7 @@ export default function InventoryBulkCount({ products }: InventoryBulkCountProps
       setErrors(rowErrors.length > 8 ? [...rowErrors.slice(0, 8), `And ${rowErrors.length - 8} more issues.`] : rowErrors);
       setDialogOpen(true);
     } catch (error) {
-      setErrors([error instanceof Error ? error.message : "We couldn’t read this Excel file. Check the template and try again."]);
+      setErrors([error instanceof Error ? readableError(error) : "We couldn’t read this Excel file. Check the template and try again."]);
       setDialogOpen(true);
     } finally {
       setIsBusy(false);
@@ -179,7 +180,7 @@ export default function InventoryBulkCount({ products }: InventoryBulkCountProps
         : `${result.checkedCount} products checked; ${result.adjustedCount} stock adjustments saved.`);
       router.refresh();
     } catch (error) {
-      setErrors([error instanceof Error ? error.message : "We couldn’t save this stock count."]);
+      setErrors([error instanceof Error ? readableError(error) : "We couldn’t save this stock count."]);
     } finally {
       setIsBusy(false);
     }

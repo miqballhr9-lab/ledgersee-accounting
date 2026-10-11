@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowDownToLine, Copy, ExternalLink, FileUp, Plus, Save, Send, Trash2 } from "lucide-react";
 import { toast } from "sonner";
+import { readableError } from "@/lib/action-error";
 
 import { saveBudgetPlan, sendBudgetSummary } from "@/app/actions";
 import { Button } from "@/components/ui/button";
@@ -109,7 +110,7 @@ function saveCsv(filename: string, rows: (string | number)[][]) {
 }
 
 function errorMessage(error: unknown) {
-  return error instanceof Error ? error.message : "We couldn’t save that budget. Please try again.";
+  return error instanceof Error ? readableError(error) : "We couldn’t save that budget. Please try again.";
 }
 
 export default function BudgetPlannerWorkspace({ budgets, financialRecords, accounts, currency, asOfDate }: BudgetPlannerWorkspaceProps) {
