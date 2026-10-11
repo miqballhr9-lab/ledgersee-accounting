@@ -112,7 +112,6 @@ function amountFromLineItems(data: Record<string, string>, kind: string): Record
   }
 
   const subtotal = lines.reduce((total, line) => total + Number(line.quantity) * Number(line.rate), 0);
-  if (categoryLines) return { ...data, subtotal: subtotal.toFixed(2), amount: subtotal.toFixed(2) };
   const taxRate = Math.max(0, Number(data.taxRate) || 0);
   const discount = Math.max(0, Number(data.discount) || 0);
   if (taxRate > 100) throw new Error("Tax rate can’t be greater than 100%.");
@@ -1106,6 +1105,11 @@ export async function convertBookkeepingRecord(id: string): Promise<void> {
         lineItems: JSON.stringify([{ itemId: "", name: category, description, quantity: "1", rate: targetData.amount || "0" }]),
         category,
         description,
+        // The purchase order total already includes its tax and discount.
+        subtotal: targetData.amount || "0",
+        taxRate: "",
+        taxAmount: "0",
+        discount: "",
         paymentTerms: "30 days",
         dueDate: dueDateForTerms(today, "30 days"),
       };

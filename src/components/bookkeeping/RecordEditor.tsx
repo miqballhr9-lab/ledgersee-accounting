@@ -425,6 +425,9 @@ export default function RecordEditor({ module, record, customers, vendors, items
   const discount = Math.max(0, Number(values.discount) || 0);
   const invoiceTotal = Math.max(0, subtotal + taxAmount - discount);
   const expenseTotal = expenseLines.reduce((sum, line) => sum + (Number(line.amount) || 0), 0);
+  const expenseTaxAmount = expenseTotal * (Math.max(0, Number(values.taxRate) || 0) / 100);
+  const expenseGrandTotal = Math.max(0, expenseTotal + expenseTaxAmount - discount);
+  const linesCurrency = values.currency || defaultCurrency || "USD";
   const hasStructuredLines = structuredLineKinds.has(module.kind);
   const customerOptions = customers.filter((customer) => customer.data.name?.trim());
   const expenseAccounts = accounts.filter((account) =>
@@ -776,10 +779,12 @@ export default function RecordEditor({ module, record, customers, vendors, items
                         >
                           <Plus size={15} />Add lines
                         </Button>
-                        <div className="flex items-center gap-3 text-sm">
-                          <span className="text-muted-foreground">Total</span>
-                          <span className="font-semibold tabular-nums">{currencyAmount(expenseTotal, defaultCurrency || "USD")}</span>
-                        </div>
+                      </div>
+                      <div className="space-y-2 rounded-lg border border-border bg-muted/30 p-3 text-sm">
+                        <div className="flex justify-between gap-4"><span className="text-muted-foreground">Subtotal</span><span className="tabular-nums">{currencyAmount(expenseTotal, linesCurrency)}</span></div>
+                        <div className="flex justify-between gap-4"><span className="text-muted-foreground">Tax ({Math.max(0, Number(values.taxRate) || 0)}%)</span><span className="tabular-nums">{currencyAmount(expenseTaxAmount, linesCurrency)}</span></div>
+                        <div className="flex justify-between gap-4"><span className="text-muted-foreground">Discount</span><span className="tabular-nums">−{currencyAmount(discount, linesCurrency)}</span></div>
+                        <div className="flex justify-between gap-4 border-t border-border pt-2 font-semibold"><span>{module.label} total</span><span className="tabular-nums">{currencyAmount(expenseGrandTotal, linesCurrency)}</span></div>
                       </div>
                       {!expenseCategories.length ? <NoAccountsNotice message="You need Expense accounts in your Chart of accounts to categorize spending." /> : null}
                     </div>
