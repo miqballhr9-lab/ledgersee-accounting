@@ -258,7 +258,7 @@ export const modules: readonly ModuleDefinition[] = [
   {
     slug: "supplier-credits", kind: "supplier-credits", label: "Supplier credit note", plural: "Supplier credit notes",
     description: "Record credits and refunds from suppliers and apply them to their bills.", titleKey: "creditNumber",
-    columns: ["creditNumber", "vendor", "date", "billNumber", "amount", "status"],
+    columns: ["creditNumber", "vendor", "date", "billNumber", "amount", "refundAccountName", "status"],
     fields: [
       { key: "vendor", label: "Supplier", required: true },
       { key: "billNumber", label: "Apply to bill no.", help: "The supplier bill this credit reduces. Apply it from the list once saved." },
@@ -274,13 +274,14 @@ export const modules: readonly ModuleDefinition[] = [
   {
     slug: "purchase-orders", kind: "purchase-orders", label: "Purchase order", plural: "Purchase orders",
     description: "Confirm supplier orders, receive products, and record purchases as bills or expenses.", titleKey: "poNumber",
-    columns: ["poNumber", "vendor", "date", "expectedDate", "amount", "status"],
+    columns: ["poNumber", "vendor", "date", "expectedDate", "amount", "paymentMode", "status"],
     fields: [
       { key: "vendor", label: "Supplier", required: true },
       { key: "currency", label: "Currency", type: "currency" },
       { key: "date", label: "PO date", type: "date", required: true },
       { key: "expectedDate", label: "Expected date", type: "date" },
       { key: "poNumber", label: "PO no.", required: true },
+      { key: "paymentMode", label: "Payment method", type: "select", options: ["On credit", "Cash", "Cheque", "Bank transfer", "Credit card"], help: "How you will pay this supplier." },
       { ...lineItemsField, label: "PO lines" },
       { key: "taxRate", label: "Tax rate (%)", type: "number" },
       { key: "discount", label: "Discount amount", type: "number" },

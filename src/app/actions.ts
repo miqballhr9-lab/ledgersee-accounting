@@ -1068,6 +1068,99 @@ export async function undoInvoicePayments(id: string): Promise<void> {
   revalidatePath("/app", "layout");
 }
 
+async function findPaymentAccount(userId: string, accountId: string) {
+  const [account] = await db
+    .select()
+    .from(bookkeepingRecord)
+    .where(and(eq(bookkeepingRecord.id, accountId), eq(bookkeepingRecord.userId, userId), eq(bookkeepingRecord.kind, "accounts")))
+    .limit(1);
+  const method = account ? paymentAccountType({ kind: "accounts", data: account.data }) : null;
+  if (!account || !method) throw new Error("Choose a Cash, Bank, or Credit card account from Chart of Accounts.");
+  return { account, method, name: account.data.name || account.data.code || "Account" };
+}
+
+function isPaymentDate(value: string) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(`${value}T00:00:00Z`));
+}
+
+/** Pays a bill's remaining balance from a Cash, Bank or Credit card account and records where it came from. */
+export async function recordBillPayment(id: string, paymentDate: string, accountId: string): Promise<void> {
+  const me = await requireUser();
+  if (!isPaymentDate(paymentDate)) throw new Error("Choose a payment date.");
+  const { account, method, name } = await findPaymentAccount(me.id, accountId);
+  await db.transaction(async (transaction) => {
+    const [bill] = await transaction
+      .select()
+      .from(bookkeepingRecord)
+      .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "bills")))
+      .for("update")
+      .limit(1);
+    if (!bill) throw new Error("We couldn’t find that bill. Refresh and try again.");
+    if (bill.data.status === "Cancelled") throw new Error(`${bill.data.billNumber || "This bill"} is cancelled.`);
+    const paid = Number(bill.data.paidAmount) || 0;
+    const due = (Number(bill.data.amount) || 0) - paid - (Number(bill.data.creditApplied) || 0);
+    if (due <= 0.005) throw new Error(`${bill.data.billNumber || "This bill"} is already paid.`);
+    await transaction
+      .update(bookkeepingRecord)
+      .set({
+        data: { ...bill.data, paidAmount: (paid + due).toFixed(2), status: "Paid", paymentMethod: method, paymentAccountId: account.id, paymentAccountName: name, paymentDate },
+        updatedAt: new Date(),
+      })
+      .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id)));
+    await transaction.insert(bookkeepingRecord).values({
+      userId: me.id,
+      kind: "payments",
+      data: { billId: id, billNumber: bill.data.billNumber ?? "Bill", vendor: bill.data.vendor ?? "", amount: due.toFixed(2), paymentDate, method, paymentAccountId: account.id, paymentAccountName: name, direction: "out" },
+    });
+  });
+  revalidatePath("/app", "layout");
+}
+
+/** Removes the payments recorded on a bill so it can be corrected and paid again. */
+export async function undoBillPayments(id: string): Promise<void> {
+  const me = await requireUser();
+  await db.transaction(async (transaction) => {
+    const [bill] = await transaction
+      .select()
+      .from(bookkeepingRecord)
+      .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "bills")))
+      .for("update")
+      .limit(1);
+    if (!bill) throw new Error("We couldn’t find that bill. Refresh and try again.");
+    if (!(Number(bill.data.paidAmount) > 0)) throw new Error(`${bill.data.billNumber || "This bill"} has no payment to undo.`);
+    await transaction
+      .delete(bookkeepingRecord)
+      .where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "payments"), sql`${bookkeepingRecord.data}->>'billId' = ${id}`));
+    await transaction
+      .update(bookkeepingRecord)
+      .set({
+        data: { ...bill.data, paidAmount: "0", paymentMethod: "Credit", paymentAccountId: "", paymentAccountName: "", paymentDate: "", status: "Open" },
+        updatedAt: new Date(),
+      })
+      .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id)));
+  });
+  revalidatePath("/app", "layout");
+}
+
+/** Records a supplier credit note as refunded into a Cash, Bank or Credit card account. */
+export async function refundSupplierCredit(id: string, refundDate: string, accountId: string): Promise<void> {
+  const me = await requireUser();
+  if (!isPaymentDate(refundDate)) throw new Error("Choose a refund date.");
+  const { account, method, name } = await findPaymentAccount(me.id, accountId);
+  const [credit] = await db
+    .select()
+    .from(bookkeepingRecord)
+    .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "supplier-credits")))
+    .limit(1);
+  if (!credit) throw new Error("We couldn’t find that credit note. Refresh and try again.");
+  if (["Applied", "Refunded"].includes(credit.data.status ?? "")) throw new Error(`${credit.data.creditNumber || "This credit note"} has already been ${credit.data.status?.toLowerCase()}.`);
+  await db
+    .update(bookkeepingRecord)
+    .set({ data: { ...credit.data, status: "Refunded", refundDate, refundMethod: method, refundAccountId: account.id, refundAccountName: `${method} · ${name}` }, updatedAt: new Date() })
+    .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id)));
+  revalidatePath("/app", "layout");
+}
+
 export async function markRecordPaid(kind: string, id: string): Promise<void> {
   const me = await requireUser();
   if (kind !== "bills" && kind !== "invoices") throw new Error("That payment action isn’t available here.");

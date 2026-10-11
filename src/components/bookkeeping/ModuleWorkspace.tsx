@@ -18,6 +18,7 @@ import {
   applyCreditNote,
   applySupplierCredit,
   undoInvoicePayments,
+  refundSupplierCredit,
   generateRecurringInvoice,
   markRecordPaid,
   recordInvoicePayment,
@@ -40,6 +41,7 @@ import JournalEntryEditor from "@/components/bookkeeping/JournalEntryEditor";
 import ItemsBulkImport from "@/components/bookkeeping/ItemsBulkImport";
 import RecordEditor from "@/components/bookkeeping/RecordEditor";
 import NoAccountsNotice from "@/components/bookkeeping/NoAccountsNotice";
+import PaymentDialog from "@/components/bookkeeping/PaymentDialog";
 import { useNewRecordParam } from "@/hooks/use-new-record-param";
 import RecordTable, { type RecordActionKind } from "@/components/bookkeeping/RecordTable";
 
@@ -119,6 +121,7 @@ function createDefaults(module: ModuleDefinition, records: BookkeepingRecord[], 
     values.status = "Draft";
   }
   if (module.kind === "purchase-orders") {
+    values.paymentMode = "On credit";
     values.poNumber = `PO-${String(records.filter((record) => record.kind === "purchase-orders").length + 1).padStart(4, "0")}`;
     values.date = dateString(today);
     values.currency = defaultCurrency;
@@ -348,7 +351,7 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
   }
 
   // Actions on several checked records at once, offered from the toolbar menu.
-  type BulkAction = "estimates" | "sales-orders" | "invoices" | "bill" | "expense" | "pay" | "undo-payment" | "apply-credit" | "delete";
+  type BulkAction = "estimates" | "sales-orders" | "invoices" | "bill" | "expense" | "pay" | "undo-payment" | "apply-credit" | "refund" | "delete";
   const bulkMenu: { label: string; items: { action: BulkAction; label: string }[] } | null = module.kind === "sales-orders"
     ? { label: "Convert", items: [{ action: "estimates", label: "Convert to estimate" }, { action: "invoices", label: "Convert to invoice" }] }
     : module.kind === "estimates"
@@ -359,10 +362,34 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
         ? { label: "Actions", items: [{ action: "pay", label: "Record payment" }, { action: "undo-payment", label: "Undo payment" }] }
         : module.kind === "credit-notes"
           ? { label: "Actions", items: [{ action: "apply-credit", label: "Apply credit" }] }
-          : null;
+          : module.kind === "supplier-credits"
+            ? { label: "Actions", items: [{ action: "apply-credit", label: "Apply to bill" }, { action: "refund", label: "Record refund" }] }
+            : null;
   const supportsBulkActions = Boolean(bulkMenu);
   const [bulkPaymentOpen, setBulkPaymentOpen] = useState(false);
   const [bulkExpenseIds, setBulkExpenseIds] = useState<string[]>([]);
+  const [refundTargets, setRefundTargets] = useState<BookkeepingRecord[] | null>(null);
+
+  async function processRefunds(date: string, accountId: string) {
+    const targets = refundTargets ?? [];
+    setBulkPending(true);
+    const failed: string[] = [];
+    let done = 0;
+    for (const record of targets) {
+      try {
+        await refundSupplierCredit(record.id, date, accountId);
+        done += 1;
+      } catch (error) {
+        failed.push(error instanceof Error ? error.message : `${record.data.creditNumber || "Credit note"} couldn’t be refunded.`);
+      }
+    }
+    setBulkPending(false);
+    setRefundTargets(null);
+    setSelectedIds(new Set());
+    if (done) toast.success(`${done} ${done === 1 ? "credit note" : "credit notes"} recorded as refunded.`);
+    if (failed.length) toast.error(failed.join(" "));
+    router.refresh();
+  }
   const [bulkPaymentDate, setBulkPaymentDate] = useState("");
   const [bulkPaymentAccount, setBulkPaymentAccount] = useState("");
   const selectedRecords = records.filter((record) => selectedIds.has(record.id));
@@ -391,6 +418,12 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
       openBulkPayment();
       return;
     }
+    if (action === "refund") {
+      const refundable = selectedRecords.filter((record) => !["Applied", "Refunded"].includes(record.data.status ?? ""));
+      if (!refundable.length) toast.info("The selected credit notes are already applied or refunded.");
+      else setRefundTargets(refundable);
+      return;
+    }
     if (action === "expense") {
       // Reuses the single "Record as expense" dialog to pick the category and account for every selected order.
       const vendor = vendors.find((item) => item.data.name?.trim().toLowerCase() === selectedRecords[0]?.data.vendor?.trim().toLowerCase());
@@ -417,7 +450,7 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
           await deleteBookkeepingRecord(module.kind, record.id);
         } else if (action === "bill") await convertBookkeepingRecord(record.id);
         else if (action === "undo-payment") await undoInvoicePayments(record.id);
-        else if (action === "apply-credit") await applyCreditNote(record.id);
+        else if (action === "apply-credit") await (module.kind === "supplier-credits" ? applySupplierCredit(record.id) : applyCreditNote(record.id));
         else if (action === "pay") {
           const balance = remainingBalance(record);
           if (balance <= 0) throw new Error(`${title} is already paid.`);
@@ -442,6 +475,7 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
       pay: "marked paid",
       "undo-payment": "reopened as unpaid",
       "apply-credit": "applied",
+      refund: "refunded",
       delete: "deleted",
     };
     if (done.length) toast.success(`${done.length} ${done.length === 1 ? module.label.toLowerCase() : module.plural.toLowerCase()} ${verbs[action]}.`);
@@ -698,6 +732,7 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
                         : item.action === "sales-orders" ? ClipboardList
                           : item.action === "pay" ? CircleDollarSign
                             : item.action === "undo-payment" ? Undo2
+                              : item.action === "refund" ? CircleDollarSign
                               : BadgeCheck;
                     return <DropdownMenuItem key={item.action} onClick={() => void runBulkAction(item.action)}><Icon size={15} />{item.label}</DropdownMenuItem>;
                   })}
@@ -809,6 +844,18 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
           onSaveComplete={handleInvoiceSaveComplete}
         />
       )}
+
+      <PaymentDialog
+        open={Boolean(refundTargets)}
+        onOpenChange={(open) => { if (!open) setRefundTargets(null); }}
+        title="Record supplier refund"
+        description={`${refundTargets?.length ?? 0} ${refundTargets?.length === 1 ? "credit note" : "credit notes"} · ${formatCurrency((refundTargets ?? []).reduce((sum, record) => sum + Number(record.data.amount || 0), 0), currency)} refunded to you`}
+        accountLabel="Refund received into"
+        submitLabel="Record refund"
+        paymentAccounts={paymentAccounts}
+        pending={bulkPending}
+        onSubmit={(date, accountId) => void processRefunds(date, accountId)}
+      />
 
       <Dialog open={bulkPaymentOpen} onOpenChange={(open) => { if (!bulkPending) setBulkPaymentOpen(open); }}>
         <DialogContent className="sm:max-w-md">

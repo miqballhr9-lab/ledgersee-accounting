@@ -28,6 +28,8 @@ interface RecordTableProps {
 }
 
 const columnLabels: Record<string, string> = {
+  refundAccountName: "Refund to",
+  paymentMode: "Payment method",
   name: "Name",
   company: "Company",
   email: "Email",
@@ -159,7 +161,7 @@ function rowActions(
   if (["estimates", "sales-orders", "credit-notes"].includes(module.kind)) actions.push({ kind: "send", label: `Send ${module.label.toLowerCase()}`, icon: Mail });
   if (module.kind === "bills") actions.push({ kind: "mark-paid", label: "Mark paid", icon: Check });
   if (module.kind === "credit-notes" && !["Applied", "Refunded"].includes(record.data.status ?? "")) actions.push({ kind: "apply-credit", label: "Apply credit", icon: BadgeCheck });
-  if (module.kind === "supplier-credits" && record.data.status !== "Applied") actions.push({ kind: "apply-credit", label: "Apply to bill", icon: BadgeCheck });
+  if (module.kind === "supplier-credits" && !["Applied", "Refunded"].includes(record.data.status ?? "")) actions.push({ kind: "apply-credit", label: "Apply to bill", icon: BadgeCheck });
   if (module.kind === "recurring-invoices") actions.push({ kind: "generate", label: "Generate invoice", icon: Play });
   if (module.kind === "transactions") actions.push({ kind: "match", label: record.data.matched === "true" ? "Mark unmatched" : "Match transaction", icon: Check });
 

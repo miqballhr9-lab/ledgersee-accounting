@@ -2,9 +2,11 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowDownToLine, Check, MoreHorizontal, Pencil, Plus, Search, Trash2 } from "lucide-react";
+import { ArrowDownToLine, CircleDollarSign, MoreHorizontal, Pencil, Plus, Search, Trash2, Undo2 } from "lucide-react";
 
-import { deleteBookkeepingRecord, markRecordPaid } from "@/app/actions";
+import { deleteBookkeepingRecord, recordBillPayment, undoBillPayments } from "@/app/actions";
+import PaymentDialog from "@/components/bookkeeping/PaymentDialog";
+import { paymentAccountType } from "@/lib/payment-accounts";
 import RecordEditor from "@/components/bookkeeping/RecordEditor";
 import BulkActionsMenu from "@/components/bookkeeping/BulkActionsMenu";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -152,23 +154,38 @@ export default function BillsWorkspace({ records: initialRecords, vendors, accou
   }
   const selectedBills = records.filter((record) => selectedIds.has(record.id));
 
-  async function runBulkAction(action: "mark-paid" | "delete") {
+  const paymentAccounts = accounts.filter((account) => paymentAccountType(account));
+  const [paymentTargets, setPaymentTargets] = useState<BookkeepingRecord[] | null>(null);
+
+  function isPayable(record: BookkeepingRecord) {
+    return !["Paid", "Cancelled"].includes(billStatus(record, asOfDate)) && amountDue(record) > 0;
+  }
+
+  async function runBulkAction(action: "pay" | "undo-payment" | "delete") {
     if (!selectedBills.length) return;
+    if (action === "pay") {
+      const payable = selectedBills.filter(isPayable);
+      if (!payable.length) toast.info("The selected bills are already paid.");
+      else setPaymentTargets(payable);
+      return;
+    }
     const count = selectedBills.length;
     const noun = count === 1 ? "bill" : "bills";
-    if (!window.confirm(action === "delete" ? `Delete ${count} ${noun}? This can’t be undone.` : `Mark ${count} ${noun} as paid in full?`)) return;
+    if (!window.confirm(action === "delete" ? `Delete ${count} ${noun}? This can’t be undone.` : `Remove the payments recorded on ${count} ${noun}? They will show as unpaid again.`)) return;
+    await processBills(selectedBills, action);
+  }
+
+  async function processBills(targets: BookkeepingRecord[], action: "pay" | "undo-payment" | "delete", payment?: { date: string; accountId: string }) {
     setBulkPending(true);
     setActionMessage("");
     const done: string[] = [];
     const failed: string[] = [];
-    for (const record of selectedBills) {
+    for (const record of targets) {
       const title = record.data.billNumber || "Bill";
       try {
         if (action === "delete") await deleteBookkeepingRecord("bills", record.id);
-        else {
-          if (["Paid", "Cancelled"].includes(billStatus(record, asOfDate))) throw new Error(`${title} is already ${billStatus(record, asOfDate).toLowerCase()}.`);
-          await markRecordPaid("bills", record.id);
-        }
+        else if (action === "undo-payment") await undoBillPayments(record.id);
+        else if (payment) await recordBillPayment(record.id, payment.date, payment.accountId);
         done.push(record.id);
       } catch (error) {
         const message = error instanceof Error ? error.message : "it couldn’t be updated.";
@@ -178,24 +195,20 @@ export default function BillsWorkspace({ records: initialRecords, vendors, accou
     if (action === "delete") setRecords((current) => current.filter((record) => !done.includes(record.id)));
     setSelectedIds(new Set());
     setBulkPending(false);
-    if (done.length) toast.success(`${done.length} ${done.length === 1 ? "bill" : "bills"} ${action === "delete" ? "deleted" : "marked paid"}.`);
+    setPaymentTargets(null);
+    const verb = action === "delete" ? "deleted" : action === "undo-payment" ? "reopened as unpaid" : "paid";
+    if (done.length) toast.success(`${done.length} ${done.length === 1 ? "bill" : "bills"} ${verb}.`);
     if (failed.length) toast.error(failed.join(" "));
     router.refresh();
   }
 
-  async function handleMarkPaid(record: BookkeepingRecord) {
-    if (!window.confirm(`Mark ${record.data.billNumber || "this bill"} as paid in full?`)) return;
-    setPendingAction(true);
-    setActionMessage("");
-    try {
-      await markRecordPaid("bills", record.id);
-      setActionMessage("Bill marked as paid.");
-      router.refresh();
-    } catch (error) {
-      setActionMessage(error instanceof Error ? error.message : "That payment update couldn’t be completed.");
-    } finally {
-      setPendingAction(false);
-    }
+  function handleMarkPaid(record: BookkeepingRecord) {
+    setPaymentTargets([record]);
+  }
+
+  async function handleUndoPayment(record: BookkeepingRecord) {
+    if (!window.confirm(`Undo the payment on ${record.data.billNumber || "this bill"}? It will show as unpaid so you can pay it again.`)) return;
+    await processBills([record], "undo-payment");
   }
 
   async function handleDelete(record: BookkeepingRecord) {
@@ -280,7 +293,7 @@ export default function BillsWorkspace({ records: initialRecords, vendors, accou
               count={selectedBills.length}
               pending={bulkPending}
               noun="bills"
-              items={[{ key: "mark-paid", label: "Mark paid", icon: Check }, { key: "delete", label: "Delete", icon: Trash2, destructive: true }]}
+              items={[{ key: "pay", label: "Record payment", icon: CircleDollarSign }, { key: "undo-payment", label: "Undo payment", icon: Undo2 }, { key: "delete", label: "Delete", icon: Trash2, destructive: true }]}
               onSelect={(action) => void runBulkAction(action)}
             />
             <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value ?? "all")}>
@@ -315,7 +328,7 @@ export default function BillsWorkspace({ records: initialRecords, vendors, accou
                     onCheckedChange={(checked) => setSelectedIds(checked === true ? new Set(filteredRecords.map((record) => record.id)) : new Set())}
                   />
                 </TableHead>
-                {["Vendor", "Bill no.", "Bill date", "Due date", "Category", "Total", "Balance due", "Status", ""].map((heading) => (
+                {["Vendor", "Bill no.", "Bill date", "Due date", "Category", "Total", "Balance due", "Payment account", "Status", ""].map((heading) => (
                   <TableHead key={heading || "actions"} className="whitespace-nowrap text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">{heading}</TableHead>
                 ))}
               </TableRow>
@@ -334,14 +347,16 @@ export default function BillsWorkspace({ records: initialRecords, vendors, accou
                     <TableCell className="max-w-[170px] truncate text-[13px] text-muted-foreground" title={expenseCategoryLabel(record.data)}>{expenseCategoryLabel(record.data) || "—"}</TableCell>
                     <TableCell className="whitespace-nowrap text-right text-[13px] tabular-nums">{formatMoney(Number(record.data.amount || 0), currency)}</TableCell>
                     <TableCell className="whitespace-nowrap text-right text-[13px] font-medium tabular-nums">{formatMoney(amountDue(record), currency)}</TableCell>
+                    <TableCell className="max-w-[200px] truncate text-[13px] text-muted-foreground" title={record.data.paymentAccountName || ""}>{record.data.paymentAccountName ? `${record.data.paymentMethod} · ${record.data.paymentAccountName}` : "—"}</TableCell>
                     <TableCell className="whitespace-nowrap"><span className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium ${statusClass(status)}`}>{status}</span></TableCell>
                     <TableCell className="whitespace-nowrap text-right">
                       <div className="flex items-center justify-end gap-1">
-                        {canMarkPaid ? <Button variant="outline" size="sm" className="h-7 gap-1.5 px-2 text-[11px]" disabled={pendingAction} onClick={() => void handleMarkPaid(record)}><Check size={13} />Mark paid</Button> : null}
+                        {canMarkPaid ? <Button variant="outline" size="sm" className="h-7 gap-1.5 px-2 text-[11px]" disabled={pendingAction || bulkPending} onClick={() => handleMarkPaid(record)}><CircleDollarSign size={13} />Record payment</Button> : null}
                         <DropdownMenu>
                           <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" aria-label={`More actions for ${record.data.billNumber || "bill"}`}><MoreHorizontal size={15} /></Button>} />
                           <DropdownMenuContent align="end">
                             <DropdownMenuItem onClick={() => openEditBill(record)}><Pencil size={14} />Edit bill</DropdownMenuItem>
+                            {Number(record.data.paidAmount) > 0 ? <DropdownMenuItem disabled={bulkPending} onClick={() => void handleUndoPayment(record)}><Undo2 size={14} />Undo payment</DropdownMenuItem> : null}
                             <DropdownMenuItem disabled={pendingAction} onClick={() => void handleDelete(record)}><Trash2 size={14} />Delete bill</DropdownMenuItem>
                           </DropdownMenuContent>
                         </DropdownMenu>
@@ -352,7 +367,7 @@ export default function BillsWorkspace({ records: initialRecords, vendors, accou
               })}
               {!filteredRecords.length ? (
                 <TableRow>
-                  <TableCell colSpan={10} className="h-52 whitespace-normal text-center">
+                  <TableCell colSpan={11} className="h-52 whitespace-normal text-center">
                     <div className="sticky left-0 w-[calc(100vw-4.5rem)] sm:static sm:mx-auto sm:w-auto sm:max-w-sm">
                       <p className="text-sm font-medium">{records.length ? "No bills match these filters" : "No bills yet"}</p>
                       <p className="mt-1 text-sm text-muted-foreground">{records.length ? "Try a different search, status, or category." : "Add your first vendor bill to start tracking due dates and balances."}</p>
@@ -366,6 +381,18 @@ export default function BillsWorkspace({ records: initialRecords, vendors, accou
         </div>
       </section>
 
+      <PaymentDialog
+        open={Boolean(paymentTargets)}
+        onOpenChange={(open) => { if (!open) setPaymentTargets(null); }}
+        title="Record bill payment"
+        description={paymentTargets?.length === 1
+          ? `${paymentTargets[0].data.billNumber || "Bill"} · ${paymentTargets[0].data.vendor || "Supplier"} · ${formatMoney(amountDue(paymentTargets[0]), currency)} due`
+          : `${paymentTargets?.length ?? 0} bills · ${formatMoney((paymentTargets ?? []).reduce((sum, record) => sum + amountDue(record), 0), currency)} due`}
+        submitLabel="Record payment"
+        paymentAccounts={paymentAccounts}
+        pending={bulkPending}
+        onSubmit={(date, accountId) => void processBills(paymentTargets ?? [], "pay", { date, accountId })}
+      />
       {editorModule ? (
         <RecordEditor
           key={`bills-${editingRecord?.id ?? "new"}`}
