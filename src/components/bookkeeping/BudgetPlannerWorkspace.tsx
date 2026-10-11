@@ -358,6 +358,13 @@ export default function BudgetPlannerWorkspace({ budgets, financialRecords, acco
     }
   }
 
+  /** Opens the print preview of these budgets in a new tab; with autoPrint the print dialog opens straight away. */
+  function openPrint(ids: string[], autoPrint: boolean) {
+    const query = new URLSearchParams({ ids: ids.join(",") });
+    if (autoPrint) query.set("autoprint", "1");
+    window.open(`/app/budgets/print?${query.toString()}`, "_blank", "noopener");
+  }
+
   function exportSelected(format: "csv" | "xlsx") {
     const rows = selectedBudgets.flatMap((budget, index) => budgetExportRows(budget).slice(index === 0 ? 0 : 1));
     if (format === "csv") {
@@ -530,7 +537,8 @@ export default function BudgetPlannerWorkspace({ budgets, financialRecords, acco
                 {selectedBudgets.length === 1 ? <DropdownMenuItem onClick={() => copyBudget(selectedBudgets[0])}><Copy size={14} />Copy budget</DropdownMenuItem> : null}
                 <DropdownMenuItem onClick={() => exportSelected("csv")}><ArrowDownToLine size={14} />Download CSV</DropdownMenuItem>
                 <DropdownMenuItem onClick={() => exportSelected("xlsx")}><FileSpreadsheet size={14} />Download Excel</DropdownMenuItem>
-                {selectedBudgets.length === 1 ? <DropdownMenuItem onClick={() => window.open(`/app/budgets/${selectedBudgets[0].id}/print`, "_blank", "noopener")}><FileText size={14} />Download PDF</DropdownMenuItem> : null}
+                <DropdownMenuItem onClick={() => openPrint(selectedBudgets.map((budget) => budget.id), false)}><FileText size={14} />Download PDF</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => openPrint(selectedBudgets.map((budget) => budget.id), true)}><Printer size={14} />Print</DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem variant="destructive" onClick={() => void deleteSelected()}><Trash2 size={14} />Delete</DropdownMenuItem>
               </DropdownMenuContent>
@@ -593,7 +601,8 @@ export default function BudgetPlannerWorkspace({ budgets, financialRecords, acco
                           <DropdownMenuSeparator />
                           <DropdownMenuItem onClick={() => exportBudget(record)}><ArrowDownToLine size={14} />Download CSV</DropdownMenuItem>
                           <DropdownMenuItem onClick={() => void exportBudgetExcel(record)}><FileSpreadsheet size={14} />Download Excel</DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => window.open(`/app/budgets/${record.id}/print`, "_blank", "noopener")}><FileText size={14} />Download PDF</DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => openPrint([record.id], false)}><FileText size={14} />Download PDF</DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => openPrint([record.id], true)}><Printer size={14} />Print</DropdownMenuItem>
                           <DropdownMenuSeparator />
                           <DropdownMenuItem variant="destructive" onClick={() => void deleteBudget(record)}><Trash2 size={14} />Delete</DropdownMenuItem>
                         </DropdownMenuContent>
