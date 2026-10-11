@@ -178,7 +178,7 @@ export default function VendorsWorkspace({ records: initialRecords, bills, accou
         </div>
       </section>
 
-      <section aria-label="Vendor summary" className="mt-6 grid gap-3 sm:grid-cols-3">
+      <section aria-label="Vendor summary" className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-3">
         {[
           { label: "All suppliers", value: String(records.length), detail: "Saved suppliers and service providers", tone: "text-foreground" },
           { label: "Open payables", value: formatMoney(totalPayables, currency), detail: `${vendorsWithOpenBills} suppliers with unpaid bills`, tone: "text-foreground" },
@@ -201,7 +201,7 @@ export default function VendorsWorkspace({ records: initialRecords, bills, accou
             <p className="mt-0.5 text-xs text-muted-foreground">{filteredVendors.length} {filteredVendors.length === 1 ? "supplier" : "suppliers"}</p>
           </div>
           <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
-            <div className="relative min-w-0 flex-1 sm:w-64 sm:flex-none">
+            <div className="relative min-w-0 basis-full sm:basis-auto sm:w-64 sm:flex-none">
               <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
               <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search suppliers, contacts, or tax IDs" className="pl-9" aria-label="Search suppliers" />
             </div>
@@ -253,7 +253,7 @@ export default function VendorsWorkspace({ records: initialRecords, bills, accou
               {!visibleVendors.length ? (
                 <TableRow>
                   <TableCell colSpan={6} className="h-52 whitespace-normal text-center">
-                    <div className="mx-auto max-w-sm">
+                    <div className="sticky left-0 w-[calc(100vw-4.5rem)] sm:static sm:mx-auto sm:w-auto sm:max-w-sm">
                       <p className="text-sm font-medium">{records.length ? "No suppliers match this search" : "No suppliers yet"}</p>
                       <p className="mt-1 text-sm text-muted-foreground">{records.length ? "Try another search or balance filter." : "Add a supplier to keep contact details and bills connected."}</p>
                       {!records.length ? <Button className="mt-4 gap-2" onClick={openNewVendor}><Plus size={15} />New supplier</Button> : null}

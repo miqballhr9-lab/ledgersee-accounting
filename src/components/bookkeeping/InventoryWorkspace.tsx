@@ -140,7 +140,7 @@ export default function InventoryWorkspace({ products: productRecords, movements
         </div>
       </header>
 
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
         <Card>
           <CardContent className="flex items-center gap-3 p-4">
             <span className="grid size-10 place-items-center rounded-md bg-accent text-accent-foreground"><Package size={18} /></span>

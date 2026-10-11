@@ -274,7 +274,7 @@ export default function ExpensesWorkspace({ expenses: initialExpenses, bills: in
         </div>
       </section>
 
-      <section className="mt-6 grid gap-3 sm:grid-cols-2">
+      <section className="mt-6 grid grid-cols-2 gap-3">
         <div className="rounded-lg border border-border bg-card px-4 py-3.5">
           <p className="text-xs font-medium text-muted-foreground">Bills to pay</p>
           <p className="mt-1 text-xl font-semibold tracking-tight tabular-nums">{formatMoney(String(outstandingBills), currency)}</p>
@@ -294,7 +294,7 @@ export default function ExpensesWorkspace({ expenses: initialExpenses, bills: in
             <p className="mt-0.5 text-xs text-muted-foreground">{filteredRecords.length} {filteredRecords.length === 1 ? "record" : "records"}</p>
           </div>
           <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
-            <div className="relative min-w-0 flex-1 sm:w-56 sm:flex-none">
+            <div className="relative min-w-0 basis-full sm:basis-auto sm:w-56 sm:flex-none">
               <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
               <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search transactions" className="pl-9" aria-label="Search transactions" />
             </div>
@@ -369,7 +369,7 @@ export default function ExpensesWorkspace({ expenses: initialExpenses, bills: in
               {!pageRecords.length ? (
                 <TableRow>
                   <TableCell colSpan={9} className="h-48 whitespace-normal text-center">
-                    <div className="mx-auto max-w-sm">
+                    <div className="sticky left-0 w-[calc(100vw-4.5rem)] sm:static sm:mx-auto sm:w-auto sm:max-w-sm">
                       <p className="text-sm font-medium">{records.length ? "No transactions match these filters" : "No expenses or bills yet"}</p>
                       <p className="mt-1 text-sm text-muted-foreground">{records.length ? "Change the date, type, or filters to see more results." : "Add a bill you need to pay or record a purchase already paid."}</p>
                       {!records.length ? (

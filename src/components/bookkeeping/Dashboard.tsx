@@ -110,7 +110,7 @@ export default function Dashboard({ records, setup, asOfDate }: DashboardProps) 
 
       <SetupChecklist progress={setup} />
 
-      <section aria-label="Financial summary" className="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+      <section aria-label="Financial summary" className="mt-6 grid grid-cols-2 gap-3 xl:grid-cols-5">
         {stats.map((stat) => {
           const Icon = stat.icon;
           return (

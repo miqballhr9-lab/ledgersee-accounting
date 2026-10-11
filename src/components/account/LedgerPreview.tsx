@@ -80,7 +80,7 @@ export default function LedgerPreview({ onCreateAccount }: { onCreateAccount: ()
       </DialogTrigger>
       <DialogContent
         showCloseButton
-        className="flex h-[min(900px,calc(100dvh-1rem))] max-h-[calc(100dvh-1rem)] w-[calc(100%-1rem)] max-w-6xl flex-col gap-0 overflow-hidden rounded-xl border border-border bg-background p-0 shadow-2xl sm:h-[min(900px,calc(100dvh-3rem))] sm:max-h-[calc(100dvh-3rem)] sm:w-[calc(100%-3rem)]"
+        className="flex h-[min(900px,calc(100dvh-1rem))] max-h-[calc(100dvh-1rem)] w-[calc(100%-1rem)] max-w-6xl flex-col sm:max-w-6xl gap-0 overflow-hidden rounded-xl border border-border bg-background p-0 shadow-2xl sm:h-[min(900px,calc(100dvh-3rem))] sm:max-h-[calc(100dvh-3rem)] sm:w-[calc(100%-3rem)]"
       >
         <header className="flex shrink-0 items-center justify-between gap-4 border-b border-border bg-card px-4 py-3 sm:px-6">
           <div className="brand-lockup group flex min-w-0 items-center gap-3">

@@ -325,7 +325,7 @@ export default function PayrollWorkspace({ records, accounts, asOfDate, dateRang
         <Button onClick={openNewEntry} className="w-full shrink-0 sm:w-auto"><Plus size={16} /> Add payroll entry</Button>
       </section>
 
-      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" aria-label="Payroll summary">
+      <section className="grid grid-cols-2 gap-3 xl:grid-cols-4" aria-label="Payroll summary">
         <div className="rounded-lg border border-border bg-card p-4">
           <p className="text-xs text-muted-foreground">Employees this month</p>
           <p className="mt-2 flex items-center gap-2 text-xl font-semibold tabular-nums"><Users size={17} className="text-primary" />{periodRecords.length}</p>

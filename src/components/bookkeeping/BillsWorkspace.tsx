@@ -205,7 +205,7 @@ export default function BillsWorkspace({ records: initialRecords, vendors, accou
         </div>
       </section>
 
-      <section aria-label="Bill summary" className="mt-6 grid gap-3 sm:grid-cols-3">
+      <section aria-label="Bill summary" className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-3">
         {[
           { label: "Total outstanding", value: outstanding, detail: `${records.filter((record) => amountDue(record) > 0 && billStatus(record, asOfDate) !== "Cancelled").length} bills to pay`, tone: "text-foreground" },
           { label: "Overdue", value: overdue, detail: `${records.filter((record) => billStatus(record, asOfDate) === "Overdue").length} past due`, tone: "text-destructive" },
@@ -228,7 +228,7 @@ export default function BillsWorkspace({ records: initialRecords, vendors, accou
             <p className="mt-0.5 text-xs text-muted-foreground">{filteredRecords.length} {filteredRecords.length === 1 ? "bill" : "bills"}</p>
           </div>
           <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
-            <div className="relative min-w-0 flex-1 sm:w-60 sm:flex-none">
+            <div className="relative min-w-0 basis-full sm:basis-auto sm:w-60 sm:flex-none">
               <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
               <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search bills or vendors" className="pl-9" aria-label="Search bills or vendors" />
             </div>
@@ -293,7 +293,7 @@ export default function BillsWorkspace({ records: initialRecords, vendors, accou
               {!filteredRecords.length ? (
                 <TableRow>
                   <TableCell colSpan={9} className="h-52 whitespace-normal text-center">
-                    <div className="mx-auto max-w-sm">
+                    <div className="sticky left-0 w-[calc(100vw-4.5rem)] sm:static sm:mx-auto sm:w-auto sm:max-w-sm">
                       <p className="text-sm font-medium">{records.length ? "No bills match these filters" : "No bills yet"}</p>
                       <p className="mt-1 text-sm text-muted-foreground">{records.length ? "Try a different search, status, or category." : "Add your first vendor bill to start tracking due dates and balances."}</p>
                       {!records.length ? <Button className="mt-4 gap-2" onClick={openNewBill}><Plus size={15} />New bill</Button> : null}

@@ -521,7 +521,7 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
           <h1 className="mt-1 text-[26px] font-semibold tracking-tight sm:text-3xl">{module.plural}</h1>
           <p className="mt-1.5 text-sm text-muted-foreground">{module.description}</p>
         </div>
-        <div className="flex w-full flex-wrap items-center justify-end gap-2 sm:w-auto sm:shrink-0">
+        <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:shrink-0 sm:justify-end">
           {canExport ? <Button variant="outline" className="gap-2" onClick={exportCsv}><ArrowDownToLine size={15} />Export CSV</Button> : null}
           {module.kind === "items" ? <ItemsBulkImport onImported={handleItemsImported} /> : null}
           <Button className="gap-2" onClick={openNewRecord}><Plus size={16} />{module.kind === "settings" ? "Edit company profile" : `New ${module.label.toLowerCase()}`}</Button>
@@ -529,7 +529,7 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
       </section>
 
       {module.kind === "invoices" || module.kind === "bills" ? (
-        <div className="mt-6 grid gap-3 sm:grid-cols-3">
+        <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-3">
           {[
             { label: module.kind === "invoices" ? "Open balance" : "Outstanding", value: records.filter((record) => !["Paid", "Cancelled"].includes(record.data.status ?? "")).reduce((sum, record) => sum + Math.max(0, Number(record.data.amount || 0) - Number(record.data.paidAmount || 0) - Number(record.data.creditApplied || 0)), 0) },
               { label: "Paid", value: records.filter((record) => record.data.status === "Paid").reduce((sum, record) => sum + Number(record.data.paidAmount || record.data.amount || 0), 0) },
@@ -570,7 +570,7 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
             <p className="mt-0.5 text-xs text-muted-foreground">{filteredRecords.length} {filteredRecords.length === 1 ? "record" : "records"}</p>
           </div>
           <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
-            <div className="relative min-w-0 flex-1 sm:w-60 sm:flex-none">
+            <div className="relative min-w-0 basis-full sm:basis-auto sm:w-60 sm:flex-none">
               <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
               <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={`Search ${module.plural.toLowerCase()}`} className="pl-9" aria-label={`Search ${module.plural}`} />
             </div>
