@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import Image from "next/image";
-import { ArrowDownToLine, ArrowRightLeft, ChevronDown, ClipboardList, FileCheck2, FileText, Plus, Search, SlidersHorizontal, Trash2 } from "lucide-react";
+import { ArrowDownToLine, ArrowRightLeft, BadgeCheck, ChevronDown, CircleDollarSign, ClipboardList, FileCheck2, FileText, ListChecks, Plus, Search, SlidersHorizontal, Trash2, Undo2 } from "lucide-react";
 
 import {
   advancePurchaseOrder,
@@ -17,6 +17,7 @@ import {
   duplicateInvoiceRecord,
   applyCreditNote,
   applySupplierCredit,
+  undoInvoicePayments,
   generateRecurringInvoice,
   markRecordPaid,
   recordInvoicePayment,
@@ -371,13 +372,21 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
     }
   }
 
-  // Sales orders and estimates convert into each other or into invoices, several at a time.
-  const bulkConvertTargets: { kind: "estimates" | "sales-orders" | "invoices"; label: string }[] = module.kind === "sales-orders"
-    ? [{ kind: "estimates", label: "Convert to estimate" }, { kind: "invoices", label: "Convert to invoice" }]
+  // Actions on several checked records at once, offered from the toolbar menu.
+  type BulkAction = "estimates" | "sales-orders" | "invoices" | "pay" | "undo-payment" | "apply-credit" | "delete";
+  const bulkMenu: { label: string; items: { action: BulkAction; label: string }[] } | null = module.kind === "sales-orders"
+    ? { label: "Convert", items: [{ action: "estimates", label: "Convert to estimate" }, { action: "invoices", label: "Convert to invoice" }] }
     : module.kind === "estimates"
-      ? [{ kind: "sales-orders", label: "Convert to sales order" }, { kind: "invoices", label: "Convert to invoice" }]
-      : [];
-  const supportsBulkActions = bulkConvertTargets.length > 0;
+      ? { label: "Convert", items: [{ action: "sales-orders", label: "Convert to sales order" }, { action: "invoices", label: "Convert to invoice" }] }
+      : module.kind === "invoices"
+        ? { label: "Actions", items: [{ action: "pay", label: "Record payment" }, { action: "undo-payment", label: "Undo payment" }] }
+        : module.kind === "credit-notes"
+          ? { label: "Actions", items: [{ action: "apply-credit", label: "Apply credit" }] }
+          : null;
+  const supportsBulkActions = Boolean(bulkMenu);
+  const [bulkPaymentOpen, setBulkPaymentOpen] = useState(false);
+  const [bulkPaymentDate, setBulkPaymentDate] = useState("");
+  const [bulkPaymentAccount, setBulkPaymentAccount] = useState("");
   const selectedRecords = records.filter((record) => selectedIds.has(record.id));
 
   function toggleSelected(id: string, checked: boolean) {
@@ -389,11 +398,25 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
     });
   }
 
-  async function runBulkAction(action: "estimates" | "sales-orders" | "invoices" | "delete") {
+  const remainingBalance = (record: BookkeepingRecord) =>
+    Math.max(0, Number(record.data.amount || 0) - Number(record.data.paidAmount || 0) - Number(record.data.creditApplied || 0));
+
+  function openBulkPayment() {
+    setBulkPaymentDate(dateString(new Date()));
+    setBulkPaymentAccount(paymentAccounts[0]?.id ?? "");
+    setBulkPaymentOpen(true);
+  }
+
+  async function runBulkAction(action: BulkAction) {
     if (!selectedRecords.length) return;
+    if (action === "pay" && !bulkPaymentOpen) {
+      openBulkPayment();
+      return;
+    }
     const count = selectedRecords.length;
     const noun = count === 1 ? module.label.toLowerCase() : module.plural.toLowerCase();
     if (action === "delete" && !window.confirm(`Delete ${count} ${noun}? This can’t be undone.`)) return;
+    if (action === "undo-payment" && !window.confirm(`Remove the payments recorded on ${count} ${noun}? They will show as unpaid again.`)) return;
     setBulkPending(true);
     setActionMessage("");
     const done: string[] = [];
@@ -402,7 +425,13 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
       const title = record.data[module.titleKey] || module.label;
       try {
         if (action === "delete") await deleteBookkeepingRecord(module.kind, record.id);
-        else await convertBookkeepingRecord(record.id, action);
+        else if (action === "undo-payment") await undoInvoicePayments(record.id);
+        else if (action === "apply-credit") await applyCreditNote(record.id);
+        else if (action === "pay") {
+          const balance = remainingBalance(record);
+          if (balance <= 0) throw new Error(`${title} is already paid.`);
+          await recordInvoicePayment(record.id, balance.toFixed(2), bulkPaymentDate, bulkPaymentAccount);
+        } else await convertBookkeepingRecord(record.id, action);
         done.push(record.id);
       } catch (error) {
         const message = error instanceof Error ? error.message : "it couldn’t be processed.";
@@ -412,8 +441,17 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
     if (action === "delete") setRecords((current) => current.filter((record) => !done.includes(record.id)));
     setSelectedIds(new Set());
     setBulkPending(false);
-    const verb = action === "delete" ? "deleted" : `converted to ${action === "estimates" ? "estimates" : action === "sales-orders" ? "sales orders" : "invoices"}`;
-    if (done.length) toast.success(`${done.length} ${done.length === 1 ? module.label.toLowerCase() : module.plural.toLowerCase()} ${verb}.`);
+    setBulkPaymentOpen(false);
+    const verbs: Record<BulkAction, string> = {
+      estimates: "converted to estimates",
+      "sales-orders": "converted to sales orders",
+      invoices: "converted to invoices",
+      pay: "marked paid",
+      "undo-payment": "reopened as unpaid",
+      "apply-credit": "applied",
+      delete: "deleted",
+    };
+    if (done.length) toast.success(`${done.length} ${done.length === 1 ? module.label.toLowerCase() : module.plural.toLowerCase()} ${verbs[action]}.`);
     if (failed.length) toast.error(failed.join(" "));
     router.refresh();
   }
@@ -428,6 +466,17 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
       setExpenseCategoryId(preferredCategory?.id ?? expenseAccounts[0]?.id ?? "");
       setExpensePaymentAccountId("");
       setExpenseConversionError("");
+      return;
+    }
+    if (kind === "undo-payment") {
+      if (!window.confirm(`Undo the payment on ${record.data.invoiceNumber || "this invoice"}? It will show as unpaid so you can edit it or record the payment again.`)) return;
+      try {
+        await undoInvoicePayments(record.id);
+        toast.success(`Payment removed from ${record.data.invoiceNumber || "the invoice"}. You can now edit it or record a new payment.`);
+        router.refresh();
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "We couldn’t undo that payment.");
+      }
       return;
     }
     if (kind === "payment") {
@@ -633,19 +682,25 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
               <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
               <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={`Search ${module.plural.toLowerCase()}`} className="pl-9" aria-label={`Search ${module.plural}`} />
             </div>
-            {supportsBulkActions ? (
+            {bulkMenu ? (
               <DropdownMenu>
                 <DropdownMenuTrigger
                   render={
                     <Button type="button" variant="outline" className="gap-2" disabled={!selectedRecords.length || bulkPending} title={selectedRecords.length ? undefined : `Select ${module.plural.toLowerCase()} with the checkboxes first`}>
-                      <ArrowRightLeft size={15} />{bulkPending ? "Working…" : `Convert${selectedRecords.length ? ` (${selectedRecords.length})` : ""}`}<ChevronDown size={14} />
+                      {bulkMenu.label === "Convert" ? <ArrowRightLeft size={15} /> : <ListChecks size={15} />}
+                      {bulkPending ? "Working…" : `${bulkMenu.label}${selectedRecords.length ? ` (${selectedRecords.length})` : ""}`}<ChevronDown size={14} />
                     </Button>
                   }
                 />
                 <DropdownMenuContent align="end" className="min-w-48">
-                  {bulkConvertTargets.map((target) => {
-                    const Icon = target.kind === "invoices" ? FileText : target.kind === "estimates" ? FileCheck2 : ClipboardList;
-                    return <DropdownMenuItem key={target.kind} onClick={() => void runBulkAction(target.kind)}><Icon size={15} />{target.label}</DropdownMenuItem>;
+                  {bulkMenu.items.map((item) => {
+                    const Icon = item.action === "invoices" ? FileText
+                      : item.action === "estimates" ? FileCheck2
+                        : item.action === "sales-orders" ? ClipboardList
+                          : item.action === "pay" ? CircleDollarSign
+                            : item.action === "undo-payment" ? Undo2
+                              : BadgeCheck;
+                    return <DropdownMenuItem key={item.action} onClick={() => void runBulkAction(item.action)}><Icon size={15} />{item.label}</DropdownMenuItem>;
                   })}
                   <DropdownMenuSeparator />
                   <DropdownMenuItem variant="destructive" onClick={() => void runBulkAction("delete")}><Trash2 size={15} />Delete</DropdownMenuItem>
@@ -755,6 +810,33 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
           onSaveComplete={handleInvoiceSaveComplete}
         />
       )}
+
+      <Dialog open={bulkPaymentOpen} onOpenChange={(open) => { if (!bulkPending) setBulkPaymentOpen(open); }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Record payment</DialogTitle>
+            <DialogDescription>
+              Pays the full remaining balance of {selectedRecords.length} selected {selectedRecords.length === 1 ? "invoice" : "invoices"}
+              {" "}({formatCurrency(selectedRecords.reduce((sum, record) => sum + remainingBalance(record), 0), currency)}).
+            </DialogDescription>
+          </DialogHeader>
+          <form id="bulk-payment-form" onSubmit={(event) => { event.preventDefault(); void runBulkAction("pay"); }} className="space-y-4">
+            <div className="space-y-2"><Label htmlFor="bulk-payment-date">Payment date</Label><Input id="bulk-payment-date" type="date" value={bulkPaymentDate} onChange={(event) => setBulkPaymentDate(event.target.value)} required /></div>
+            <div className="space-y-2">
+              <Label htmlFor="bulk-payment-method">Payment method / deposit to</Label>
+              <Select value={bulkPaymentAccount || undefined} onValueChange={(value) => setBulkPaymentAccount(value ?? "")}>
+                <SelectTrigger id="bulk-payment-method" className="w-full"><SelectValue placeholder="Choose a payment account" /></SelectTrigger>
+                <SelectContent>{paymentAccounts.map((account) => <SelectItem key={account.id} value={account.id}>{paymentAccountLabel(account)}</SelectItem>)}</SelectContent>
+              </Select>
+              {!paymentAccounts.length ? <NoAccountsNotice message="You need a Cash, Bank or Credit card account to record where this payment went." /> : null}
+            </div>
+          </form>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setBulkPaymentOpen(false)} disabled={bulkPending}>Cancel</Button>
+            <Button type="submit" form="bulk-payment-form" disabled={bulkPending || !bulkPaymentAccount}>{bulkPending ? "Recording…" : "Record payments"}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={Boolean(paymentRecord)} onOpenChange={(open) => { if (!open) setPaymentRecord(null); }}>
         <DialogContent className="sm:max-w-md">

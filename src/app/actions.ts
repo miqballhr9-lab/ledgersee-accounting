@@ -1005,6 +1005,10 @@ export async function recordInvoicePayment(
     ...data,
     paidAmount: updatedPaid.toFixed(2),
     status: updatedPaid + credited >= total ? "Paid" : "Partially Paid",
+    // Show where the latest payment went in the invoice list's payment account column.
+    paymentMethod: method,
+    paymentAccountId: paymentAccount.id,
+    paymentAccountName: paymentAccount.data.name || paymentAccount.data.code || "Account",
   };
   await db
     .update(bookkeepingRecord)
@@ -1023,6 +1027,43 @@ export async function recordInvoicePayment(
       paymentAccountId: paymentAccount.id,
       paymentAccountName: paymentAccount.data.name || paymentAccount.data.code || "Account",
     },
+  });
+  revalidatePath("/app", "layout");
+}
+
+/**
+ * Removes every payment recorded against an invoice, so a paid invoice can be
+ * corrected and paid again (for example into a different account).
+ */
+export async function undoInvoicePayments(id: string): Promise<void> {
+  const me = await requireUser();
+  await db.transaction(async (transaction) => {
+    const [invoice] = await transaction
+      .select()
+      .from(bookkeepingRecord)
+      .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "invoices")))
+      .for("update")
+      .limit(1);
+    if (!invoice) throw new Error("We couldn’t find that invoice. Refresh and try again.");
+    if (!(Number(invoice.data.paidAmount) > 0)) throw new Error(`${invoice.data.invoiceNumber || "This invoice"} has no payment to undo.`);
+    await transaction
+      .delete(bookkeepingRecord)
+      .where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "payments"), sql`${bookkeepingRecord.data}->>'invoiceId' = ${id}`));
+    const credited = Number(invoice.data.creditApplied) || 0;
+    await transaction
+      .update(bookkeepingRecord)
+      .set({
+        data: {
+          ...invoice.data,
+          paidAmount: "0",
+          paymentMethod: "Credit",
+          paymentAccountId: "",
+          paymentAccountName: "",
+          status: credited > 0 ? "Partially Paid" : "Open",
+        },
+        updatedAt: new Date(),
+      })
+      .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id)));
   });
   revalidatePath("/app", "layout");
 }

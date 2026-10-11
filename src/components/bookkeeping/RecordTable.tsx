@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowRightLeft, BadgeCheck, Ban, Check, CircleDollarSign, Copy, Ellipsis, Link2, Mail, PackageCheck, Pencil, Play, Printer, Trash2 } from "lucide-react";
+import { ArrowRightLeft, BadgeCheck, Ban, Check, CircleDollarSign, Copy, Ellipsis, Link2, Mail, PackageCheck, Pencil, Play, Printer, Trash2, Undo2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -10,7 +10,7 @@ import type { ModuleDefinition } from "@/lib/bookkeeping-config";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
 import { formatCustomerAddress } from "@/lib/customer-utils";
 
-export type RecordActionKind = "convert" | "convert-expense" | "payment" | "send" | "send-rfq" | "confirm-order" | "receive-order" | "cancel-order" | "mark-paid" | "match" | "apply-credit" | "generate" | "duplicate" | "share" | "print";
+export type RecordActionKind = "convert" | "convert-expense" | "payment" | "send" | "send-rfq" | "confirm-order" | "receive-order" | "cancel-order" | "mark-paid" | "match" | "apply-credit" | "generate" | "duplicate" | "share" | "print" | "undo-payment";
 
 interface RecordTableProps {
   module: ModuleDefinition;
@@ -154,7 +154,7 @@ function rowActions(module: ModuleDefinition, record: BookkeepingRecord, onActio
   }
   if (["estimates", "sales-orders", "credit-notes"].includes(module.kind)) actions.push({ kind: "send", label: `Send ${module.label.toLowerCase()}`, icon: Mail });
   if (module.kind === "bills") actions.push({ kind: "mark-paid", label: "Mark paid", icon: Check });
-  if (module.kind === "credit-notes") actions.push({ kind: "apply-credit", label: "Apply credit", icon: BadgeCheck });
+  if (module.kind === "credit-notes" && !["Applied", "Refunded"].includes(record.data.status ?? "")) actions.push({ kind: "apply-credit", label: "Apply credit", icon: BadgeCheck });
   if (module.kind === "supplier-credits" && record.data.status !== "Applied") actions.push({ kind: "apply-credit", label: "Apply to bill", icon: BadgeCheck });
   if (module.kind === "recurring-invoices") actions.push({ kind: "generate", label: "Generate invoice", icon: Play });
   if (module.kind === "transactions") actions.push({ kind: "match", label: record.data.matched === "true" ? "Mark unmatched" : "Match transaction", icon: Check });
@@ -186,6 +186,9 @@ function rowActions(module: ModuleDefinition, record: BookkeepingRecord, onActio
             <DropdownMenuItem onClick={() => onAction("duplicate", record)}><Copy size={14} />Copy {module.label.toLowerCase()}</DropdownMenuItem>
             <DropdownMenuItem onClick={() => onAction("share", record)}><Link2 size={14} />Copy share link</DropdownMenuItem>
             <DropdownMenuItem onClick={() => onAction("print", record)}><Printer size={14} />Print or save PDF</DropdownMenuItem>
+            {module.kind === "invoices" && Number(record.data.paidAmount) > 0 ? (
+              <DropdownMenuItem onClick={() => onAction("undo-payment", record)}><Undo2 size={14} />Undo payment</DropdownMenuItem>
+            ) : null}
           </DropdownMenuContent>
         </DropdownMenu>
       ) : null}
