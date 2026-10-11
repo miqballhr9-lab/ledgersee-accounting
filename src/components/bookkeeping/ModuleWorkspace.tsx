@@ -178,18 +178,6 @@ function formatCurrency(value: number, currency: string) {
   }
 }
 
-function purchaseOrderStage(status: string | undefined) {
-  switch (status) {
-    case "Sent":
-    case "RFQ Sent": return "sent";
-    case "Purchase Order": return "confirmed";
-    case "Received": return "received";
-    case "Converted": return "billed";
-    case "Cancelled": return "cancelled";
-    default: return "draft";
-  }
-}
-
 export default function ModuleWorkspace({ module, records: initialRecords, customers, vendors, accounts, items, defaultCurrency, sourceFilter }: ModuleWorkspaceProps) {
   const router = useRouter();
   const [records, setRecords] = useState(initialRecords);
@@ -267,11 +255,7 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
     } : null;
     return records.filter((record) => {
       const matchesSearch = !normalizedSearch || Object.values(record.data).some((value) => value.toLowerCase().includes(normalizedSearch));
-      const matchesFilter = module.kind === "purchase-orders" && filter.startsWith("po:")
-        ? filter === "po:accounted"
-          ? Boolean(record.data.convertedRecordId || record.data.convertedKind) || record.data.status === "Converted"
-          : purchaseOrderStage(record.data.status) === filter.slice(3)
-        : filter === "all" || !filterKey || record.data[filterKey] === filter;
+      const matchesFilter = filter === "all" || !filterKey || record.data[filterKey] === filter;
       const matchesDateRange = !sourceFilter || recordsWithinBudgetDates([record], sourceFilter.startDate, sourceFilter.endDate).length > 0;
       const matchesBudgetHead = !budgetLine || budgetActualRecords(budgetLine, [record]).length > 0;
       return matchesSearch && matchesFilter && matchesDateRange && matchesBudgetHead;
@@ -290,15 +274,6 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
   const visibleColumns = module.kind === "customers" ? customerPreferences.columns : module.columns;
   const canExport = module.kind !== "settings";
   const currency = records.find((record) => record.data.currency)?.data.currency || "USD";
-  const purchaseOrderStages = [
-    { id: "all", label: "All orders", count: records.length },
-    { id: "po:draft", label: "RFQ drafts", count: records.filter((record) => purchaseOrderStage(record.data.status) === "draft").length },
-    { id: "po:sent", label: "Awaiting response", count: records.filter((record) => purchaseOrderStage(record.data.status) === "sent").length },
-    { id: "po:confirmed", label: "To receive", count: records.filter((record) => purchaseOrderStage(record.data.status) === "confirmed").length },
-    { id: "po:received", label: "Ready to record", count: records.filter((record) => purchaseOrderStage(record.data.status) === "received" && !record.data.convertedRecordId && !record.data.convertedKind).length },
-    { id: "po:accounted", label: "Accounted", count: records.filter((record) => Boolean(record.data.convertedRecordId || record.data.convertedKind) || record.data.status === "Converted").length },
-    { id: "po:cancelled", label: "Cancelled", count: records.filter((record) => purchaseOrderStage(record.data.status) === "cancelled").length },
-  ];
 
   useEffect(() => setPage(1), [search, filter]);
 
@@ -690,23 +665,6 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
         </div>
       ) : null}
 
-      {module.kind === "purchase-orders" ? (
-        <div className="mt-6 flex min-w-0 gap-2 overflow-x-auto border-y border-border py-2" aria-label="Purchase order stages">
-          {purchaseOrderStages.map((stage) => (
-            <Button
-              key={stage.id}
-              type="button"
-              size="sm"
-              variant={filter === stage.id ? "default" : "outline"}
-              className="shrink-0 gap-2"
-              aria-pressed={filter === stage.id}
-              onClick={() => setFilter(stage.id)}
-            >
-              {stage.label}<span className="tabular-nums opacity-75">{stage.count}</span>
-            </Button>
-          ))}
-        </div>
-      ) : null}
 
       {actionMessage ? <p role="status" className="mt-4 rounded-md border border-border bg-card px-3 py-2 text-sm text-muted-foreground">{actionMessage}</p> : null}
 
@@ -748,7 +706,7 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
                 </DropdownMenuContent>
               </DropdownMenu>
             ) : null}
-            {module.kind !== "purchase-orders" && filterKey && filterOptions.length ? (
+            {filterKey && filterOptions.length ? (
               <Select value={filter} onValueChange={(value) => setFilter(value ?? "all")}>
                 <SelectTrigger className="w-[150px]" aria-label="Filter records"><SelectValue placeholder="All records" /></SelectTrigger>
                 <SelectContent>
