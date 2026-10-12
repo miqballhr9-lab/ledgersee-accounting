@@ -69,6 +69,31 @@ export function pakistanAnnualSalaryTax(annualTaxableSalary: number): number {
   return 0;
 }
 
+/** Which salary income tax payroll works out when the tax box is left empty. Set by Tax setup's country. */
+export type SalaryTaxRule = "pakistan-slabs" | "uk-paye" | "none";
+
+/**
+ * UK income tax for 2025/26 (England, Wales and Northern Ireland), as a yearly
+ * estimate: personal allowance £12,570 (tapered away above £100,000), 20% basic
+ * rate to £50,270, 40% higher rate to £125,140 and 45% above. Tax codes and
+ * Scottish rates aren't applied.
+ */
+export function ukAnnualIncomeTax(annualIncome: number): number {
+  const income = Math.max(0, annualIncome);
+  const allowance = Math.max(0, 12_570 - Math.max(0, income - 100_000) / 2);
+  const taxable = Math.max(0, income - allowance);
+  const basic = Math.min(taxable, 37_700);
+  const higher = Math.min(Math.max(0, taxable - 37_700), Math.max(0, 125_140 - allowance - 37_700));
+  const additional = Math.max(0, taxable - basic - higher);
+  return Math.round((basic * 0.2 + higher * 0.4 + additional * 0.45) * 100) / 100;
+}
+
+export function annualSalaryTax(rule: SalaryTaxRule, annualIncome: number) {
+  if (rule === "uk-paye") return ukAnnualIncomeTax(annualIncome);
+  if (rule === "none") return 0;
+  return pakistanAnnualSalaryTax(annualIncome);
+}
+
 function amount(value: string): number {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
@@ -76,13 +101,13 @@ function amount(value: string): number {
 
 export function calculatePayroll(values: Pick<PayrollValues,
   "baseSalary" | "increment" | "workingDays" | "workedDays" | "incentive" | "overtimeAllowance" | "gymAllowance" | "medicalAllowance" | "otherAllowance" | "taxDeduction" | "advanceDeduction" | "loanDeduction" | "fineDeduction" | "adjustment"
->): PayrollTotals {
+>, taxRule: SalaryTaxRule = "pakistan-slabs"): PayrollTotals {
   const revisedSalary = amount(values.baseSalary) + amount(values.increment);
   const workingDays = amount(values.workingDays);
   const workedDays = amount(values.workedDays);
   const proratedSalary = workingDays > 0 ? revisedSalary * Math.min(workedDays, workingDays) / workingDays : 0;
   const grossSalary = proratedSalary + amount(values.incentive) + amount(values.overtimeAllowance) + amount(values.gymAllowance) + amount(values.medicalAllowance) + amount(values.otherAllowance);
-  const estimatedTax = pakistanAnnualSalaryTax(grossSalary * 12) / 12;
+  const estimatedTax = annualSalaryTax(taxRule, grossSalary * 12) / 12;
   const enteredTax = values.taxDeduction.trim() ? Math.max(0, amount(values.taxDeduction)) : estimatedTax;
   const taxDeduction = Math.round(enteredTax * 100) / 100;
   const totalDeductions = taxDeduction + amount(values.advanceDeduction) + amount(values.loanDeduction) + amount(values.fineDeduction);
@@ -130,8 +155,8 @@ export function emptyPayrollValues(month: string): PayrollValues {
   };
 }
 
-export function serializePayroll(values: PayrollValues): Record<string, string> {
-  const totals = calculatePayroll(values);
+export function serializePayroll(values: PayrollValues, taxRule: SalaryTaxRule = "pakistan-slabs"): Record<string, string> {
+  const totals = calculatePayroll(values, taxRule);
   return {
     ...values,
     afterIncrement: totals.revisedSalary.toFixed(2),

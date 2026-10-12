@@ -10,8 +10,12 @@ interface PayrollSlipPageProps {
   params: Promise<{ id: string }>;
 }
 
-function amount(value: string | undefined) {
-  return new Intl.NumberFormat("en-PK", { style: "currency", currency: "PKR", minimumFractionDigits: 2 }).format(Number(value || 0));
+function formatAmount(value: string | undefined, currency: string) {
+  try {
+    return new Intl.NumberFormat(currency === "PKR" ? "en-PK" : "en-US", { style: "currency", currency, minimumFractionDigits: 2 }).format(Number(value || 0));
+  } catch {
+    return `${currency} ${Number(value || 0).toFixed(2)}`;
+  }
 }
 
 export default async function PayrollSlipPage({ params }: PayrollSlipPageProps) {
@@ -34,6 +38,8 @@ export default async function PayrollSlipPage({ params }: PayrollSlipPageProps) 
 
   const employee = records[0].data;
   const companyName = settings[0]?.data.companyName || me.name;
+  const currency = settings[0]?.data.currency || "PKR";
+  const amount = (value: string | undefined) => formatAmount(value, currency);
   const otherDeductions = Math.max(0, Number(employee.totalDeductions || 0) - Number(employee.taxDeduction || 0));
   const rows = [
     ["Base salary", amount(employee.baseSalary)],

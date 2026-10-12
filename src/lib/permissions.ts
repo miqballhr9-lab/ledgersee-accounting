@@ -91,7 +91,7 @@ export function areaForPage(path: string): Area | null {
   if (slug === "crm") return "crm";
   if (slug === "hr" || slug === "my") return slug === "my" ? "self" : "hr";
   if (slug === "invoices" || slug === "documents") return "sales";
-  if (slug === "reconciliation" || slug === "reports") return "accounting";
+  if (slug === "reconciliation" || slug === "reports" || slug === "tax-setup" || slug === "tax-returns") return "accounting";
   if (slug === "inventory") return "inventory";
   if (slug === "automation") return "admin";
   const area = areaForKind(slug);

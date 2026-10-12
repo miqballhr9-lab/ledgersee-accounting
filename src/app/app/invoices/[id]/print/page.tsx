@@ -34,7 +34,7 @@ export default async function InvoicePrintPage({ params }: InvoicePrintPageProps
       <div className="mx-auto mb-4 flex max-w-4xl justify-end print:hidden">
         <InvoicePrintButton />
       </div>
-      <InvoiceDocument invoice={invoice[0].data} companyName={settings[0]?.data.companyName || me.name} />
+      <InvoiceDocument invoice={invoice[0].data} companyName={settings[0]?.data.companyName || me.name} seller={settings[0]?.data} />
     </main>
   );
 }

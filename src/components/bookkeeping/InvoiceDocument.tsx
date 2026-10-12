@@ -1,9 +1,12 @@
 import { currencyAmount, parseInvoiceLines } from "@/lib/invoice-utils";
+import { packFor } from "@/lib/tax-packs";
 
 interface InvoiceDocumentProps {
   invoice: Record<string, string>;
   companyName: string;
   documentKind?: "invoices" | "estimates" | "sales-orders" | "credit-notes";
+  /** The seller's Settings, for tax registration numbers and the tax-invoice title. */
+  seller?: Record<string, string>;
 }
 
 const documentDetails = {
@@ -13,7 +16,11 @@ const documentDetails = {
   "credit-notes": { label: "Credit note", numberKey: "creditNumber", dateKey: "date", dateLabel: "Date", totalLabel: "Credit amount" },
 } as const;
 
-export default function InvoiceDocument({ invoice, companyName, documentKind = "invoices" }: InvoiceDocumentProps) {
+export default function InvoiceDocument({ invoice, companyName, documentKind = "invoices", seller }: InvoiceDocumentProps) {
+  const pack = packFor(seller?.taxCountry);
+  const registrations = (pack?.registrations ?? []).filter((field) => seller?.[field.key]).map((field) => `${field.label}: ${seller?.[field.key]}`);
+  // VAT and GST countries call a taxed invoice a "tax invoice".
+  const isTaxInvoice = documentKind === "invoices" && Boolean(pack) && pack?.code !== "US" && Number(invoice.taxAmount) > 0;
   const currency = invoice.currency || "USD";
   const details = documentDetails[documentKind];
   const lines = parseInvoiceLines(invoice.lineItems ?? "");
@@ -25,9 +32,10 @@ export default function InvoiceDocument({ invoice, companyName, documentKind = "
     <article className="mx-auto w-full max-w-4xl border border-border bg-card p-6 text-card-foreground shadow-sm sm:p-10 print:max-w-none print:border-0 print:p-0 print:shadow-none">
       <header className="flex flex-wrap items-start justify-between gap-6 border-b border-border pb-7">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.12em] text-primary">{details.label}</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.12em] text-primary">{isTaxInvoice ? (pack?.code === "PK" ? "Sales tax invoice" : "Tax invoice") : details.label}</p>
           <h1 className="mt-2 text-3xl font-semibold tracking-tight">{invoice[details.numberKey] || details.label}</h1>
           <p className="mt-2 text-sm text-muted-foreground">From {companyName || "Business"}</p>
+          {registrations.length ? <p className="mt-1 text-xs text-muted-foreground">{registrations.join(" · ")}</p> : null}
         </div>
         <dl className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm">
           <div><dt className="text-xs text-muted-foreground">{details.dateLabel}</dt><dd className="mt-1 font-medium">{invoice[details.dateKey] || "—"}</dd></div>
@@ -80,7 +88,7 @@ export default function InvoiceDocument({ invoice, companyName, documentKind = "
 
       <section className="ml-auto mt-6 w-full max-w-sm space-y-3 text-sm">
         <div className="flex justify-between gap-4"><span className="text-muted-foreground">Subtotal</span><span className="tabular-nums">{currencyAmount(subtotal, currency)}</span></div>
-        <div className="flex justify-between gap-4"><span className="text-muted-foreground">Tax ({invoice.taxRate || "0"}%)</span><span className="tabular-nums">{currencyAmount(taxAmount, currency)}</span></div>
+        <div className="flex justify-between gap-4"><span className="text-muted-foreground">{invoice.taxName ? `${invoice.taxName}` : `Tax (${invoice.taxRate || "0"}%)`}</span><span className="tabular-nums">{currencyAmount(taxAmount, currency)}</span></div>
         <div className="flex justify-between gap-4"><span className="text-muted-foreground">Discount</span><span className="tabular-nums">−{currencyAmount(discount, currency)}</span></div>
         <div className="flex justify-between gap-4 border-t border-border pt-4 text-base font-semibold"><span>{details.totalLabel}</span><span className="tabular-nums">{currencyAmount(Number(invoice.amount) || 0, currency)}</span></div>
       </section>

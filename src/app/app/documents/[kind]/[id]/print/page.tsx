@@ -39,7 +39,7 @@ export default async function DocumentPrintPage({ params }: DocumentPrintPagePro
       <div className="mx-auto mb-4 flex max-w-4xl justify-end print:hidden">
         <InvoicePrintButton />
       </div>
-      <InvoiceDocument invoice={document[0].data} companyName={settings[0]?.data.companyName || me.name} documentKind={documentKind} />
+      <InvoiceDocument invoice={document[0].data} companyName={settings[0]?.data.companyName || me.name} documentKind={documentKind} seller={settings[0]?.data} />
     </main>
   );
 }

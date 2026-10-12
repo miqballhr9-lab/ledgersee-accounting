@@ -19,6 +19,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { payrollCsvFields } from "@/lib/payroll-utils";
+import type { SalaryTaxRule } from "@/lib/payroll-utils";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
 
 interface PayrollWorkspaceProps {
@@ -28,14 +29,17 @@ interface PayrollWorkspaceProps {
   employees?: BookkeepingRecord[];
   asOfDate: string;
   dateRange?: { startDate: string; endDate: string };
+  /** The business's currency (Settings); Pakistani rupees until one is set. */
+  currency?: string;
+  taxRule?: SalaryTaxRule;
 }
 
-function formatRupees(amount: number) {
-  return new Intl.NumberFormat("en-PK", {
-    style: "currency",
-    currency: "PKR",
-    maximumFractionDigits: 2,
-  }).format(Number.isFinite(amount) ? amount : 0);
+function formatPayAmount(amount: number, currency: string) {
+  try {
+    return new Intl.NumberFormat(currency === "PKR" ? "en-PK" : "en-US", { style: "currency", currency, maximumFractionDigits: 2 }).format(Number.isFinite(amount) ? amount : 0);
+  } catch {
+    return `${currency} ${(Number.isFinite(amount) ? amount : 0).toFixed(2)}`;
+  }
 }
 
 function monthLabel(month: string) {
@@ -74,7 +78,8 @@ interface PayrollColumn {
 const PAYROLL_COLUMNS_KEY = "mikledger:payroll-columns:v1";
 const DEFAULT_PAYROLL_COLUMNS = ["reference", "employee", "designation", "days", "paymentAccount", "grossSalary", "tax", "otherDeductions", "payable", "description"];
 
-function payrollColumns(): PayrollColumn[] {
+function payrollColumns(currency: string): PayrollColumn[] {
+  const formatRupees = (amount: number) => formatPayAmount(amount, currency);
   const money = (value: string | undefined) => formatRupees(Number(value || 0));
   return [
     { key: "reference", label: "Ref no.", render: (record) => <span className="font-medium">{record.data.reference || "—"}</span> },
@@ -122,9 +127,9 @@ function payrollColumns(): PayrollColumn[] {
   ];
 }
 
-const PAYROLL_COLUMNS = payrollColumns();
 
-export default function PayrollWorkspace({ records, accounts, employees = [], asOfDate, dateRange }: PayrollWorkspaceProps) {
+export default function PayrollWorkspace({ records, accounts, employees = [], asOfDate, dateRange, currency = "PKR", taxRule }: PayrollWorkspaceProps) {
+  const formatRupees = (amount: number) => formatPayAmount(amount, currency);
   const router = useRouter();
   const uploadRef = useRef<HTMLInputElement>(null);
   const currentMonth = asOfDate.slice(0, 7);
@@ -143,7 +148,7 @@ export default function PayrollWorkspace({ records, accounts, employees = [], as
   const [isSending, setIsSending] = useState("");
   const [isImporting, setIsImporting] = useState(false);
   const [visibleColumnKeys, setVisibleColumnKeys] = useState<string[]>(DEFAULT_PAYROLL_COLUMNS);
-  const allColumns = PAYROLL_COLUMNS;
+  const allColumns = useMemo(() => payrollColumns(currency), [currency]);
   const visibleColumns = allColumns.filter((column) => visibleColumnKeys.includes(column.key));
 
   useEffect(() => {
@@ -374,7 +379,7 @@ export default function PayrollWorkspace({ records, accounts, employees = [], as
         <div className="flex flex-col gap-3 border-b border-border p-4">
           <div>
             <h2 className="font-semibold">Payroll register</h2>
-            <p className="mt-1 text-xs text-muted-foreground">{customFromDate || customToDate ? `${customFromDate || "Any date"} – ${customToDate || "Any date"}` : monthLabel(selectedMonth)} · PKR</p>
+            <p className="mt-1 text-xs text-muted-foreground">{customFromDate || customToDate ? `${customFromDate || "Any date"} – ${customToDate || "Any date"}` : monthLabel(selectedMonth)} · {currency}</p>
           </div>
           <input ref={uploadRef} type="file" accept=".csv,text/csv" className="hidden" aria-label="Upload payroll CSV" onChange={(event) => { void handleImport(event.target.files?.[0]); event.target.value = ""; }} />
           <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center print:hidden">
@@ -541,6 +546,8 @@ export default function PayrollWorkspace({ records, accounts, employees = [], as
           copyFrom={sheet.copyFrom}
           employees={employees}
           existingRecords={savedRecords}
+          taxRule={taxRule}
+          currency={currency}
           onSaved={(saved, month) => {
             setSavedRecords((previous) => [...saved, ...previous.filter((record) => !saved.some((item) => item.id === record.id))]);
             setSelectedMonth(month);

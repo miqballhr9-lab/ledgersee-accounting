@@ -12,7 +12,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { readableError } from "@/lib/action-error";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
-import { calculatePayroll, emptyPayrollValues, type PayrollValues } from "@/lib/payroll-utils";
+import { calculatePayroll, emptyPayrollValues, type PayrollValues, type SalaryTaxRule } from "@/lib/payroll-utils";
 
 interface PayrollSheetProps {
   open: boolean;
@@ -24,6 +24,9 @@ interface PayrollSheetProps {
   /** Payroll entries already saved; the month's entries load into the sheet and saving updates them. */
   existingRecords: BookkeepingRecord[];
   onSaved: (records: BookkeepingRecord[], month: string) => void;
+  /** The country's salary tax, for the estimate shown when the tax box is empty. */
+  taxRule?: SalaryTaxRule;
+  currency?: string;
 }
 
 interface Person {
@@ -145,12 +148,18 @@ function defaultReference(month: string) {
   return month ? `SAL-${month}` : "SAL";
 }
 
-function rupees(value: number) {
-  return `Rs ${value.toLocaleString("en-PK", { maximumFractionDigits: 0 })}`;
+function formatPay(value: number, currency: string) {
+  if (currency === "PKR") return `Rs ${value.toLocaleString("en-PK", { maximumFractionDigits: 0 })}`;
+  try {
+    return new Intl.NumberFormat("en-US", { style: "currency", currency, maximumFractionDigits: 0 }).format(value);
+  } catch {
+    return `${currency} ${value.toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
+  }
 }
 
 /** Enter a month's salaries for many employees at once, one employee per line. */
-export default function PayrollSheet({ open, onOpenChange, month: initialMonth, copyFrom, employees, existingRecords, onSaved }: PayrollSheetProps) {
+export default function PayrollSheet({ open, onOpenChange, month: initialMonth, copyFrom, employees, existingRecords, onSaved, taxRule, currency = "PKR" }: PayrollSheetProps) {
+  const rupees = (value: number) => formatPay(value, currency);
   const activeEmployees = employees.filter((employee) => employee.data.name?.trim() && employee.data.status !== "Inactive");
   const monthEntries = existingRecords.filter((entry) => entry.data.month === initialMonth);
   const [month, setMonth] = useState(initialMonth);
@@ -275,7 +284,7 @@ export default function PayrollSheet({ open, onOpenChange, month: initialMonth, 
 
   const lineTotals = rows.map((row) => {
     const values = payrollValues(row);
-    return values ? calculatePayroll(values) : null;
+    return values ? calculatePayroll(values, taxRule) : null;
   });
   const columnTotal = (key: keyof SheetRow) => rows.reduce((sum, row, index) => sum + (lineTotals[index] ? Number(row[key]) || 0 : 0), 0);
   const sheetTotals = lineTotals.reduce((sum, totals) => totals ? {

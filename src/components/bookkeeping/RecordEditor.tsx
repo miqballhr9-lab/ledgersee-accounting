@@ -10,6 +10,7 @@ import {
   createCustomerDocumentShareLink,
   createInvoiceShareLink,
   getAttachmentUploadTarget,
+  listBookkeepingRecords,
   saveBookkeepingRecord,
   sendCustomerDocumentRecord,
   sendInvoiceRecord,
@@ -159,6 +160,30 @@ function selectedCatalogItemLabel(items: BookkeepingRecord[], itemId: string, cu
 
 export default function RecordEditor({ module, record, customers, vendors, items, accounts, defaultCurrency, defaults, open, onOpenChange, onSaved, onSaveComplete }: RecordEditorProps) {
   const [values, setValues] = useState<Record<string, string>>(() => getInitialValues(module, record, defaults, customers));
+  // Tax rates from Taxes (installed by Tax setup), offered on documents with a tax rate field.
+  const [taxes, setTaxes] = useState<BookkeepingRecord[]>([]);
+  const defaultTaxRef = useRef<{ rate: string; name: string } | null>(null);
+  const hasTaxField = module.fields.some((field) => field.key === "taxRate");
+  const taxSide = ["invoices", "estimates", "sales-orders", "credit-notes", "recurring-invoices"].includes(module.kind) ? "Sales" : "Purchases";
+  useEffect(() => {
+    if (!open || !hasTaxField) return;
+    let cancelled = false;
+    listBookkeepingRecords("taxes")
+      .then((rows) => {
+        if (cancelled) return;
+        const enabled = rows.filter((tax) => tax.data.enabled !== "false");
+        setTaxes(enabled);
+        // A new document starts on the business's default rate for its side.
+        const fallback = record ? undefined : enabled.find((tax) => tax.data.isDefault === "true" && (tax.data.appliesTo || "Both") !== (taxSide === "Sales" ? "Purchases" : "Sales"));
+        defaultTaxRef.current = fallback ? { rate: fallback.data.rate, name: fallback.data.name } : null;
+        if (fallback) setValues((current) => (current.taxRate || current.taxName ? current : { ...current, taxRate: fallback.data.rate, taxName: fallback.data.name }));
+      })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [open, hasTaxField, record, taxSide]);
+  const taxOptions = taxes.filter((tax) => tax.data.type !== "Withholding" && (tax.data.appliesTo || "Both") !== (taxSide === "Sales" ? "Purchases" : "Sales"));
+  const [customTax, setCustomTax] = useState(false);
+
   const [invoiceLines, setInvoiceLines] = useState<InvoiceLine[]>(() => readInvoiceLines(record?.data.lineItems ?? "", items));
   const [expenseLines, setExpenseLines] = useState<ExpenseEntryLine[]>(() => readExpenseEditorLines(record));
   const availableItems = items.filter((item) => item.data.name?.trim());
@@ -179,7 +204,9 @@ export default function RecordEditor({ module, record, customers, vendors, items
   const sendWindow = useRef<Window | null>(null);
 
   useEffect(() => {
-    setValues(getInitialValues(module, record, defaults, customers));
+    const initial = getInitialValues(module, record, defaults, customers);
+    const defaultTax = defaultTaxRef.current;
+    setValues(!record && defaultTax && !initial.taxRate && !initial.taxName ? { ...initial, taxRate: defaultTax.rate, taxName: defaultTax.name } : initial);
     setInvoiceLines(readInvoiceLines(record?.data.lineItems ?? "", itemsRef.current));
     setExpenseLines(readExpenseEditorLines(record));
     setSavedRecordId(record?.id ?? null);
@@ -865,13 +892,31 @@ export default function RecordEditor({ module, record, customers, vendors, items
                     </div>
                   ) : null}
 
-                  {field.key !== "customer" && field.key !== "vendor" && (!field.type || field.type === "text" || field.type === "email" || field.type === "number" || field.type === "date") ? (
+                  {field.key === "taxRate" && taxOptions.length ? (
+                    <Select
+                      value={customTax ? "custom" : taxOptions.find((tax) => tax.data.name === values.taxName)?.id ?? (values.taxRate && Number(values.taxRate) !== 0 ? taxOptions.find((tax) => Number(tax.data.rate) === Number(values.taxRate))?.id ?? "custom" : "none")}
+                      onValueChange={(next) => {
+                        if (next === "custom") { setCustomTax(true); return; }
+                        setCustomTax(false);
+                        const tax = taxOptions.find((item) => item.id === next);
+                        setValues((current) => ({ ...current, taxRate: tax ? tax.data.rate : "", taxName: tax ? tax.data.name : "" }));
+                      }}
+                    >
+                      <SelectTrigger id={`field-${field.key}-select`} className="w-full" aria-label="Tax"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">No tax</SelectItem>
+                        {taxOptions.map((tax) => <SelectItem key={tax.id} value={tax.id}>{tax.data.name} · {tax.data.rate}%</SelectItem>)}
+                        <SelectItem value="custom">Custom rate…</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  ) : null}
+                  {field.key !== "customer" && field.key !== "vendor" && !(field.key === "taxRate" && taxOptions.length && !customTax) && (!field.type || field.type === "text" || field.type === "email" || field.type === "number" || field.type === "date") ? (
                     <Input
                       id={`field-${field.key}`}
                       type={field.type ?? "text"}
                       value={module.kind === "credit-notes" && field.key === "amount" ? invoiceTotal.toFixed(2) : value}
                       list={module.kind === "expenses" && field.key === "payee" ? "expense-payees" : undefined}
-                      onChange={(event) => changeValue(field.key, event.target.value)}
+                      onChange={(event) => { if (field.key === "taxRate") setValues((current) => ({ ...current, taxName: "" })); changeValue(field.key, event.target.value); }}
                       placeholder={field.placeholder}
                       required={field.required}
                       min={field.type === "number" ? "0" : undefined}

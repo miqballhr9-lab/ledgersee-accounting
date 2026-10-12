@@ -19,7 +19,8 @@ import { paymentAccountType } from "@/lib/payment-accounts";
 import { accountCategoryForType, accountDetailsForType } from "@/lib/account-types";
 import { standardAccounts } from "@/lib/standard-accounts";
 import { budgetActual, budgetExpectedTotal, payrollBudgetHead, budgetVariance, parseBudgetLines, parseCsv, recordsWithinBudgetDates, type BudgetCategory, type BudgetLine, type BudgetLineType, type BudgetPeriod } from "@/lib/budget-utils";
-import { calculatePayroll, payrollCsvFields, serializePayroll, type PayrollValues } from "@/lib/payroll-utils";
+import { calculatePayroll, payrollCsvFields, serializePayroll, type PayrollValues, type SalaryTaxRule } from "@/lib/payroll-utils";
+import { packFor } from "@/lib/tax-packs";
 import { MAX_ITEM_IMPORT_ROWS, type ItemImportData, type ItemImportRow } from "@/lib/item-import";
 import { MAX_INVENTORY_COUNT_ROWS, type InventoryCountRow } from "@/lib/inventory-import";
 
@@ -136,7 +137,13 @@ function amountFromLineItems(data: Record<string, string>, kind: string): Record
   };
 }
 
-function normalizePayrollData(data: Record<string, string>): Record<string, string> {
+/** The salary tax rule of the business's country (Tax setup); Pakistan slabs until a country is chosen. */
+async function salaryTaxRule(userId: string): Promise<SalaryTaxRule> {
+  const [settings] = await db.select().from(bookkeepingRecord).where(and(eq(bookkeepingRecord.userId, userId), eq(bookkeepingRecord.kind, "settings"))).limit(1);
+  return packFor(settings?.data.taxCountry)?.payroll.incomeTax ?? "pakistan-slabs";
+}
+
+function normalizePayrollData(data: Record<string, string>, taxRule: SalaryTaxRule = "pakistan-slabs"): Record<string, string> {
   const values: PayrollValues = {
     reference: (data.reference || "").slice(0, 60),
     employeeId: data.employeeId || "",
@@ -197,9 +204,9 @@ function normalizePayrollData(data: Record<string, string>): Record<string, stri
   const workedDays = Number(values.workedDays);
   if (!Number.isInteger(workingDays) || workingDays < 1 || workingDays > 31) throw new ActionError("Total working days must be from 1 to 31.");
   if (!Number.isInteger(workedDays) || workedDays < 0 || workedDays > workingDays) throw new ActionError("Worked days can’t exceed total working days.");
-  if (calculatePayroll(values).payableSalary < 0) throw new ActionError("Deductions exceed the gross salary. Adjust the deductions or adjustment.");
+  if (calculatePayroll(values, taxRule).payableSalary < 0) throw new ActionError("Deductions exceed the gross salary. Adjust the deductions or adjustment.");
 
-  return serializePayroll(values);
+  return serializePayroll(values, taxRule);
 }
 
 export async function listBookkeepingRecords(kind: string): Promise<BookkeepingRecord[]> {
@@ -264,7 +271,7 @@ export async function saveBookkeepingRecord(
   let data = amountFromLineItems(sanitizePayload(input), kind);
   if (kind === "purchase-orders" && !id) data = { ...data, status: "Draft" };
   if (kind === "payroll") {
-    data = normalizePayrollData(data);
+    data = normalizePayrollData(data, await salaryTaxRule(me.id));
     if (data.paymentAccountId) {
       const [paymentAccount] = await db
         .select()
@@ -741,6 +748,7 @@ export async function saveBudgetPlan(input: unknown, id?: string): Promise<Bookk
 export async function importPayrollCsv(input: string): Promise<{ created: number; updated: number; records: BookkeepingRecord[] }> {
   const me = await requireUser();
   assertCanWrite(me, "payroll");
+  const taxRule = await salaryTaxRule(me.id);
   if (input.length > 2_000_000) throw new ActionError("The payroll CSV is too large. Keep it under 2 MB.");
   const [rawHeaders, ...rows] = parseCsv(input);
   if (!rawHeaders || !rows.length) throw new ActionError("The payroll CSV needs a header row and at least one employee.");
@@ -758,7 +766,7 @@ export async function importPayrollCsv(input: string): Promise<{ created: number
       if (columnIndex !== undefined) payload[fieldName] = row[columnIndex] ?? "";
     }
     try {
-      return normalizePayrollData(payload);
+      return normalizePayrollData(payload, taxRule);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Check this row’s payroll details.";
       throw new ActionError(`CSV row ${index + 2}: ${message}`);

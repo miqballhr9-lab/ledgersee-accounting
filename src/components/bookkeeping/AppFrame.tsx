@@ -11,6 +11,8 @@ import {
   CalendarDays,
   Clock,
   FileBadge,
+  FileSpreadsheet,
+  Globe,
   HandCoins,
   Network,
   PartyPopper,
@@ -144,6 +146,8 @@ const icons: Record<string, LucideIcon> = {
   Star,
   LogOut,
   UserRound,
+  Globe,
+  FileSpreadsheet,
 };
 
 const gearGroups = [

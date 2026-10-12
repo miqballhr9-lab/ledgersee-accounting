@@ -43,6 +43,7 @@ export default async function SharedInvoicePage({ params }: SharedInvoicePagePro
       <InvoiceDocument
         invoice={invoice.data}
         companyName={settings?.data.companyName || "Business"}
+        seller={settings?.data}
         documentKind={invoice.kind as "invoices" | "estimates" | "sales-orders" | "credit-notes"}
       />
     </main>
