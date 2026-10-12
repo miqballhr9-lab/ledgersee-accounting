@@ -12,7 +12,7 @@ interface HrPageProps {
 
 export async function generateMetadata({ params }: HrPageProps): Promise<Metadata> {
   const { page } = await params;
-  return { title: `${hrModules.find((module) => module.key === page)?.plural ?? "HR"} · HR` };
+  return { title: `${hrModules.find((module) => module.key === page)?.plural ?? "HRM"} · HRM` };
 }
 
 export default async function HrSectionPage({ params, searchParams }: HrPageProps) {

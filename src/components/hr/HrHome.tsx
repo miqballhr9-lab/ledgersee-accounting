@@ -91,7 +91,7 @@ export default function HrHome({ store, currency, asOfDate }: { store: CrmStore;
     <div className="mx-auto w-full max-w-[1440px] px-4 py-6 sm:px-7 sm:py-8">
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div className="min-w-0">
-          <p className="text-xs font-medium uppercase tracking-[0.12em] text-primary">HR / Home</p>
+          <p className="text-xs font-medium uppercase tracking-[0.12em] text-primary">HRM / Home</p>
           <h1 className="mt-1 text-[26px] font-semibold tracking-tight sm:text-3xl">People</h1>
           <p className="mt-1.5 max-w-2xl text-sm text-muted-foreground">Today&apos;s attendance, who is away, this month&apos;s payroll, what is waiting for approval, and your hiring at a glance.</p>
         </div>

@@ -4,7 +4,6 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import PaymentDialog from "@/components/bookkeeping/PaymentDialog";
 import PayrollSheet from "@/components/bookkeeping/PayrollSheet";
-import Link from "next/link";
 import { useNewRecordParam } from "@/hooks/use-new-record-param";
 import { paymentAccountType } from "@/lib/payment-accounts";
 import { useRouter } from "next/navigation";
@@ -353,7 +352,7 @@ export default function PayrollWorkspace({ records, accounts, employees = [], as
     <main className="space-y-6 px-4 py-6 sm:px-7 lg:px-8">
       <section className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <p className="text-xs font-medium uppercase tracking-[0.12em] text-primary"><Link href="/app/hr" className="hover:underline">HR</Link> / Payroll</p>
+          <p className="text-xs font-medium uppercase tracking-[0.12em] text-primary">Payroll / Salaries</p>
           <h1 className="mt-1 text-[26px] font-semibold tracking-tight sm:text-3xl">Payroll</h1>
           <p className="mt-1.5 max-w-2xl text-sm text-muted-foreground">Prepare each employee’s monthly pay with salary-tax estimates for your country and a clear take-home total. Unpaid leave and loan installments from HR are applied for you.</p>
         </div>

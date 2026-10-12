@@ -283,7 +283,7 @@ export default function CrmWorkspace({ page, initialStore, currency, me, owners,
   }
 
   const info = pageInfo[page] ?? { title: mod?.plural ?? "Records", description: mod?.description ?? "" };
-  const sectionLabel = mod?.section === "hr" ? "HR" : "CRM";
+  const sectionLabel = mod?.section === "hr" ? "HRM" : "CRM";
   const accountsStats = useMemo(() => {
     if (page !== "accounts") return new Map<string, { contacts: number; open: number; won: number; outstanding: number }>();
     const stats = new Map<string, { contacts: number; open: number; won: number; outstanding: number }>();
