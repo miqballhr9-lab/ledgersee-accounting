@@ -443,6 +443,20 @@ export interface NavigationGroup {
 export const navigationGroups: NavigationGroup[] = [
   { label: "Overview", items: [{ slug: "dashboard", label: "Dashboard", icon: "LayoutDashboard" }] },
   {
+    label: "CRM",
+    items: [
+      { slug: "crm", label: "CRM home", icon: "Gauge" },
+      { slug: "crm/leads", label: "Leads", icon: "UserPlus" },
+      { slug: "crm/contacts", label: "Contacts", icon: "Contact" },
+      { slug: "crm/accounts", label: "Accounts", icon: "Building2" },
+      { slug: "crm/deals", label: "Deals", icon: "Handshake" },
+      { slug: "crm/activities", label: "Activities", icon: "CalendarCheck" },
+      { slug: "crm/campaigns", label: "Campaigns", icon: "Megaphone" },
+      { slug: "crm/cases", label: "Cases", icon: "LifeBuoy" },
+      { slug: "crm/solutions", label: "Solutions", icon: "BookOpen" },
+    ],
+  },
+  {
     label: "Sales",
     items: [
       { slug: "customers", label: "Customers", icon: "Users" },

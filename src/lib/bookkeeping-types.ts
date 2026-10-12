@@ -28,6 +28,16 @@ export const recordKinds = [
   "automation-settings",
   "automation-rules",
   "automation-log",
+  "crm-leads",
+  "crm-contacts",
+  "crm-deals",
+  "crm-tasks",
+  "crm-meetings",
+  "crm-calls",
+  "crm-campaigns",
+  "crm-cases",
+  "crm-solutions",
+  "crm-notes",
 ] as const;
 
 export type RecordKind = (typeof recordKinds)[number];

@@ -11,19 +11,26 @@ import {
   BarChart3,
   Bot,
   Boxes,
+  BookOpen,
   BookOpenCheck,
   Building2,
+  CalendarCheck,
   ChevronDown,
   ClipboardList,
+  Contact,
   ContactRound,
   FileCheck2,
   FileText,
+  Gauge,
+  Handshake,
   Landmark,
   LayoutDashboard,
   ListChecks,
   ListFilter,
   ListTree,
+  LifeBuoy,
   LogOut,
+  Megaphone,
   Menu,
   Package,
   Percent,
@@ -35,6 +42,7 @@ import {
   ShieldCheck,
   ShoppingCart,
   Undo2,
+  UserPlus,
   UserRound,
   Users,
   Wallet,
@@ -98,6 +106,15 @@ const icons: Record<string, LucideIcon> = {
   Settings,
   Settings2,
   Bot,
+  Gauge,
+  UserPlus,
+  Contact,
+  Building2,
+  Handshake,
+  CalendarCheck,
+  Megaphone,
+  LifeBuoy,
+  BookOpen,
 };
 
 const gearGroups = [
@@ -130,10 +147,10 @@ function itemHref(slug: string) {
   return slug === "dashboard" ? "/app" : `/app/${slug}`;
 }
 
-/** The dashboard lives at `/app`, which prefixes every route, so it only matches exactly. */
+/** The dashboard lives at `/app` and CRM home at `/app/crm`, which prefix other routes, so they only match exactly. */
 function isItemActive(slug: string, pathname: string) {
   const href = itemHref(slug);
-  return pathname === href || (slug !== "dashboard" && pathname.startsWith(`${href}/`));
+  return pathname === href || (slug !== "dashboard" && slug !== "crm" && pathname.startsWith(`${href}/`));
 }
 
 function groupForPath(pathname: string) {
