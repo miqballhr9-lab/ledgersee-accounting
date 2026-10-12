@@ -28,6 +28,7 @@ export interface AttendanceRow {
   status: string;
   checkIn: string;
   checkOut: string;
+  notes?: string;
 }
 
 /** Saves a day's attendance for many employees at once, updating anyone already marked that day. */
@@ -52,6 +53,7 @@ export async function markAttendance(date: string, entries: AttendanceRow[]): Pr
       status: entry.status,
       checkIn: ["Absent", "On leave", "Holiday"].includes(entry.status) ? "" : entry.checkIn.trim(),
       checkOut: ["Absent", "On leave", "Holiday"].includes(entry.status) ? "" : entry.checkOut.trim(),
+      ...(entry.notes !== undefined ? { notes: entry.notes.trim().slice(0, 500) } : {}),
     };
     applyHrRules("hr-attendance", data, existing?.data, { byKind, actor: me.name }, existing?.id);
     const [row] = existing

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { ArrowDownToLine, CalendarCheck, ChevronDown, Scale, Columns3, Ellipsis, KanbanSquare, List, Pencil, Plus, Search, SlidersHorizontal, Trash2, Upload, UserCheck, Users } from "lucide-react";
+import { ArrowDownToLine, ChevronDown, Scale, Columns3, Ellipsis, KanbanSquare, List, Pencil, Plus, Search, SlidersHorizontal, Trash2, Upload, UserCheck, Users } from "lucide-react";
 
 import { deleteCrmRecords, importCrmRecords, updateCrmField } from "@/app/crm-actions";
 import BulkActionsMenu from "@/components/bookkeeping/BulkActionsMenu";
@@ -182,6 +182,11 @@ export default function CrmWorkspace({ page, initialStore, currency, me, owners,
 
 
   function openNew(preset?: Record<string, string>) {
+    // Attendance is entered for many employees at once, on the attendance sheet.
+    if (mod?.kind === "hr-attendance" && !preset) {
+      setMarking(true);
+      return;
+    }
     if (mod) setEditor({ mod, record: null, preset });
   }
 
@@ -330,7 +335,6 @@ export default function CrmWorkspace({ page, initialStore, currency, me, owners,
             </DropdownMenu>
           ) : null}
           <input ref={fileInput} type="file" accept=".csv,text/csv" className="hidden" onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) void importFile(file); }} />
-          {mod?.kind === "hr-attendance" ? <Button type="button" variant="outline" className="gap-2" onClick={() => setMarking(true)}><CalendarCheck size={15} />Mark attendance</Button> : null}
           {mod ? <Button type="button" className="gap-2" onClick={() => openNew()}><Plus size={15} />Create {mod.label}</Button>
             : <Button className="gap-2" nativeButton={false} render={<Link href="/app/customers?new=1" />}><Plus size={15} />Create account</Button>}
         </div>
