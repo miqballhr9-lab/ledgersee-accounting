@@ -245,3 +245,23 @@ textarea {
     transform: none;
   }
 }
+
+/* Reports print as just the report sheet: no sidebar, header or toolbars. */
+@media print {
+  body:has(.report-print) * {
+    visibility: hidden;
+  }
+  body:has(.report-print) .report-print,
+  body:has(.report-print) .report-print * {
+    visibility: visible;
+  }
+  body:has(.report-print) .report-print {
+    position: absolute;
+    inset: 0 0 auto 0;
+    border: 0;
+    box-shadow: none;
+  }
+  .report-print .overflow-x-auto {
+    overflow: visible;
+  }
+}

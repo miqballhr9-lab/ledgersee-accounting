@@ -14,7 +14,7 @@ import type { RecordMenuAction } from "@/components/bookkeeping/RecordTable";
 import { StatusBadge } from "@/components/crm/crm-shared";
 import BulkActionsMenu from "@/components/bookkeeping/BulkActionsMenu";
 import { Checkbox } from "@/components/ui/checkbox";
-import { useNewRecordParam } from "@/hooks/use-new-record-param";
+import { useNewRecordParam, useOpenRecordParam } from "@/hooks/use-new-record-param";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -198,6 +198,10 @@ export default function ExpensesWorkspace({ expenses: initialExpenses, bills: in
   }
 
   useNewRecordParam(() => openNewTransaction("expenses"));
+  useOpenRecordParam((id) => {
+    const record = records.find((item) => item.id === id);
+    if (record) setDetailKey(`${record.kind}-${record.id}`);
+  });
 
   function openEditTransaction(record: BookkeepingRecord) {
     if (record.kind !== "bills" && record.kind !== "expenses") return;

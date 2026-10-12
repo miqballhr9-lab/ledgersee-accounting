@@ -43,7 +43,7 @@ import ItemsBulkImport from "@/components/bookkeeping/ItemsBulkImport";
 import RecordEditor from "@/components/bookkeeping/RecordEditor";
 import NoAccountsNotice from "@/components/bookkeeping/NoAccountsNotice";
 import PaymentDialog from "@/components/bookkeeping/PaymentDialog";
-import { useNewRecordParam } from "@/hooks/use-new-record-param";
+import { useNewRecordParam, useOpenRecordParam } from "@/hooks/use-new-record-param";
 import RecordTable, { recordActions, type RecordActionKind } from "@/components/bookkeeping/RecordTable";
 import RecordDetailPanel from "@/components/bookkeeping/RecordDetailPanel";
 
@@ -451,6 +451,12 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
   }
 
   useNewRecordParam(openNewRecord);
+  useOpenRecordParam((id) => {
+    const record = records.find((item) => item.id === id);
+    if (!record) return;
+    if (module.kind === "journals" || module.kind === "settings") openEditRecord(record);
+    else setDetailId(id);
+  });
 
   function openEditRecord(record: BookkeepingRecord) {
     setEditingRecord(record);

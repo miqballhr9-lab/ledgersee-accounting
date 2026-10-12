@@ -15,7 +15,7 @@ import { StatusBadge } from "@/components/crm/crm-shared";
 import BulkActionsMenu from "@/components/bookkeeping/BulkActionsMenu";
 import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
-import { useNewRecordParam } from "@/hooks/use-new-record-param";
+import { useNewRecordParam, useOpenRecordParam } from "@/hooks/use-new-record-param";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
@@ -126,6 +126,7 @@ export default function BillsWorkspace({ records: initialRecords, vendors, accou
   }
 
   useNewRecordParam(openNewBill);
+  useOpenRecordParam(setDetailId);
 
   function openEditBill(record: BookkeepingRecord) {
     setEditingRecord(record);

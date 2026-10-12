@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 
-import { listAllBookkeepingRecords, listBookkeepingRecordGroups } from "@/app/actions";
+import { listBookkeepingRecordGroups } from "@/app/actions";
 import ChartOfAccountsWorkspace from "@/components/bookkeeping/ChartOfAccountsWorkspace";
 import InventoryWorkspace from "@/components/bookkeeping/InventoryWorkspace";
 import BudgetPlannerWorkspace from "@/components/bookkeeping/BudgetPlannerWorkspace";
@@ -10,7 +10,6 @@ import ExpensesWorkspace from "@/components/bookkeeping/ExpensesWorkspace";
 import VendorsWorkspace from "@/components/bookkeeping/VendorsWorkspace";
 import ModuleWorkspace from "@/components/bookkeeping/ModuleWorkspace";
 import PayrollWorkspace from "@/components/bookkeeping/PayrollWorkspace";
-import ReportsWorkspace from "@/components/bookkeeping/ReportsWorkspace";
 import { moduleBySlug } from "@/lib/bookkeeping-config";
 import { packFor } from "@/lib/tax-packs";
 import type { RecordKind } from "@/lib/bookkeeping-types";
@@ -23,7 +22,7 @@ interface SectionPageProps {
 export async function generateMetadata({ params }: SectionPageProps): Promise<Metadata> {
   const { section } = await params;
   const module = moduleBySlug(section);
-  return { title: module?.plural ?? (section === "reports" ? "Reports" : section === "payroll" ? "Payroll" : section === "inventory" ? "Inventory" : "Workspace") };
+  return { title: module?.plural ?? (section === "payroll" ? "Payroll" : section === "inventory" ? "Inventory" : "Workspace") };
 }
 
 export default async function SectionPage({ params, searchParams }: SectionPageProps) {
@@ -45,11 +44,6 @@ export default async function SectionPage({ params, searchParams }: SectionPageP
     const settingsData = groups.settings?.[0]?.data;
     const pack = packFor(settingsData?.taxCountry);
     return <PayrollWorkspace records={groups.payroll ?? []} accounts={groups.accounts ?? []} employees={groups.employees ?? []} asOfDate={new Date().toISOString().slice(0, 10)} dateRange={{ startDate, endDate }} currency={settingsData?.currency || pack?.currency || "PKR"} taxRule={pack?.payroll.incomeTax ?? "pakistan-slabs"} />;
-  }
-
-  if (section === "reports") {
-    const records = await listAllBookkeepingRecords();
-    return <ReportsWorkspace records={records} asOfDate={new Date().toISOString().slice(0, 10)} />;
   }
 
   if (section === "budgets") {

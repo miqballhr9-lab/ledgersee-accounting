@@ -28,6 +28,7 @@ import {
 import AccountEditorSheet from "@/components/bookkeeping/AccountEditorSheet";
 import StandardAccountsButton from "@/components/bookkeeping/StandardAccountsButton";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
+import { useOpenRecordParam } from "@/hooks/use-new-record-param";
 
 interface ChartOfAccountsWorkspaceProps {
   accounts: BookkeepingRecord[];
@@ -84,6 +85,11 @@ export default function ChartOfAccountsWorkspace({ accounts: initialAccounts, cu
     setEditingAccount(account);
     setSheetOpen(true);
   }
+
+  useOpenRecordParam((id) => {
+    const account = accounts.find((item) => item.id === id);
+    if (account) openEditAccount(account);
+  });
 
   function handleSaved(saved: BookkeepingRecord) {
     setAccounts((current) => {
