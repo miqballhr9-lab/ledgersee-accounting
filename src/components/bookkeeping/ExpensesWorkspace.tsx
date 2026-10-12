@@ -604,7 +604,11 @@ export default function ExpensesWorkspace({ expenses: initialExpenses, bills: in
           open={Boolean(editorModule)}
           onOpenChange={(open) => { if (!open) setEditorModule(null); }}
           onSaved={handleSaved}
-          onSaveComplete={async () => undefined}
+          onSaveComplete={async (saved, intent) => {
+            if (intent !== "save-and-new") return;
+            setEditingRecord(null);
+            setEditorDefaults(createDefaults(editorModule.kind as "bills" | "expenses", [saved, ...records.filter((record) => record.id !== saved.id)], asOfDate));
+          }}
         />
       ) : null}
     </div>

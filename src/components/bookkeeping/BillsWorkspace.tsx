@@ -113,10 +113,11 @@ export default function BillsWorkspace({ records: initialRecords, vendors, accou
   const overdue = records.filter((record) => billStatus(record, asOfDate) === "Overdue").reduce((sum, record) => sum + amountDue(record), 0);
   const paidTotal = records.reduce((sum, record) => sum + Number(record.data.paidAmount || 0), 0);
 
-  function openNewBill() {
+  /** `added` counts a bill saved a moment ago that the list doesn't hold yet (Save and new). */
+  function openNewBill(added = 0) {
     setEditingRecord(null);
     setDefaults({
-      billNumber: `BILL-${String(records.length + 1).padStart(4, "0")}`,
+      billNumber: `BILL-${String(records.length + 1 + added).padStart(4, "0")}`,
       billDate: asOfDate,
       dueDate: dueDateForTerms(asOfDate, billTerms) || asOfDate,
       paymentTerms: billTerms,
@@ -268,7 +269,7 @@ export default function BillsWorkspace({ records: initialRecords, vendors, accou
         </div>
         <div className="flex shrink-0 items-center gap-2">
           <Button variant="outline" className="gap-2" onClick={exportCsv}><ArrowDownToLine size={15} />Export CSV</Button>
-          <Button className="gap-2" onClick={openNewBill}><Plus size={16} />New bill</Button>
+          <Button className="gap-2" onClick={() => openNewBill()}><Plus size={16} />New bill</Button>
         </div>
       </section>
 
@@ -380,7 +381,7 @@ export default function BillsWorkspace({ records: initialRecords, vendors, accou
                     <div className="sticky left-0 w-[calc(100vw-4.5rem)] sm:static sm:mx-auto sm:w-auto sm:max-w-sm">
                       <p className="text-sm font-medium">{records.length ? "No bills match these filters" : "No bills yet"}</p>
                       <p className="mt-1 text-sm text-muted-foreground">{records.length ? "Try a different search, status, or category." : "Add your first vendor bill to start tracking due dates and balances."}</p>
-                      {!records.length ? <Button className="mt-4 gap-2" onClick={openNewBill}><Plus size={15} />New bill</Button> : null}
+                      {!records.length ? <Button className="mt-4 gap-2" onClick={() => openNewBill()}><Plus size={15} />New bill</Button> : null}
                     </div>
                   </TableCell>
                 </TableRow>
@@ -425,7 +426,7 @@ export default function BillsWorkspace({ records: initialRecords, vendors, accou
           open={editorOpen}
           onOpenChange={setEditorOpen}
           onSaved={handleSaved}
-          onSaveComplete={async () => undefined}
+          onSaveComplete={async (saved, intent) => { if (intent === "save-and-new") openNewBill(records.some((record) => record.id === saved.id) ? 0 : 1); }}
         />
       ) : null}
     </div>
