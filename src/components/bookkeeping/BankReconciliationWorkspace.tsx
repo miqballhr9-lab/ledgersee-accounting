@@ -161,8 +161,8 @@ export default function BankReconciliationWorkspace({ accounts, transactions: in
     return (
       <div className="mx-auto w-full max-w-5xl px-4 py-8 sm:px-6 lg:px-8">
         <div className="mb-6">
-          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-primary">Banking / Reconciliation</p>
-          <h1 className="mt-2 text-3xl font-semibold tracking-tight">Reconciliation</h1>
+          <p className="text-xs font-medium uppercase tracking-[0.12em] text-primary">Accounts / Reconciliation</p>
+          <h1 className="mt-1 text-[26px] font-semibold tracking-tight sm:text-3xl">Reconciliation</h1>
           <p className="mt-2 max-w-2xl text-sm text-muted-foreground">Compare a bank statement with the transactions recorded in MIKLEDGER.</p>
         </div>
         <Card className="flex flex-col items-start gap-4 border-border p-6 sm:p-8">
@@ -181,8 +181,8 @@ export default function BankReconciliationWorkspace({ accounts, transactions: in
     <div className="mx-auto w-full max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-primary">Banking / Reconciliation</p>
-          <h1 className="mt-2 text-3xl font-semibold tracking-tight">Reconciliation</h1>
+          <p className="text-xs font-medium uppercase tracking-[0.12em] text-primary">Accounts / Reconciliation</p>
+          <h1 className="mt-1 text-[26px] font-semibold tracking-tight sm:text-3xl">Reconciliation</h1>
           <p className="mt-2 max-w-2xl text-sm text-muted-foreground">Match recorded transactions to your bank statement and carry a verified balance into the next period.</p>
         </div>
         <Button variant="outline" nativeButton={false} render={<Link href="/app/transactions" />}>View transactions</Button>

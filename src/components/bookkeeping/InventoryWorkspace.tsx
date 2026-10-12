@@ -124,13 +124,13 @@ export default function InventoryWorkspace({ products: productRecords, movements
 
   return (
     <div className="space-y-6 px-4 py-6 sm:px-6 xl:px-8">
-      <header className="flex flex-col gap-4 border-b border-border pb-5 lg:flex-row lg:items-end lg:justify-between">
+      <header className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-primary">Products / Stock control</p>
-          <h1 className="mt-2 text-2xl font-semibold tracking-tight sm:text-3xl">Inventory</h1>
-          <p className="mt-1 text-sm text-muted-foreground">Keep product quantities, receipts, deliveries, and counts in sync.</p>
+          <p className="text-xs font-medium uppercase tracking-[0.12em] text-primary">Inventory / Stock control</p>
+          <h1 className="mt-1 text-[26px] font-semibold tracking-tight sm:text-3xl">Inventory</h1>
+          <p className="mt-1.5 text-sm text-muted-foreground">Keep product quantities, receipts, deliveries, and counts in sync.</p>
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-2 lg:max-w-[60%] lg:justify-end">
           <InventoryBulkCount products={products} />
           {movementActions.map(({ type, label, icon: Icon, variant }) => (
             <Button key={type} type="button" variant={variant} disabled={!products.length} onClick={() => openMovement(type)}>

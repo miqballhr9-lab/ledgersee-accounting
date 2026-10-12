@@ -351,11 +351,11 @@ export default function PayrollWorkspace({ records, accounts, employees = [], as
 
   return (
     <main className="space-y-6 px-4 py-6 sm:px-7 lg:px-8">
-      <section className="flex flex-col gap-4 border-b border-border pb-5 sm:flex-row sm:items-end sm:justify-between">
+      <section className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <p className="mb-2 text-xs font-semibold uppercase tracking-[0.16em] text-primary"><Link href="/app/hr" className="hover:underline">HR</Link> / Payroll</p>
-          <h1 className="text-2xl font-semibold tracking-tight text-foreground">Payroll</h1>
-          <p className="mt-1 max-w-2xl text-sm text-muted-foreground">Prepare each employee’s monthly pay with salary-tax estimates for your country and a clear take-home total. Unpaid leave and loan installments from HR are applied for you.</p>
+          <p className="text-xs font-medium uppercase tracking-[0.12em] text-primary"><Link href="/app/hr" className="hover:underline">HR</Link> / Payroll</p>
+          <h1 className="mt-1 text-[26px] font-semibold tracking-tight sm:text-3xl">Payroll</h1>
+          <p className="mt-1.5 max-w-2xl text-sm text-muted-foreground">Prepare each employee’s monthly pay with salary-tax estimates for your country and a clear take-home total. Unpaid leave and loan installments from HR are applied for you.</p>
         </div>
         <Button onClick={openNewEntry} className="w-full shrink-0 sm:w-auto"><Plus size={16} /> Add payroll entry</Button>
       </section>

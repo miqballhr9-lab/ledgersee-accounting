@@ -335,7 +335,7 @@ export default function BillsWorkspace({ records: initialRecords, vendors, accou
                   />
                 </TableHead>
                 {["Vendor", "Bill no.", "Bill date", "Due date", "Category", "Total", "Balance due", "Payment account", "Status", ""].map((heading) => (
-                  <TableHead key={heading || "actions"} className="whitespace-nowrap px-4 text-xs font-medium text-muted-foreground">{heading || <span className="sr-only">Actions</span>}</TableHead>
+                  <TableHead key={heading || "actions"} className="whitespace-nowrap text-xs font-medium text-muted-foreground">{heading || <span className="sr-only">Actions</span>}</TableHead>
                 ))}
               </TableRow>
             </TableHeader>
@@ -346,14 +346,14 @@ export default function BillsWorkspace({ records: initialRecords, vendors, accou
                 return (
                   <TableRow key={record.id} className="group cursor-pointer" onClick={(event) => { if (!(event.target as HTMLElement).closest("button, a, input, [role=checkbox], [role=menu]")) setDetailId(record.id); }} data-state={selectedIds.has(record.id) ? "selected" : undefined}>
                     <TableCell className="w-10"><Checkbox aria-label={`Select ${record.data.billNumber || "bill"}`} checked={selectedIds.has(record.id)} onCheckedChange={(checked) => toggleSelected(record.id, checked === true)} /></TableCell>
-                    <TableCell className="max-w-[220px] truncate px-4 text-[13px] font-medium text-primary" title={record.data.vendor || ""}>{record.data.vendor || "—"}</TableCell>
-                    <TableCell className="whitespace-nowrap text-[13px] text-muted-foreground">{record.data.billNumber || "—"}</TableCell>
+                    <TableCell className="max-w-[170px] truncate text-[13px] font-medium text-primary" title={record.data.vendor || ""}>{record.data.vendor || "—"}</TableCell>
+                    <TableCell className="max-w-[120px] truncate text-[13px] text-muted-foreground" title={record.data.billNumber || ""}>{record.data.billNumber || "—"}</TableCell>
                     <TableCell className="whitespace-nowrap text-[13px]">{formatDate(record.data.billDate || "")}</TableCell>
                     <TableCell className={`whitespace-nowrap text-[13px] ${status === "Overdue" ? "font-medium text-destructive" : ""}`}>{formatDate(record.data.dueDate || "")}</TableCell>
-                    <TableCell className="max-w-[170px] truncate text-[13px] text-muted-foreground" title={expenseCategoryLabel(record.data)}>{expenseCategoryLabel(record.data) || "—"}</TableCell>
+                    <TableCell className="max-w-[140px] truncate text-[13px] text-muted-foreground" title={expenseCategoryLabel(record.data)}>{expenseCategoryLabel(record.data) || "—"}</TableCell>
                     <TableCell className="whitespace-nowrap text-right text-[13px] tabular-nums">{formatMoney(Number(record.data.amount || 0), currency)}</TableCell>
                     <TableCell className="whitespace-nowrap text-right text-[13px] font-medium tabular-nums">{formatMoney(amountDue(record), currency)}</TableCell>
-                    <TableCell className="max-w-[200px] truncate text-[13px] text-muted-foreground" title={record.data.paymentAccountName || ""}>{record.data.paymentAccountName ? `${record.data.paymentMethod} · ${record.data.paymentAccountName}` : "—"}</TableCell>
+                    <TableCell className="max-w-[150px] truncate text-[13px] text-muted-foreground" title={record.data.paymentAccountName || ""}>{record.data.paymentAccountName ? `${record.data.paymentMethod} · ${record.data.paymentAccountName}` : "—"}</TableCell>
                     <TableCell className="whitespace-nowrap"><StatusBadge value={status} /></TableCell>
                     <TableCell className="whitespace-nowrap text-right">
                       <DropdownMenu>

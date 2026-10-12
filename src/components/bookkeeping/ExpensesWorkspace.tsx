@@ -9,12 +9,15 @@ import { readableError } from "@/lib/action-error";
 import { deleteBookkeepingRecord, recordBillPayment, recordExpensePayment, undoBillPayments, undoExpensePayment } from "@/app/actions";
 import PaymentDialog from "@/components/bookkeeping/PaymentDialog";
 import RecordEditor from "@/components/bookkeeping/RecordEditor";
+import RecordDetailPanel from "@/components/bookkeeping/RecordDetailPanel";
+import type { RecordMenuAction } from "@/components/bookkeeping/RecordTable";
+import { StatusBadge } from "@/components/crm/crm-shared";
 import BulkActionsMenu from "@/components/bookkeeping/BulkActionsMenu";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useNewRecordParam } from "@/hooks/use-new-record-param";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -115,6 +118,7 @@ export default function ExpensesWorkspace({ expenses: initialExpenses, bills: in
   const [page, setPage] = useState(1);
   const [actionMessage, setActionMessage] = useState("");
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
+  const [detailKey, setDetailKey] = useState<string | null>(null);
   const pageSize = 10;
   const expenseCategories = accounts.filter((account) => account.kind === "accounts" && account.data.type === "Expense" && account.data.locked !== "true");
   const paymentAccounts = accounts.filter((account) => paymentAccountType(account));
@@ -301,6 +305,16 @@ export default function ExpensesWorkspace({ expenses: initialExpenses, bills: in
     }
   }
 
+  const detailRecord = records.find((record) => `${record.kind}-${record.id}` === detailKey) ?? null;
+  const detailModule = detailRecord ? moduleBySlug(detailRecord.kind) : undefined;
+  const detailActions: RecordMenuAction[] = detailRecord ? [
+    isUnpaid(detailRecord)
+      ? { key: "pay", label: "Record payment", icon: CircleDollarSign, primary: true, run: () => { setDetailKey(null); setPaymentTargets([detailRecord]); } }
+      : { key: "undo-payment", label: "Undo payment", icon: Undo2, run: () => { setDetailKey(null); void undoPayment(detailRecord); } },
+    { key: "edit", label: "Edit", icon: Pencil, primary: true, run: () => { setDetailKey(null); openEditTransaction(detailRecord); } },
+    { key: "delete", label: "Delete", icon: Trash2, destructive: true, run: () => { setDetailKey(null); void handleDelete(detailRecord); } },
+  ] : [];
+
   function applyFilters() {
     setCategoryFilter(draftCategory);
     setStatusFilter(draftStatus);
@@ -438,17 +452,17 @@ export default function ExpensesWorkspace({ expenses: initialExpenses, bills: in
                   ? record.data.paymentAccountName ? `${record.data.paymentMethod} · ${record.data.paymentAccountName}` : record.data.paymentMethod === "Credit" ? "Credit · unpaid" : record.data.paymentMethod
                   : record.data.paymentAccount;
                 return (
-                  <TableRow key={`${record.kind}-${record.id}`} data-state={selectedIds.has(`${record.kind}-${record.id}`) ? "selected" : undefined}>
+                  <TableRow key={`${record.kind}-${record.id}`} className="cursor-pointer" onClick={(event) => { if (!(event.target as HTMLElement).closest("button, a, input, [role=checkbox], [role=menu]")) setDetailKey(`${record.kind}-${record.id}`); }} data-state={selectedIds.has(`${record.kind}-${record.id}`) ? "selected" : undefined}>
                     <TableCell className="w-10"><Checkbox aria-label={`Select ${title || (isBill ? "bill" : "expense")}`} checked={selectedIds.has(`${record.kind}-${record.id}`)} onCheckedChange={(checked) => toggleSelected(`${record.kind}-${record.id}`, checked === true)} /></TableCell>
                     <TableCell className="whitespace-nowrap text-[13px]">{formatDate(getRecordDate(record))}</TableCell>
                     <TableCell className="text-[13px]">{isBill ? "Bill" : "Expense"}</TableCell>
-                    <TableCell className="max-w-[240px] text-[13px] font-medium"><span className="block truncate" title={title || ""}>{title || "—"}</span></TableCell>
+                    <TableCell className="max-w-[240px] text-[13px] font-medium text-primary"><span className="block truncate" title={title || ""}>{title || "—"}</span></TableCell>
                     <TableCell className="max-w-[180px] text-[13px]"><span className="block truncate" title={payee || ""}>{payee || "—"}</span></TableCell>
                     <TableCell className="max-w-[200px] text-[13px]"><span className="block truncate" title={expenseCategoryLabel(record.data)}>{expenseCategoryLabel(record.data) || "—"}</span></TableCell>
                     <TableCell className="max-w-[200px] text-[13px]"><span className="block truncate" title={payment || ""}>{payment || "—"}</span></TableCell>
                     <TableCell className="text-right text-[13px] font-medium tabular-nums">{formatMoney(record.data.amount || "", currency)}</TableCell>
                     <TableCell className="text-[13px]">
-                      <span className="inline-flex rounded-full bg-secondary px-2 py-0.5 text-[11px] font-medium text-secondary-foreground">{record.data.status || (isUnpaid(record) ? "Unpaid" : "Paid")}</span>
+                      <StatusBadge value={record.data.status || (isUnpaid(record) ? "Unpaid" : "Paid")} />
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex items-center justify-end gap-1">
@@ -459,6 +473,7 @@ export default function ExpensesWorkspace({ expenses: initialExpenses, bills: in
                             {isUnpaid(record)
                               ? <DropdownMenuItem disabled={bulkPending} onClick={() => setPaymentTargets([record])}><CircleDollarSign size={14} />Record payment</DropdownMenuItem>
                               : <DropdownMenuItem disabled={bulkPending} onClick={() => void undoPayment(record)}><Undo2 size={14} />Undo payment</DropdownMenuItem>}
+                            <DropdownMenuSeparator />
                             <DropdownMenuItem variant="destructive" disabled={pendingDelete === record.id} onClick={() => void handleDelete(record)}><Trash2 size={14} />Delete</DropdownMenuItem>
                           </DropdownMenuContent>
                         </DropdownMenu>
@@ -549,6 +564,16 @@ export default function ExpensesWorkspace({ expenses: initialExpenses, bills: in
         pending={bulkPending}
         onSubmit={(date, accountId) => void processTransactions(paymentTargets ?? [], "pay", { date, accountId })}
       />
+
+      {detailModule ? (
+        <RecordDetailPanel
+          module={detailModule}
+          record={detailRecord ? { ...detailRecord, data: { ...detailRecord.data, status: detailRecord.data.status || (isUnpaid(detailRecord) ? "Unpaid" : "Paid") } } : null}
+          currency={currency}
+          actions={detailActions}
+          onClose={() => setDetailKey(null)}
+        />
+      ) : null}
 
       {editorModule ? (
         <RecordEditor

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { CalendarClock, ChevronDown, Paperclip } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -20,6 +20,10 @@ interface RecordDetailPanelProps {
   currency: string;
   actions: RecordMenuAction[];
   onClose: () => void;
+  /** Extra overview content, such as a supplier's open bills. */
+  children?: ReactNode;
+  /** Summary figures shown above the details, in place of the invoice/bill balance cards. */
+  stats?: Array<[string, string]>;
 }
 
 const partyKeys = ["customer", "vendor", "payee", "name"] as const;
@@ -36,7 +40,7 @@ function balanceOf(data: Record<string, string>) {
  * and totals, and a short history. It only shows the record and runs the
  * same actions as the list's ⋯ menu.
  */
-export default function RecordDetailPanel({ module, record, currency: fallbackCurrency, actions, onClose }: RecordDetailPanelProps) {
+export default function RecordDetailPanel({ module, record, currency: fallbackCurrency, actions, onClose, children, stats }: RecordDetailPanelProps) {
   const [tab, setTab] = useState<"overview" | "timeline">("overview");
   const [shownId, setShownId] = useState<string | null>(null);
   if ((record?.id ?? null) !== shownId) {
@@ -55,7 +59,8 @@ export default function RecordDetailPanel({ module, record, currency: fallbackCu
   const buttons = actions.filter((action) => action.primary && !action.destructive);
   const more = actions.filter((action) => !action.primary || action.destructive);
   const hasBalance = ["invoices", "bills"].includes(module.kind);
-  const fields = module.fields.filter((field) => !["lineItems", "attachment", "logo"].includes(field.key) && field.type !== "file");
+  // Like Zoho, only filled-in details are listed; the editor still shows every field.
+  const fields = module.fields.filter((field) => !["lineItems", "attachment", "logo"].includes(field.key) && field.type !== "file" && (field.type === "checkbox" || (field.key === "address" ? formatCustomerAddress(data) : data[field.key])?.trim()));
   const timeline = [
     { at: record.createdAt, text: `${module.label} created` },
     ...(data.sentAt ? [{ at: data.sentAt, text: `${module.label} sent` }] : []),
@@ -121,9 +126,9 @@ export default function RecordDetailPanel({ module, record, currency: fallbackCu
         <div className="space-y-4 p-5">
           {tab === "overview" ? (
             <>
-              {hasBalance ? (
+              {hasBalance || stats?.length ? (
                 <div className="grid gap-3 sm:grid-cols-3">
-                  {[["Amount", money(data.amount)], ["Paid", money(data.paidAmount)], [module.kind === "invoices" ? "Balance due" : "Still to pay", money(balanceOf(data))]].map(([label, value], index) => (
+                  {(stats ?? [["Amount", money(data.amount)], ["Paid", money(data.paidAmount)], [module.kind === "invoices" ? "Balance due" : "Still to pay", money(balanceOf(data))]]).map(([label, value], index) => (
                     <div key={label} className="rounded-lg border border-border bg-card px-4 py-3">
                       <p className="text-xs text-muted-foreground">{label}</p>
                       <p className={`mt-1 text-lg font-semibold tabular-nums ${index === 2 ? "text-primary" : ""}`}>{value}</p>
@@ -134,7 +139,8 @@ export default function RecordDetailPanel({ module, record, currency: fallbackCu
 
               <section className="rounded-lg border border-border bg-card">
                 <h3 className="border-b border-border px-4 py-2.5 text-sm font-semibold">{module.label} details</h3>
-                <dl className="grid gap-x-6 gap-y-2.5 px-4 py-3 sm:grid-cols-2">
+                {!fields.length ? <p className="px-4 py-3 text-sm text-muted-foreground">No details added yet. Use Edit to fill them in.</p> : null}
+                <dl className="grid gap-x-6 gap-y-2.5 px-4 py-3 empty:hidden sm:grid-cols-2">
                   {fields.map((field) => (
                     <div key={field.key} className={`min-w-0 ${field.type === "textarea" ? "sm:col-span-2" : ""}`}>
                       <dt className="text-xs text-muted-foreground">{field.label}</dt>
@@ -170,6 +176,8 @@ export default function RecordDetailPanel({ module, record, currency: fallbackCu
                   </div>
                 </section>
               ) : null}
+
+              {children}
 
               {data.attachmentUrl ? (
                 <a href={data.attachmentUrl} target="_blank" rel="noreferrer" className="flex items-center gap-2 rounded-lg border border-border bg-card px-4 py-3 text-sm text-primary hover:underline">

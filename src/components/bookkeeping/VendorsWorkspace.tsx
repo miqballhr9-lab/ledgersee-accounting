@@ -7,9 +7,11 @@ import { readableError } from "@/lib/action-error";
 
 import { deleteBookkeepingRecord } from "@/app/actions";
 import RecordEditor from "@/components/bookkeeping/RecordEditor";
+import RecordDetailPanel from "@/components/bookkeeping/RecordDetailPanel";
+import { StatusBadge } from "@/components/crm/crm-shared";
 import { useNewRecordParam } from "@/hooks/use-new-record-param";
 import { Button } from "@/components/ui/button";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -54,6 +56,7 @@ export default function VendorsWorkspace({ records: initialRecords, bills, accou
   const [defaults, setDefaults] = useState<Record<string, string>>({});
   const [actionMessage, setActionMessage] = useState("");
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
+  const [detailId, setDetailId] = useState<string | null>(null);
 
   useEffect(() => setRecords(initialRecords), [initialRecords]);
 
@@ -64,7 +67,7 @@ export default function VendorsWorkspace({ records: initialRecords, bills, accou
     const overdueBills = openBills.filter((bill) => Boolean(bill.data.dueDate && bill.data.dueDate < asOfDate));
     const openingBalance = Number(vendor.data.openingBalance || 0) || 0;
     const currentBalance = openingBalance + openBills.reduce((sum, bill) => sum + billBalance(bill), 0);
-    return { vendor, openBills, overdueBills, openingBalance, currentBalance };
+    return { vendor, vendorBills, openBills, overdueBills, openingBalance, currentBalance };
   }), [asOfDate, bills, records]);
 
   const filteredVendors = useMemo(() => {
@@ -102,6 +105,7 @@ export default function VendorsWorkspace({ records: initialRecords, bills, accou
   const vendorsWithOpenBills = summaries.filter((summary) => summary.openBills.length > 0).length;
   const pageCount = Math.max(1, Math.ceil(filteredVendors.length / pageSize));
   const visibleVendors = filteredVendors.slice((page - 1) * pageSize, page * pageSize);
+  const detail = summaries.find((summary) => summary.vendor.id === detailId) ?? null;
   const editorModule = moduleBySlug("vendors");
 
   useEffect(() => setPage(1), [balanceFilter, search]);
@@ -229,10 +233,10 @@ export default function VendorsWorkspace({ records: initialRecords, bills, accou
             </TableHeader>
             <TableBody>
               {visibleVendors.map(({ vendor, openBills, currentBalance }) => (
-                <TableRow key={vendor.id} className="group">
+                <TableRow key={vendor.id} className="group cursor-pointer" onClick={(event) => { if (!(event.target as HTMLElement).closest("button, a, [role=menu]")) setDetailId(vendor.id); }}>
                   <TableCell className="max-w-[280px]">
-                    <Button type="button" variant="link" className="block h-auto max-w-full justify-start p-0 text-left" onClick={() => openEditVendor(vendor)}>
-                      <span className="block truncate text-[13px] font-medium text-foreground" title={vendor.data.displayName || vendor.data.company || vendor.data.name || ""}>{vendor.data.displayName || vendor.data.company || vendor.data.name || "Unnamed supplier"}</span>
+                    <Button type="button" variant="link" className="block h-auto max-w-full justify-start p-0 text-left" onClick={() => setDetailId(vendor.id)}>
+                      <span className="block truncate text-[13px] font-medium text-primary" title={vendor.data.displayName || vendor.data.company || vendor.data.name || ""}>{vendor.data.displayName || vendor.data.company || vendor.data.name || "Unnamed supplier"}</span>
                       {vendor.data.name && (vendor.data.displayName || vendor.data.company) && vendor.data.name !== (vendor.data.displayName || vendor.data.company) ? <span className="mt-0.5 block truncate text-xs text-muted-foreground">{vendor.data.name}</span> : null}
                     </Button>
                   </TableCell>
@@ -245,7 +249,8 @@ export default function VendorsWorkspace({ records: initialRecords, bills, accou
                       <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" aria-label={`More actions for ${vendor.data.displayName || vendor.data.name || "supplier"}`}><MoreHorizontal size={15} /></Button>} />
                       <DropdownMenuContent align="end">
                         <DropdownMenuItem onClick={() => openEditVendor(vendor)}><Pencil size={14} />Edit supplier</DropdownMenuItem>
-                        <DropdownMenuItem disabled={pendingDelete === vendor.id} onClick={() => void handleDelete(vendor)}><Trash2 size={14} />Delete supplier</DropdownMenuItem>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem variant="destructive" disabled={pendingDelete === vendor.id} onClick={() => void handleDelete(vendor)}><Trash2 size={14} />Delete supplier</DropdownMenuItem>
                       </DropdownMenuContent>
                     </DropdownMenu>
                   </TableCell>
@@ -276,6 +281,44 @@ export default function VendorsWorkspace({ records: initialRecords, bills, accou
         </div>
       </section>
 
+      {editorModule ? (
+        <RecordDetailPanel
+          module={editorModule as ModuleDefinition}
+          record={detail ? { ...detail.vendor, data: { ...detail.vendor.data, defaultExpenseAccount: accounts.find((account) => account.id === detail.vendor.data.defaultExpenseAccount)?.data.name ?? detail.vendor.data.defaultExpenseAccount ?? "" } } : null}
+          currency={currency}
+          stats={detail ? [["Open bills", String(detail.openBills.length)], ["Overdue bills", String(detail.overdueBills.length)], ["Balance", formatMoney(detail.currentBalance, currency)]] : undefined}
+          actions={detail ? [
+            { key: "edit", label: "Edit", icon: Pencil, primary: true, run: () => { setDetailId(null); openEditVendor(detail.vendor); } },
+            { key: "delete", label: "Delete", icon: Trash2, destructive: true, run: () => { setDetailId(null); void handleDelete(detail.vendor); } },
+          ] : []}
+          onClose={() => setDetailId(null)}
+        >
+          {detail ? (
+            <section className="rounded-lg border border-border bg-card">
+              <h3 className="border-b border-border px-4 py-2.5 text-sm font-semibold">Bills ({detail.vendorBills.length})</h3>
+              {detail.vendorBills.length ? (
+                <table className="w-full text-sm">
+                  <thead><tr className="text-left text-xs text-muted-foreground"><th className="px-4 py-2 font-medium">Bill no.</th><th className="px-4 py-2 font-medium">Due date</th><th className="px-4 py-2 text-right font-medium">Balance</th><th className="px-4 py-2 font-medium">Status</th></tr></thead>
+                  <tbody>
+                    {detail.vendorBills.map((bill) => {
+                      const balance = billBalance(bill);
+                      const status = bill.data.status === "Cancelled" ? "Cancelled" : balance <= 0 ? "Paid" : bill.data.dueDate && bill.data.dueDate < asOfDate ? "Overdue" : "Open";
+                      return (
+                        <tr key={bill.id} className="border-t border-border">
+                          <td className="px-4 py-2 font-medium">{bill.data.billNumber || "—"}</td>
+                          <td className="px-4 py-2 text-muted-foreground">{bill.data.dueDate || "—"}</td>
+                          <td className="px-4 py-2 text-right tabular-nums">{formatMoney(balance, currency)}</td>
+                          <td className="px-4 py-2"><StatusBadge value={status} /></td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              ) : <p className="px-4 py-3 text-sm text-muted-foreground">No bills from this supplier yet.</p>}
+            </section>
+          ) : null}
+        </RecordDetailPanel>
+      ) : null}
       {editorModule ? (
         <RecordEditor
           key={`vendors-${editingRecord?.id ?? "new"}`}
