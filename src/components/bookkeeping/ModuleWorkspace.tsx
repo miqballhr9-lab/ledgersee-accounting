@@ -174,6 +174,7 @@ function createDefaults(module: ModuleDefinition, records: BookkeepingRecord[], 
   const sequence = Math.max(1, Number(settings?.nextInvoiceNumber) || records.filter((record) => record.kind === "invoices").length + 1);
   const prefix = settings?.invoicePrefix || "INV-";
 
+  if (module.kind === "items") values.itemType = "Inventory";
   if (module.kind === "invoices") {
     values.invoiceNumber = `${prefix}${String(sequence).padStart(4, "0")}`;
     values.issueDate = dateString(today);

@@ -166,6 +166,19 @@ export function buildLedger(records: BookkeepingRecord[], method: AccountingMeth
     for (const [account, amount] of kept) postings.push({ ...base, account, amount });
   };
 
+  /** A sale's income split by each line's item income account; lines without one go to Sales. */
+  function splitIncome(data: Record<string, string>, income: number): Array<[string, number]> {
+    const lines = pricedLines(data).filter((line) => line.qty);
+    const lineTotal = lines.reduce((sum, line) => sum + line.qty * line.unit, 0);
+    if (!lines.length || lineTotal <= 0) return [[sales, income]];
+    const byAccount = new Map<string, number>();
+    for (const line of lines) {
+      const account = incomeFor(line.itemId);
+      byAccount.set(account, (byAccount.get(account) ?? 0) + (line.qty * line.unit / lineTotal) * income);
+    }
+    return [...byAccount.entries()];
+  }
+
   // Inventory: stock bought goes to the inventory asset, and its cost moves to cost of goods sold when sold (FIFO).
   const inventoryItems = new Set(records.filter((record) => record.kind === "items" && isInventoryItem(record)).map((record) => record.id));
   const inventoryAsset = () => find((account) => account.category === "Asset" && /inventory/i.test(`${account.name} ${account.detailType}`)) ?? ensure("Inventory Asset", "Asset", "Current assets");
@@ -173,6 +186,16 @@ export function buildLedger(records: BookkeepingRecord[], method: AccountingMeth
   const shrinkage = () => find((account) => /shrinkage/i.test(account.name)) ?? ensure("Inventory Shrinkage", "Expense", "Cost of sales");
   const receivedNotBilled = () => find((account) => /received not billed/i.test(account.name)) ?? ensure("Inventory received not billed", "Liability", "Current liabilities");
   const purchaseOrders = new Map(records.filter((record) => record.kind === "purchase-orders").map((record) => [record.id, record]));
+  // Each item can name its own income, expense (cost of goods sold) and inventory asset accounts.
+  const itemById = new Map(records.filter((record) => record.kind === "items").map((record) => [record.id, record]));
+  const itemAccount = (itemId: string, field: "incomeAccountId" | "expenseAccountId" | "assetAccountId") => {
+    const id = itemById.get(itemId)?.data[field];
+    const name = id ? accountById.get(id) : "";
+    return name ? accounts.get(key(name))?.name ?? name : "";
+  };
+  const incomeFor = (itemId: string) => (itemId && itemAccount(itemId, "incomeAccountId")) || sales;
+  const cogsFor = (itemId: string) => (itemId && itemAccount(itemId, "expenseAccountId")) || cogs();
+  const assetFor = (itemId: string) => (itemId && itemAccount(itemId, "assetAccountId")) || inventoryAsset();
   if (inventoryItems.size) {
     let sequence = 0;
     for (const summary of buildInventory(records).values()) {
@@ -180,8 +203,8 @@ export function buildLedger(records: BookkeepingRecord[], method: AccountingMeth
         if (event.role === "bill" || event.role === "purchase-return" || Math.abs(event.value) < 0.005) continue;
         sequence += 1;
         const base = { txnId: `inv-${event.role}-${sequence}`, date: event.date, type: event.role === "sale" ? "Invoice (cost of sale)" : event.role === "return" ? "Credit note (stock returned)" : event.type, number: event.number, name: event.name, customer: event.role === "sale" || event.role === "return" ? event.name : "", supplier: "", memo: `${summary.item.data.name ?? "Item"} × ${Math.abs(event.quantity)}`, sourceKind: event.sourceKind, sourceId: event.sourceId };
-        const offset = event.role === "opening" ? openingEquity : event.role === "po-receipt" ? receivedNotBilled() : event.role === "adjust-in" || event.role === "adjust-out" ? shrinkage() : cogs();
-        post(base, [[inventoryAsset(), event.value], [offset, -event.value]]);
+        const offset = event.role === "opening" ? openingEquity : event.role === "po-receipt" ? receivedNotBilled() : event.role === "adjust-in" || event.role === "adjust-out" ? shrinkage() : cogsFor(event.itemId);
+        post(base, [[assetFor(event.itemId), event.value], [offset, -event.value]]);
       }
     }
   }
@@ -231,15 +254,17 @@ export function buildLedger(records: BookkeepingRecord[], method: AccountingMeth
       const tax = num(data.taxAmount) * rate;
       const income = total - tax;
       const base = { type: "Invoice", number: data.invoiceNumber ?? "", name: data.customer ?? "", customer: data.customer ?? "", supplier: "", memo: "", sourceKind: "invoices", sourceId: record.id };
+      // Income goes to each item's income account (Sales by default); lines carry the discount, not the tax.
+      const incomeLines = splitIncome(data, income);
       if (method === "accrual") {
-        post({ ...base, txnId: `inv-${record.id}`, date }, [[ar, total], [sales, -income], [salesTax, -tax]]);
+        post({ ...base, txnId: `inv-${record.id}`, date }, [[ar, total], ...incomeLines.map(([account, amount]) => [account, -amount] as [string, number]), [salesTax, -tax]]);
         for (const payment of docPayments(record, date)) {
           post({ ...base, type: "Payment", txnId: `pay-${payment.id}-${record.id}`, date: payment.date }, [[payment.account, payment.amount * rate], [ar, -payment.amount * rate]]);
         }
       } else if (total > 0) {
         for (const payment of docPayments(record, date)) {
           const share = (payment.amount * rate) / total;
-          post({ ...base, type: "Payment", txnId: `pay-${payment.id}-${record.id}`, date: payment.date }, [[payment.account, payment.amount * rate], [sales, -income * share], [salesTax, -tax * share]]);
+          post({ ...base, type: "Payment", txnId: `pay-${payment.id}-${record.id}`, date: payment.date }, [[payment.account, payment.amount * rate], ...incomeLines.map(([account, amount]) => [account, -amount * share] as [string, number]), [salesTax, -tax * share]]);
         }
       }
       continue;
@@ -252,7 +277,7 @@ export function buildLedger(records: BookkeepingRecord[], method: AccountingMeth
       if (!total || method === "cash") continue;
       post(
         { txnId: `cn-${record.id}`, date: data.date || record.createdAt.slice(0, 10), type: "Credit note", number: data.creditNumber ?? "", name: data.customer ?? "", customer: data.customer ?? "", supplier: "", memo: data.reason ?? "", sourceKind: "credit-notes", sourceId: record.id },
-        [[sales, total - tax], [salesTax, tax], [ar, -total]],
+        [...splitIncome(data, total - tax), [salesTax, tax], [ar, -total]],
       );
       continue;
     }
@@ -279,16 +304,16 @@ export function buildLedger(records: BookkeepingRecord[], method: AccountingMeth
       const itemLines = pricedLines(data, data.purchaseLineItems || data.lineItems || "").filter((line) => inventoryItems.has(line.itemId) && line.qty);
       // Non-inventory products and services bought go to cost of goods sold, as in QuickBooks.
       if (!itemLines.length && !data.purchaseLineItems && pricedLines(data).some((line) => line.itemId && line.qty)) {
-        debitLines = pricedLines(data).filter((line) => line.qty).map((line) => [line.itemId ? cogs() : expenseAccount(line.name || fallbackCategory), line.qty * line.unit] as [string, number]);
+        debitLines = pricedLines(data).filter((line) => line.qty).map((line) => [line.itemId ? cogsFor(line.itemId) : expenseAccount(line.name || fallbackCategory), line.qty * line.unit] as [string, number]);
       }
       if (itemLines.length && inventoryItems.size) {
         const order = data.sourcePurchaseOrderId ? purchaseOrders.get(data.sourcePurchaseOrderId) : undefined;
-        const stockAccount = order && (order.data.receivedAt || order.data.status === "Received") ? receivedNotBilled() : inventoryAsset();
-        const stockValue = itemLines.reduce((sum, line) => sum + line.qty * line.unit, 0);
+        const received = Boolean(order && (order.data.receivedAt || order.data.status === "Received"));
         const others = data.purchaseLineItems
-          ? [[debitLines[0]?.[0] ?? expenseAccount(fallbackCategory), total - tax - stockValue] as [string, number]]
-          : pricedLines(data).filter((line) => !inventoryItems.has(line.itemId) && line.qty).map((line) => [line.itemId ? cogs() : expenseAccount(line.name || fallbackCategory), line.qty * line.unit] as [string, number]);
-        debitLines = [[stockAccount, stockValue], ...others.filter(([, amount]) => Math.abs(amount) > 0.004)];
+          ? [[debitLines[0]?.[0] ?? expenseAccount(fallbackCategory), total - tax - itemLines.reduce((sum, line) => sum + line.qty * line.unit, 0)] as [string, number]]
+          : pricedLines(data).filter((line) => !inventoryItems.has(line.itemId) && line.qty).map((line) => [line.itemId ? cogsFor(line.itemId) : expenseAccount(line.name || fallbackCategory), line.qty * line.unit] as [string, number]);
+        const stockLines: Array<[string, number]> = itemLines.map((line) => [received ? receivedNotBilled() : assetFor(line.itemId), line.qty * line.unit]);
+        debitLines = [...stockLines, ...others.filter(([, amount]) => Math.abs(amount) > 0.004)];
       }
       const party = (isBill || isCredit ? data.vendor : data.payee) ?? "";
       const base = {

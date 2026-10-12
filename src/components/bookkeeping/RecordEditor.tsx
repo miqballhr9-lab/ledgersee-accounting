@@ -56,6 +56,34 @@ interface InvoiceLine {
   description: string;
   quantity: string;
   rate: string;
+  bundleId?: string;
+  bundleName?: string;
+  bundleShow?: string;
+}
+
+const itemAccountKeys = new Set(["incomeAccountId", "expenseAccountId", "assetAccountId"]);
+
+/** Which item fields show for each item type, as in QuickBooks' product/service forms. */
+function itemFieldVisible(key: string, itemType: string) {
+  const type = itemType === "Product" || !itemType ? "Inventory" : itemType;
+  if (type === "Bundle") return ["name", "sku", "itemType", "bundleItems", "showComponents"].includes(key);
+  if (["bundleItems", "showComponents"].includes(key)) return false;
+  if (type !== "Inventory" && ["openingQty", "openingDate", "reorderPoint", "assetAccountId"].includes(key)) return false;
+  return true;
+}
+
+interface BundlePart {
+  itemId: string;
+  quantity: string;
+}
+
+function readBundleParts(value: string): BundlePart[] {
+  try {
+    const parsed: unknown = JSON.parse(value || "[]");
+    return Array.isArray(parsed) ? parsed.flatMap((part) => (part && typeof part === "object" && typeof (part as Record<string, unknown>).itemId === "string" ? [{ itemId: (part as Record<string, string>).itemId, quantity: String((part as Record<string, unknown>).quantity ?? "1") }] : [])) : [];
+  } catch {
+    return [];
+  }
 }
 
 interface ExpenseEntryLine {
@@ -126,6 +154,7 @@ function readInvoiceLines(lines: string, items: BookkeepingRecord[]): InvoiceLin
       description: line.description,
       quantity: line.quantity,
       rate: line.rate,
+      ...(line.bundleId ? { bundleId: line.bundleId, bundleName: line.bundleName, bundleShow: line.bundleShow } : {}),
     };
   });
 
@@ -216,6 +245,7 @@ export default function RecordEditor({ module, record, customers, vendors, items
   const [expenseLines, setExpenseLines] = useState<ExpenseEntryLine[]>(() => readExpenseEditorLines(record));
   const [purchaseItems, setPurchaseItems] = useState<PurchaseItemLine[]>(() => readPurchaseItemLines(record));
   const availableItems = items.filter((item) => item.data.name?.trim());
+  const visibleFields = module.kind === "items" ? module.fields.filter((field) => itemFieldVisible(field.key, values.itemType ?? "")) : module.fields;
   const paymentAccounts = accounts.filter((account) => paymentAccountType(account));
   const [savedRecordId, setSavedRecordId] = useState<string | null>(record?.id ?? null);
   const [error, setError] = useState("");
@@ -542,10 +572,10 @@ export default function RecordEditor({ module, record, customers, vendors, items
             </>
           ) : null}
           <div className="grid gap-x-5 gap-y-4 sm:grid-cols-2">
-            {module.fields.map((field, index) => {
+            {visibleFields.map((field, index) => {
               const value = values[field.key] ?? "";
               const isWide = field.type === "textarea" || field.type === "file";
-              const startsSection = Boolean(field.section && module.fields[index - 1]?.section !== field.section);
+              const startsSection = Boolean(field.section && visibleFields[index - 1]?.section !== field.section);
               return (
                 <Fragment key={field.key}>
                 {startsSection ? <div className="border-b border-border pb-2 pt-1 text-sm font-semibold text-foreground sm:col-span-2">{field.section}</div> : null}
@@ -568,7 +598,54 @@ export default function RecordEditor({ module, record, customers, vendors, items
                     </Label>
                   )}
 
-                  {field.type === "textarea" && !(hasStructuredLines && field.key === "lineItems") && !(categoryLineKinds.has(module.kind) && field.key === "lineItems") ? (
+                  {module.kind === "items" && itemAccountKeys.has(field.key) ? (() => {
+                    const options = accounts.filter((account) => account.data.name?.trim() && (field.key === "incomeAccountId" ? account.data.type === "Income" : field.key === "expenseAccountId" ? account.data.type === "Expense" : account.data.type === "Asset" && !["Cash and cash equivalents", "Accounts receivable (A/R)"].includes(account.data.accountType ?? "")));
+                    return (
+                      <Select value={value || "default"} onValueChange={(nextValue) => changeValue(field.key, nextValue === "default" ? "" : nextValue ?? "")}>
+                        <SelectTrigger id={`field-${field.key}`} className="w-full"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="default">{field.key === "incomeAccountId" ? "Default (Sales)" : field.key === "expenseAccountId" ? "Default (Cost of goods sold)" : "Default (Inventory)"}</SelectItem>
+                          {options.map((account) => <SelectItem key={account.id} value={account.id}>{account.data.code ? `${account.data.code} · ` : ""}{account.data.name}</SelectItem>)}
+                          {value && !options.some((account) => account.id === value) ? <SelectItem value={value}>Previously saved account</SelectItem> : null}
+                        </SelectContent>
+                      </Select>
+                    );
+                  })() : null}
+
+                  {module.kind === "items" && field.key === "bundleItems" ? (() => {
+                    const parts = readBundleParts(value);
+                    const rows = parts.length ? parts : [{ itemId: "", quantity: "1" }];
+                    const choices = availableItems.filter((item) => item.data.itemType !== "Bundle" && item.id !== record?.id);
+                    const setParts = (next: BundlePart[]) => changeValue("bundleItems", JSON.stringify(next));
+                    const price = rows.reduce((sum, part) => sum + (Number(choices.find((item) => item.id === part.itemId)?.data.rate) || 0) * (Number(part.quantity) || 0), 0);
+                    return (
+                      <div className="space-y-2 rounded-lg border border-border p-3" role="group" aria-label="Bundle products and services">
+                        {rows.map((part, partIndex) => (
+                          <div key={partIndex} className="grid grid-cols-[minmax(0,1fr)_6rem_2.75rem] items-end gap-2">
+                            <div className="space-y-1">
+                              <Label htmlFor={`bundle-item-${partIndex}`} className="text-xs text-muted-foreground">Product/service</Label>
+                              <Select value={part.itemId || null} onValueChange={(nextValue) => setParts(rows.map((entry, i) => (i === partIndex ? { ...entry, itemId: nextValue ?? "" } : entry)))}>
+                                <SelectTrigger id={`bundle-item-${partIndex}`} className="w-full"><SelectValue placeholder="Choose product or service">{choices.find((item) => item.id === part.itemId)?.data.name}</SelectValue></SelectTrigger>
+                                <SelectContent>{choices.map((item) => <SelectItem key={item.id} value={item.id}>{item.data.name} <span className="text-xs text-muted-foreground">· {currencyAmount(Number(item.data.rate) || 0, defaultCurrency || "USD")}</span></SelectItem>)}</SelectContent>
+                              </Select>
+                            </div>
+                            <div className="space-y-1">
+                              <Label htmlFor={`bundle-qty-${partIndex}`} className="text-xs text-muted-foreground">Qty</Label>
+                              <Input id={`bundle-qty-${partIndex}`} type="number" min="0.001" step="any" value={part.quantity} onChange={(event) => setParts(rows.map((entry, i) => (i === partIndex ? { ...entry, quantity: event.target.value } : entry)))} />
+                            </div>
+                            <Button type="button" variant="ghost" size="icon" aria-label={`Remove bundle line ${partIndex + 1}`} className="text-muted-foreground hover:text-destructive" onClick={() => setParts(rows.filter((_, i) => i !== partIndex))}><Trash2 size={16} /></Button>
+                          </div>
+                        ))}
+                        <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                          <Button type="button" variant="outline" size="sm" disabled={!choices.length} onClick={() => setParts([...rows, { itemId: "", quantity: "1" }])}><Plus size={15} />Add product/service</Button>
+                          <span className="text-sm text-muted-foreground">Bundle price: <span className="font-medium text-foreground tabular-nums">{currencyAmount(price, defaultCurrency || "USD")}</span></span>
+                        </div>
+                        <p className="text-xs text-muted-foreground">On an invoice the bundle adds these lines; each keeps its own stock and income account. Prices can be changed on the invoice.</p>
+                      </div>
+                    );
+                  })() : null}
+
+                  {field.type === "textarea" && field.key !== "bundleItems" && !(hasStructuredLines && field.key === "lineItems") && !(categoryLineKinds.has(module.kind) && field.key === "lineItems") ? (
                     <Textarea
                       id={`field-${field.key}`}
                       value={value}
@@ -590,6 +667,15 @@ export default function RecordEditor({ module, record, customers, vendors, items
                               onValueChange={(itemId) => {
                                 const item = availableItems.find((option) => option.id === itemId);
                                 if (!item) return;
+                                if (item.data.itemType === "Bundle") {
+                                  // Like QuickBooks, a bundle brings in its products and services as lines of their own.
+                                  const parts = readBundleParts(item.data.bundleItems ?? "").flatMap((part, partIndex) => {
+                                    const component = availableItems.find((option) => option.id === part.itemId);
+                                    return component ? [{ id: `${line.id}-b${Date.now()}-${partIndex}`, itemId: component.id, name: component.data.name?.trim() ?? "", description: component.data.description?.trim() || "", quantity: part.quantity || "1", rate: component.data.rate ?? "0", bundleId: item.id, bundleName: item.data.name?.trim() ?? "Bundle", bundleShow: item.data.showComponents === "false" ? "false" : "true" }] : [];
+                                  });
+                                  if (parts.length) setInvoiceLines((current) => current.flatMap((currentLine) => (currentLine.id === line.id ? parts : [currentLine])));
+                                  return;
+                                }
                                 setInvoiceLines((current) => current.map((currentLine) => currentLine.id === line.id
                                   ? {
                                       ...currentLine,
@@ -608,7 +694,7 @@ export default function RecordEditor({ module, record, customers, vendors, items
                                 </SelectValue>
                               </SelectTrigger>
                               <SelectContent>
-                                {availableItems.map((item) => {
+                                {availableItems.filter((item) => module.kind !== "purchase-orders" || item.data.itemType !== "Bundle").map((item) => {
                                   return (
                                     <SelectItem value={item.id} key={item.id}>
                                       {catalogItemLabel(item, values.currency || "USD")}
@@ -618,6 +704,7 @@ export default function RecordEditor({ module, record, customers, vendors, items
                                 })}
                               </SelectContent>
                             </Select>
+                            {line.bundleId ? <p className="text-xs text-primary">Part of bundle: {line.bundleName}</p> : null}
                             <Label htmlFor={`invoice-description-${line.id}`} className="text-xs text-muted-foreground">Description</Label>
                             <Input
                               id={`invoice-description-${line.id}`}
@@ -891,7 +978,7 @@ export default function RecordEditor({ module, record, customers, vendors, items
                               >
                                 <SelectTrigger id={`purchase-item-${line.id}`} className="w-full"><SelectValue placeholder={availableItems.length ? "Choose product" : "Add items first"}>{picked?.data.name ?? (line.name || undefined)}</SelectValue></SelectTrigger>
                                 <SelectContent>
-                                  {availableItems.map((item) => (
+                                  {availableItems.filter((item) => item.data.itemType !== "Bundle").map((item) => (
                                     <SelectItem key={item.id} value={item.id}>
                                       {item.data.name}{isInventoryItem(item) ? <span className="ml-1 text-xs text-muted-foreground">· Inventory{item.data.qtyOnHand !== undefined ? ` · ${Number(item.data.qtyOnHand).toLocaleString()} on hand` : ""}</span> : <span className="ml-1 text-xs text-muted-foreground">· {item.data.itemType || "Service"}</span>}
                                     </SelectItem>
@@ -964,7 +1051,7 @@ export default function RecordEditor({ module, record, customers, vendors, items
                     </>
                   ) : null}
 
-                  {field.type === "select" && field.key !== "defaultExpenseAccount" && !(module.kind === "employees" && field.key === "paymentAccountId") && !(field.key === "paymentMethod" && (module.kind === "invoices" || module.kind === "bills")) ? (
+                  {field.type === "select" && field.key !== "defaultExpenseAccount" && !(module.kind === "items" && itemAccountKeys.has(field.key)) && !(module.kind === "employees" && field.key === "paymentAccountId") && !(field.key === "paymentMethod" && (module.kind === "invoices" || module.kind === "bills")) ? (
                     <Select value={value || undefined} onValueChange={(nextValue) => changeValue(field.key, nextValue ?? "")}>
                       <SelectTrigger id={`field-${field.key}`} className="w-full">
                         <SelectValue placeholder="Choose an option" />

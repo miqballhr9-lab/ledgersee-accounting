@@ -4,6 +4,10 @@ export interface InvoiceLineData {
   description: string;
   quantity: string;
   rate: string;
+  /** Set on lines added from a bundle: the bundle they belong to, and whether its parts print. */
+  bundleId?: string;
+  bundleName?: string;
+  bundleShow?: string;
 }
 
 export function parseInvoiceLines(raw: string): InvoiceLineData[] {
@@ -22,6 +26,7 @@ export function parseInvoiceLines(raw: string): InvoiceLineData[] {
           description: typeof line.description === "string" ? line.description : "",
           quantity: typeof line.quantity === "string" ? line.quantity : String(line.quantity ?? ""),
           rate: typeof line.rate === "string" ? line.rate : String(line.rate ?? ""),
+          ...(typeof line.bundleId === "string" && line.bundleId ? { bundleId: line.bundleId, bundleName: typeof line.bundleName === "string" ? line.bundleName : "", bundleShow: line.bundleShow === "false" ? "false" : "true" } : {}),
         }];
       });
     } catch {

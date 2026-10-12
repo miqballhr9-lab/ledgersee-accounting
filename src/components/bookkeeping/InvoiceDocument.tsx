@@ -1,4 +1,6 @@
-import { currencyAmount, parseInvoiceLines } from "@/lib/invoice-utils";
+import { Fragment } from "react";
+
+import { currencyAmount, parseInvoiceLines, type InvoiceLineData } from "@/lib/invoice-utils";
 import { packFor } from "@/lib/tax-packs";
 
 interface InvoiceDocumentProps {
@@ -7,6 +9,17 @@ interface InvoiceDocumentProps {
   documentKind?: "invoices" | "estimates" | "sales-orders" | "credit-notes";
   /** The seller's Settings, for tax registration numbers and the tax-invoice title. */
   seller?: Record<string, string>;
+}
+
+/** Consecutive lines from the same bundle, kept together. */
+function groupBundles(lines: InvoiceLineData[]) {
+  const groups: Array<{ bundleId: string; bundleName: string; show: boolean; lines: InvoiceLineData[] }> = [];
+  for (const line of lines) {
+    const last = groups[groups.length - 1];
+    if (line.bundleId && last?.bundleId === line.bundleId) last.lines.push(line);
+    else groups.push({ bundleId: line.bundleId ?? "", bundleName: line.bundleName || "Bundle", show: line.bundleShow !== "false", lines: [line] });
+  }
+  return groups;
 }
 
 const documentDetails = {
@@ -81,15 +94,43 @@ export default function InvoiceDocument({ invoice, companyName, documentKind = "
             </tr>
           </thead>
           <tbody>
-            {lines.map((line, index) => (
-              <tr key={`${line.name}-${index}`} className="border-b border-border">
-                <td className="px-3 py-4 font-medium">{line.name}</td>
-                <td className="max-w-64 whitespace-pre-wrap px-3 py-4 text-muted-foreground">{line.description || "—"}</td>
-                <td className="px-3 py-4 text-right tabular-nums">{line.quantity}</td>
-                <td className="px-3 py-4 text-right tabular-nums">{currencyAmount(Number(line.rate) || 0, currency)}</td>
-                <td className="px-3 py-4 text-right font-medium tabular-nums">{currencyAmount((Number(line.quantity) || 0) * (Number(line.rate) || 0), currency)}</td>
-              </tr>
-            ))}
+            {groupBundles(lines).map((group, index) => {
+              const lineTotal = (line: (typeof lines)[number]) => (Number(line.quantity) || 0) * (Number(line.rate) || 0);
+              if (!group.bundleId) {
+                const line = group.lines[0];
+                return (
+                  <tr key={`${line.name}-${index}`} className="border-b border-border">
+                    <td className="px-3 py-4 font-medium">{line.name}</td>
+                    <td className="max-w-64 whitespace-pre-wrap px-3 py-4 text-muted-foreground">{line.description || "—"}</td>
+                    <td className="px-3 py-4 text-right tabular-nums">{line.quantity}</td>
+                    <td className="px-3 py-4 text-right tabular-nums">{currencyAmount(Number(line.rate) || 0, currency)}</td>
+                    <td className="px-3 py-4 text-right font-medium tabular-nums">{currencyAmount(lineTotal(line), currency)}</td>
+                  </tr>
+                );
+              }
+              // A bundle prints as one line, with its products and services under it when the bundle says so.
+              const total = group.lines.reduce((sum, line) => sum + lineTotal(line), 0);
+              return (
+                <Fragment key={`${group.bundleId}-${index}`}>
+                  <tr className={group.show ? "" : "border-b border-border"}>
+                    <td className="px-3 py-4 font-medium">{group.bundleName}</td>
+                    <td className="max-w-64 whitespace-pre-wrap px-3 py-4 text-muted-foreground">{group.show ? "Bundle" : group.lines.map((line) => line.name).join(", ")}</td>
+                    <td className="px-3 py-4 text-right tabular-nums">1</td>
+                    <td className="px-3 py-4 text-right tabular-nums">{currencyAmount(total, currency)}</td>
+                    <td className="px-3 py-4 text-right font-medium tabular-nums">{currencyAmount(total, currency)}</td>
+                  </tr>
+                  {group.show ? group.lines.map((line, partIndex) => (
+                    <tr key={`${line.name}-${partIndex}`} className={partIndex === group.lines.length - 1 ? "border-b border-border text-muted-foreground" : "text-muted-foreground"}>
+                      <td className="py-2 pl-8 pr-3">{line.name}</td>
+                      <td className="max-w-64 whitespace-pre-wrap px-3 py-2">{line.description || ""}</td>
+                      <td className="px-3 py-2 text-right tabular-nums">{line.quantity}</td>
+                      <td className="px-3 py-2 text-right tabular-nums">{currencyAmount(Number(line.rate) || 0, currency)}</td>
+                      <td className="px-3 py-2 text-right tabular-nums">{currencyAmount(lineTotal(line), currency)}</td>
+                    </tr>
+                  )) : null}
+                </Fragment>
+              );
+            })}
           </tbody>
         </table>
       </div>

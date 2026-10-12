@@ -273,7 +273,37 @@ export async function saveBookkeepingRecord(
   if (kind === "purchase-orders" && !id) data = { ...data, status: "Draft" };
   if (kind === "items") {
     if (data.itemType === "Product") data.itemType = "Inventory";
-    if (!["Inventory", "Non-inventory", "Service"].includes(data.itemType || "Inventory")) throw new ActionError("Choose Inventory, Non-inventory or Service.");
+    if (!["Inventory", "Non-inventory", "Service", "Bundle"].includes(data.itemType || "Inventory")) throw new ActionError("Choose Inventory, Non-inventory, Service or Bundle.");
+    // Item accounts must be accounts in this chart of accounts.
+    const accountIds = [data.incomeAccountId, data.expenseAccountId, data.assetAccountId].filter(Boolean) as string[];
+    if (accountIds.length) {
+      const found = await db.select({ id: bookkeepingRecord.id }).from(bookkeepingRecord)
+        .where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "accounts"), inArray(bookkeepingRecord.id, accountIds)));
+      if (found.length !== new Set(accountIds).size) throw new ActionError("Choose the item's accounts from your chart of accounts.");
+    }
+    if (data.itemType === "Bundle") {
+      // A bundle's price is the total of its parts; it has no stock or accounts of its own.
+      let parts: Array<{ itemId: string; quantity: string }> = [];
+      try {
+        const parsed: unknown = JSON.parse(data.bundleItems || "[]");
+        if (Array.isArray(parsed)) parts = parsed.filter((part): part is { itemId: string; quantity: string } => Boolean(part) && typeof part === "object" && typeof (part as Record<string, unknown>).itemId === "string").map((part) => ({ itemId: part.itemId, quantity: String(part.quantity ?? "1") }));
+      } catch {
+        parts = [];
+      }
+      parts = parts.filter((part) => part.itemId);
+      if (!parts.length) throw new ActionError("Add at least one product or service to the bundle.");
+      if (parts.length > 50) throw new ActionError("A bundle can hold up to 50 products and services.");
+      if (parts.some((part) => !(Number(part.quantity) > 0))) throw new ActionError("Each product in the bundle needs a quantity greater than zero.");
+      const components = await db.select().from(bookkeepingRecord)
+        .where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "items"), inArray(bookkeepingRecord.id, parts.map((part) => part.itemId))));
+      if (components.length !== new Set(parts.map((part) => part.itemId)).size) throw new ActionError("A product in the bundle is no longer in Items & services.");
+      if (components.some((component) => component.data.itemType === "Bundle" || component.id === id)) throw new ActionError("A bundle can’t contain another bundle.");
+      const price = parts.reduce((sum, part) => sum + (Number(components.find((component) => component.id === part.itemId)?.data.rate) || 0) * Number(part.quantity), 0);
+      data = { ...data, bundleItems: JSON.stringify(parts), rate: price.toFixed(2), cost: "", openingQty: "", openingDate: "", reorderPoint: "", incomeAccountId: "", expenseAccountId: "", assetAccountId: "", showComponents: data.showComponents === "false" ? "false" : "true" };
+    } else {
+      data = { ...data, bundleItems: "", showComponents: "" };
+    }
+    if (data.itemType !== "Inventory") data = { ...data, assetAccountId: "" };
     data.itemType = data.itemType || "Inventory";
     if (data.openingQty && (!Number.isFinite(Number(data.openingQty)) || Number(data.openingQty) < 0)) throw new ActionError("Enter an initial quantity of zero or more.");
     if (id) {
@@ -285,6 +315,7 @@ export async function saveBookkeepingRecord(
       data = { ...data, openingQty: "0" };
     }
     if (data.itemType !== "Inventory") data = { ...data, openingQty: "", openingDate: "" };
+    if (data.itemType !== "Bundle" && !(Number(data.rate) >= 0)) throw new ActionError("Enter a sales price of zero or more.");
   }
   if (kind === "payroll") {
     data = normalizePayrollData(data, await salaryTaxRule(me.id));
