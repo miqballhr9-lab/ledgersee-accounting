@@ -36,6 +36,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { navigationGroups, type ModuleDefinition } from "@/lib/bookkeeping-config";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
 import { formatCustomerAddress } from "@/lib/customer-utils";
+import { dueDateForTerms } from "@/lib/invoice-utils";
 import { paymentAccountLabel, paymentAccountType } from "@/lib/payment-accounts";
 import { budgetActualRecords, recordsWithinBudgetDates, type BudgetLine } from "@/lib/budget-utils";
 import JournalEntryEditor from "@/components/bookkeeping/JournalEntryEditor";
@@ -176,8 +177,8 @@ function createDefaults(module: ModuleDefinition, records: BookkeepingRecord[], 
   if (module.kind === "invoices") {
     values.invoiceNumber = `${prefix}${String(sequence).padStart(4, "0")}`;
     values.issueDate = dateString(today);
-    values.dueDate = dateString(dueDate);
-    values.paymentTerms = "30 days";
+    values.paymentTerms = settings?.invoiceTerms || "30 days";
+    values.dueDate = dueDateForTerms(values.issueDate, values.paymentTerms) || dateString(dueDate);
     values.currency = defaultCurrency;
     values.exchangeRate = "1";
     values.paidAmount = "0";

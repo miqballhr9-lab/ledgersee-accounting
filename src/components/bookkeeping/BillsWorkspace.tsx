@@ -24,6 +24,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { moduleBySlug, type ModuleDefinition } from "@/lib/bookkeeping-config";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
 import { expenseCategoryLabel, expenseLinesFromData } from "@/lib/expense-utils";
+import { dueDateForTerms } from "@/lib/invoice-utils";
 
 interface BillsWorkspaceProps {
   records: BookkeepingRecord[];
@@ -31,6 +32,8 @@ interface BillsWorkspaceProps {
   accounts: BookkeepingRecord[];
   currency: string;
   asOfDate: string;
+  /** Default terms for new bills, from Settings. */
+  billTerms?: string;
 }
 
 type BillStatus = "Open" | "Partially Paid" | "Overdue" | "Paid" | "Cancelled";
@@ -66,7 +69,7 @@ function csvValue(value: string) {
   return `"${value.replaceAll('"', '""')}"`;
 }
 
-export default function BillsWorkspace({ records: initialRecords, vendors, accounts, currency, asOfDate }: BillsWorkspaceProps) {
+export default function BillsWorkspace({ records: initialRecords, vendors, accounts, currency, asOfDate, billTerms = "30 days" }: BillsWorkspaceProps) {
   const router = useRouter();
   const [records, setRecords] = useState(initialRecords);
   const [search, setSearch] = useState("");
@@ -109,14 +112,12 @@ export default function BillsWorkspace({ records: initialRecords, vendors, accou
   const paidTotal = records.reduce((sum, record) => sum + Number(record.data.paidAmount || 0), 0);
 
   function openNewBill() {
-    const dueDate = new Date(`${asOfDate}T00:00:00`);
-    dueDate.setDate(dueDate.getDate() + 30);
     setEditingRecord(null);
     setDefaults({
       billNumber: `BILL-${String(records.length + 1).padStart(4, "0")}`,
       billDate: asOfDate,
-      dueDate: dueDate.toISOString().slice(0, 10),
-      paymentTerms: "30 days",
+      dueDate: dueDateForTerms(asOfDate, billTerms) || asOfDate,
+      paymentTerms: billTerms,
       paymentMethod: "Credit",
       paidAmount: "0",
       status: "Open",

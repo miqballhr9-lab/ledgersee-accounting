@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 
 import { listBookkeepingRecordGroups } from "@/app/actions";
+import CompanySettings from "@/components/settings/CompanySettings";
+import { requireUser } from "@/lib/auth";
 import ChartOfAccountsWorkspace from "@/components/bookkeeping/ChartOfAccountsWorkspace";
 import InventoryWorkspace from "@/components/bookkeeping/InventoryWorkspace";
 import BudgetPlannerWorkspace from "@/components/bookkeeping/BudgetPlannerWorkspace";
@@ -28,6 +30,11 @@ export async function generateMetadata({ params }: SectionPageProps): Promise<Me
 export default async function SectionPage({ params, searchParams }: SectionPageProps) {
   const { section } = await params;
   const { startDate = "", endDate = "", budgetHead = "" } = await searchParams;
+  if (section === "settings") {
+    const [groups, me] = await Promise.all([listBookkeepingRecordGroups(["settings"]), requireUser()]);
+    return <CompanySettings settings={groups.settings?.[0] ?? null} workspaceName={me.workspaceName} />;
+  }
+
   if (section === "inventory") {
     const groups = await listBookkeepingRecordGroups(["items", "inventory-movements", "settings"]);
     return (
@@ -83,6 +90,7 @@ export default async function SectionPage({ params, searchParams }: SectionPageP
         vendors={groups.vendors ?? []}
         accounts={groups.accounts ?? []}
         currency={groups.settings?.[0]?.data.currency || "USD"}
+        billTerms={groups.settings?.[0]?.data.billTerms || "30 days"}
         asOfDate={new Date().toISOString().slice(0, 10)}
       />
     );

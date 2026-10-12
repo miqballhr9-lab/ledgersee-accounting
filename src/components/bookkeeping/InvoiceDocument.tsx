@@ -34,7 +34,15 @@ export default function InvoiceDocument({ invoice, companyName, documentKind = "
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.12em] text-primary">{isTaxInvoice ? (pack?.code === "PK" ? "Sales tax invoice" : "Tax invoice") : details.label}</p>
           <h1 className="mt-2 text-3xl font-semibold tracking-tight">{invoice[details.numberKey] || details.label}</h1>
-          <p className="mt-2 text-sm text-muted-foreground">From {companyName || "Business"}</p>
+          <div className="mt-2 flex items-start gap-3">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            {seller?.logo ? <img src={seller.logo} alt="" className="h-12 w-auto max-w-[140px] object-contain" /> : null}
+            <div className="text-sm text-muted-foreground">
+              <p>From <span className="font-medium text-foreground">{companyName || "Business"}</span></p>
+              {(seller?.customerAddressSame === "false" ? seller?.customerAddress : seller?.address) ? <p className="whitespace-pre-line text-xs leading-5">{seller?.customerAddressSame === "false" ? seller?.customerAddress : seller?.address}</p> : null}
+              {[seller?.customerEmail || seller?.companyEmail, seller?.phone, seller?.website].filter(Boolean).length ? <p className="text-xs">{[seller?.customerEmail || seller?.companyEmail, seller?.phone, seller?.website].filter(Boolean).join(" · ")}</p> : null}
+            </div>
+          </div>
           {registrations.length ? <p className="mt-1 text-xs text-muted-foreground">{registrations.join(" · ")}</p> : null}
         </div>
         <dl className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm">
@@ -93,6 +101,7 @@ export default function InvoiceDocument({ invoice, companyName, documentKind = "
         <div className="flex justify-between gap-4 border-t border-border pt-4 text-base font-semibold"><span>{details.totalLabel}</span><span className="tabular-nums">{currencyAmount(Number(invoice.amount) || 0, currency)}</span></div>
       </section>
 
+      {documentKind === "invoices" && seller?.invoiceMessage ? <section className="mt-8 border-t border-border pt-5"><p className="whitespace-pre-wrap text-sm">{seller.invoiceMessage}</p></section> : null}
       {invoice.notes || invoice.reason ? <section className="mt-8 border-t border-border pt-5"><h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{invoice.reason ? "Reason" : "Notes"}</h2><p className="mt-2 whitespace-pre-wrap text-sm">{invoice.reason || invoice.notes}</p></section> : null}
     </article>
   );

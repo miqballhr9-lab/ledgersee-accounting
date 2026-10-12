@@ -43,7 +43,7 @@ const sourceSlug: Record<string, string> = {
 
 const asOfEngines = new Set(["bs", "trial-balance", "ar-ageing", "ap-ageing"]);
 
-function readOptions(params: URLSearchParams, report: ReportDefinition, today: string, fiscalStart: number, earliest: string) {
+function readOptions(params: URLSearchParams, report: ReportDefinition, today: string, fiscalStart: number, earliest: string, defaultMethod: AccountingMethod) {
   const defaults = report.defaults ?? {};
   const preset = (params.get("period") as PeriodPreset | null) ?? (asOfEngines.has(report.engine ?? "") ? "today" : "this-year-to-date");
   const range = preset === "custom" ? { from: params.get("from") ?? today, to: params.get("to") ?? today } : presetRange(preset, today, fiscalStart, earliest);
@@ -59,7 +59,7 @@ function readOptions(params: URLSearchParams, report: ReportDefinition, today: s
     pctOfIncome: params.has("pcti") ? params.get("pcti") === "1" : Boolean(defaults.pctOfIncome),
     nameFilter: params.get("name") ?? undefined,
   };
-  const method: AccountingMethod = params.get("method") === "cash" ? "cash" : "accrual";
+  const method: AccountingMethod = params.get("method") === "cash" ? "cash" : params.get("method") === "accrual" ? "accrual" : defaultMethod;
   return { preset, options, method };
 }
 
@@ -75,10 +75,11 @@ export default function ReportViewer({ reportKey, records, today }: ReportViewer
   const settings = records.find((record) => record.kind === "settings")?.data ?? {};
   const company = settings.companyName || "Your business";
   const currency = settings.currency || "USD";
-  const methodParam: AccountingMethod = params.get("method") === "cash" ? "cash" : "accrual";
+  const defaultMethod: AccountingMethod = settings.accountingMethod === "Cash" ? "cash" : "accrual";
+  const methodParam: AccountingMethod = params.get("method") === "cash" ? "cash" : params.get("method") === "accrual" ? "accrual" : defaultMethod;
   const ledger = useMemo(() => buildLedger(records, methodParam), [records, methodParam]);
   const query = params.toString();
-  const { preset, options, method } = useMemo(() => readOptions(new URLSearchParams(query), report, today, ledger.fiscalYearStartMonth, earliestDate(ledger)), [query, report, today, ledger]);
+  const { preset, options, method } = useMemo(() => readOptions(new URLSearchParams(query), report, today, ledger.fiscalYearStartMonth, earliestDate(ledger), defaultMethod), [query, report, today, ledger, defaultMethod]);
   const engine = report.engine;
   const isAsOf = asOfEngines.has(engine ?? "");
 
@@ -136,7 +137,7 @@ export default function ReportViewer({ reportKey, records, today }: ReportViewer
     if (!draft.showChange) next.set("chg", "0");
     if (!draft.showPctChange) next.set("pctc", "0");
     if (draft.allRows) next.set("rows", "all");
-    if (draft.method === "cash") next.set("method", "cash");
+    next.set("method", draft.method);
     if (params.has("pcti")) next.set("pcti", params.get("pcti")!);
     if (nameDraft.trim()) next.set("name", nameDraft.trim());
     router.replace(`${pathname}?${next.toString()}`, { scroll: false });
