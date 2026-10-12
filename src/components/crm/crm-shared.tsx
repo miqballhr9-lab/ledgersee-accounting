@@ -49,6 +49,7 @@ export function displayValue(field: CrmField | undefined, data: Record<string, s
   if (field.type === "percent") return `${value}%`;
   if (field.type === "datetime") return formatDateTime(value);
   if (field.type === "related") return data.related ? `${data.relatedType}: ${data.related}` : "";
+  if (field.type === "file") return data[`${key}Name`] || "File";
   return value;
 }
 
@@ -59,6 +60,7 @@ export function fieldFor(mod: CrmModule, key: string): CrmField | undefined {
 
 export function recordTitle(record: BookkeepingRecord) {
   if (record.kind === "customers") return record.data.name || "Customer";
+  if (record.kind === "employees") return record.data.name || "Employee";
   const mod = crmModuleByKind(record.kind);
   return mod ? crmTitle(mod, record.data) : "Record";
 }

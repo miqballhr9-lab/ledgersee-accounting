@@ -496,11 +496,34 @@ export const navigationGroups: NavigationGroup[] = [
     ],
   },
   {
+    label: "HR",
+    items: [
+      { slug: "hr", label: "HR home", icon: "Gauge" },
+      { slug: "employees", label: "Employees", icon: "Users" },
+      { slug: "hr/departments", label: "Departments", icon: "Network" },
+      { slug: "hr/attendance", label: "Attendance", icon: "Clock" },
+      { slug: "hr/leave-requests", label: "Leave requests", icon: "CalendarDays" },
+      { slug: "hr/leave-types", label: "Leave types", icon: "CalendarCog" },
+      { slug: "hr/holidays", label: "Holidays", icon: "PartyPopper" },
+      { slug: "hr/loans", label: "Loans & advances", icon: "HandCoins" },
+      { slug: "hr/expense-claims", label: "Expense claims", icon: "ReceiptText" },
+      { slug: "hr/documents", label: "Employee documents", icon: "FileBadge" },
+      { slug: "hr/jobs", label: "Job openings", icon: "BriefcaseBusiness" },
+      { slug: "hr/candidates", label: "Candidates", icon: "UserSearch" },
+      { slug: "hr/onboarding", label: "Onboarding", icon: "ListChecks" },
+      { slug: "hr/appraisals", label: "Appraisals", icon: "Star" },
+      { slug: "hr/settlements", label: "Final settlements", icon: "LogOut" },
+    ],
+  },
+  {
     label: "Payroll",
     items: [
-      { slug: "employees", label: "Employees", icon: "Users" },
       { slug: "payroll", label: "Payroll", icon: "Banknote" },
     ],
+  },
+  {
+    label: "My portal",
+    items: [{ slug: "my", label: "My HR portal", icon: "UserRound" }],
   },
   {
     label: "Budgets",

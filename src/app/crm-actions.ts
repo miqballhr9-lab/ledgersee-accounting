@@ -9,8 +9,10 @@ import { saveBookkeepingRecord } from "@/app/actions";
 import { ActionError } from "@/lib/action-error";
 import { assertCanWrite, requireUser } from "@/lib/auth";
 import type { BookkeepingRecord, RecordKind } from "@/lib/bookkeeping-types";
+import { afterHrSave, applyHrRules } from "@/lib/hr-rules";
 import {
   crmKinds,
+  hrKinds,
   crmModuleByKind,
   crmTitle,
   fullName,
@@ -58,7 +60,10 @@ async function lookupContext(userId: string) {
   const rows = await db
     .select()
     .from(bookkeepingRecord)
-    .where(and(eq(bookkeepingRecord.userId, userId), inArray(bookkeepingRecord.kind, ["customers", "crm-leads", "crm-contacts", "crm-deals", "crm-campaigns", "crm-cases"])));
+    .where(and(eq(bookkeepingRecord.userId, userId), inArray(bookkeepingRecord.kind, [
+      "customers", "crm-leads", "crm-contacts", "crm-deals", "crm-campaigns", "crm-cases",
+      "employees", "hr-departments", "hr-leave-types", "hr-jobs", "hr-leaves", "hr-holidays", "hr-loans", "hr-attendance",
+    ])));
   const byKind = (kind: string) => rows.filter((row) => row.kind === kind);
   return { rows, byKind };
 }
@@ -66,6 +71,7 @@ type LookupContext = Awaited<ReturnType<typeof lookupContext>>;
 
 function lookupName(kind: string, data: Record<string, string>) {
   if (kind === "customers") return data.name?.trim() || data.company?.trim() || "Customer";
+  if (kind === "employees") return data.name?.trim() || "Employee";
   const mod = crmModuleByKind(kind);
   return mod ? crmTitle(mod, data) : "Record";
 }
@@ -75,6 +81,10 @@ const lookupKinds: Partial<Record<NonNullable<CrmField["type"]>, string>> = {
   contact: "crm-contacts",
   deal: "crm-deals",
   campaign: "crm-campaigns",
+  employee: "employees",
+  department: "hr-departments",
+  leaveType: "hr-leave-types",
+  job: "hr-jobs",
 };
 
 /** Resolves one lookup to an id and name that belong to this business, by id first and then by name (for imports). */
@@ -128,7 +138,7 @@ function cleanValue(field: CrmField, raw: string | undefined) {
 }
 
 /** Checks and tidies a CRM record before it is stored. */
-function buildData(mod: CrmModule, input: Record<string, string>, context: LookupContext, existing: Record<string, string> | undefined, ownerName: string) {
+function buildData(mod: CrmModule, input: Record<string, string>, context: LookupContext, existing: Record<string, string> | undefined, ownerName: string, id?: string) {
   const data: Record<string, string> = { ...(existing ?? {}) };
   for (const field of mod.fields) {
     if (field.readOnly) continue;
@@ -156,6 +166,10 @@ function buildData(mod: CrmModule, input: Record<string, string>, context: Looku
     }
     if (!(field.key in input) && existing) continue;
     data[field.key] = cleanValue(field, input[field.key]);
+    if (field.type === "file") {
+      if (data[field.key] && !/^(https?:\/\/|\/)/.test(data[field.key])) throw new ActionError(`Upload the ${field.label.toLowerCase()} again.`);
+      data[`${field.key}Name`] = data[field.key] ? (input[`${field.key}Name`] ?? existing?.[`${field.key}Name`] ?? "").slice(0, 200) : "";
+    }
   }
   if (!data.owner) data.owner = ownerName;
   for (const field of mod.fields) {
@@ -172,6 +186,7 @@ function buildData(mod: CrmModule, input: Record<string, string>, context: Looku
     if (!isClosedStage(data.stage)) data.closedOn = "";
   }
   if ((mod.kind === "crm-tasks") && data.status === "Completed" && existing?.status !== "Completed") data.completedOn = new Date().toISOString().slice(0, 10);
+  if (mod.section === "hr") applyHrRules(mod.kind, data, existing, { byKind: context.byKind, actor: ownerName }, id);
   return data;
 }
 
@@ -203,16 +218,18 @@ export async function saveCrmRecord(kind: string, input: Record<string, string>,
       .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, kind))).limit(1);
     if (!existing) throw new ActionError(`We couldn’t find that ${mod.label.toLowerCase()}. Refresh and try again.`);
   }
-  let data = buildData(mod, input, context, existing?.data, me.name);
+  let data = buildData(mod, input, context, existing?.data, me.name, existing?.id);
   data = withHistory(data, changeEntries(mod, existing?.data, data, me.name));
   if (existing) {
     const [saved] = await db.update(bookkeepingRecord).set({ data, updatedAt: new Date() })
       .where(and(eq(bookkeepingRecord.id, existing.id), eq(bookkeepingRecord.userId, me.id))).returning();
+    if (mod.section === "hr") await afterHrSave(me.id, kind, existing.data, saved);
     revalidatePath("/app", "layout");
     return toRecord(saved);
   }
   if (mod.numbering) data[mod.numbering.key] = await nextNumber(me.id, kind, mod.numbering.key, mod.numbering.prefix);
   const [created] = await db.insert(bookkeepingRecord).values({ userId: me.id, kind, data }).returning();
+  if (mod.section === "hr") await afterHrSave(me.id, kind, undefined, created);
   revalidatePath("/app", "layout");
   return toRecord(created);
 }
@@ -231,10 +248,11 @@ export async function updateCrmField(kind: string, ids: string[], key: string, v
   const saved: BookkeepingRecord[] = [];
   for (const row of rows) {
     const input = { ...row.data, [key]: value, ...(key === "stage" ? { probability: "" } : {}) };
-    let data = buildData(mod, input, context, row.data, me.name);
+    let data = buildData(mod, input, context, row.data, me.name, row.id);
     data = withHistory(data, changeEntries(mod, row.data, data, me.name));
     const [updated] = await db.update(bookkeepingRecord).set({ data, updatedAt: new Date() })
       .where(and(eq(bookkeepingRecord.id, row.id), eq(bookkeepingRecord.userId, me.id))).returning();
+    if (mod.section === "hr") await afterHrSave(me.id, kind, row.data, updated);
     saved.push(toRecord(updated));
   }
   revalidatePath("/app", "layout");
@@ -262,7 +280,7 @@ export async function deleteCrmRecords(kind: string, ids: string[]): Promise<voi
 export async function addCrmNote(parentKind: string, parentId: string, title: string, content: string): Promise<BookkeepingRecord> {
   const me = await requireUser();
   assertCanWrite(me, "crm-notes");
-  if (parentKind !== "customers" && !crmKinds.includes(parentKind as RecordKind)) throw new ActionError("Notes can’t be added here.");
+  if (parentKind !== "customers" && !crmKinds.includes(parentKind as RecordKind) && !hrKinds.includes(parentKind as RecordKind)) throw new ActionError("Notes can’t be added here.");
   const text = content.trim().slice(0, 8000);
   if (!text) throw new ActionError("Write the note first.");
   const [parent] = await db.select({ id: bookkeepingRecord.id }).from(bookkeepingRecord)

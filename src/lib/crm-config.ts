@@ -8,12 +8,16 @@
  * server actions.
  */
 import type { RecordKind } from "@/lib/bookkeeping-types";
+import { hrModules } from "@/lib/hr-config";
 
 export type CrmFieldType =
   | "text" | "email" | "phone" | "url" | "number" | "currency" | "percent" | "date" | "datetime"
   | "select" | "textarea" | "checkbox" | "owner"
   /** Lookups store the record's id in `<key>Id` and its display name in `<key>`. */
   | "account" | "contact" | "deal" | "campaign"
+  | "employee" | "department" | "leaveType" | "job"
+  /** An uploaded file: the link in `<key>`, the file name in `<key>Name`. */
+  | "file"
   /** "Related to": a lead, contact, account, deal, campaign or case, stored as relatedType / relatedId / related. */
   | "related";
 
@@ -32,7 +36,7 @@ export interface CrmField {
   readOnly?: boolean;
 }
 
-export type CrmModuleKey = "leads" | "contacts" | "deals" | "tasks" | "meetings" | "calls" | "campaigns" | "cases" | "solutions";
+export type CrmModuleKey = string;
 
 export interface CrmModule {
   key: CrmModuleKey;
@@ -53,6 +57,10 @@ export interface CrmModule {
   kanbanKey?: string;
   /** Amount summed in each Kanban column. */
   kanbanAmountKey?: string;
+  /** Which part of the app the module belongs to; CRM unless set. */
+  section?: "crm" | "hr";
+  /** One-click status changes on the detail panel, e.g. Approve / Reject on a leave request. */
+  quickActions?: readonly { label: string; key: string; value: string; tone?: "primary" | "danger" }[];
 }
 
 export const leadSources = [
@@ -321,12 +329,16 @@ export const crmModules: readonly CrmModule[] = [
 
 export const crmKinds = crmModules.map((module) => module.kind);
 
+/** Every module that shares the CRM screens: CRM itself and HR. */
+export const allModules: readonly CrmModule[] = [...crmModules, ...hrModules];
+export const hrKinds = hrModules.map((module) => module.kind);
+
 export function crmModule(key: string): CrmModule | undefined {
-  return crmModules.find((module) => module.key === key);
+  return allModules.find((module) => module.key === key);
 }
 
 export function crmModuleByKind(kind: string): CrmModule | undefined {
-  return crmModules.find((module) => module.kind === kind);
+  return allModules.find((module) => module.kind === kind);
 }
 
 /** Pages under /app/crm. Activities shows tasks, meetings and calls together. */
@@ -340,6 +352,15 @@ export function fullName(data: Record<string, string>) {
 /** The name a record goes by, whatever its module. */
 export function crmTitle(module: CrmModule, data: Record<string, string>) {
   if (module.titleKey === "fullName") return fullName(data) || data.company || "Untitled";
+  // HR records about an employee read better with what they are.
+  const about: Record<string, string | undefined> = {
+    "hr-attendance": data.date,
+    "hr-leaves": data.leaveType,
+    "hr-loans": data.loanType,
+    "hr-appraisals": data.period,
+    "hr-settlements": "final settlement",
+  };
+  if (module.kind in about && data.employee) return about[module.kind] ? `${data.employee} · ${about[module.kind]}` : data.employee;
   return data[module.titleKey]?.trim() || "Untitled";
 }
 
@@ -361,10 +382,10 @@ export function relatedHref(type: string, id: string) {
 /** Badge colour for a status or stage, so the same word always looks the same. */
 export function statusTone(value: string | undefined): "good" | "bad" | "warn" | "info" | "neutral" {
   if (!value) return "neutral";
-  if (["Closed Won", "Completed", "Converted", "Published", "Complete", "Closed", "Active", "Pre-Qualified", "Contacted"].includes(value)) return "good";
-  if (["Closed Lost", "Closed Lost to Competition", "Junk Lead", "Lost Lead", "Not Qualified", "Cancelled", "No answer", "Escalated", "Inactive"].includes(value)) return "bad";
-  if (["Negotiation/Review", "Proposal/Price Quote", "In Progress", "Waiting for input", "On Hold", "Scheduled", "Planning", "Reviewed", "Attempted to Contact", "Contact in Future"].includes(value)) return "warn";
-  if (["New", "Not Started", "Not Contacted", "Qualification", "Draft"].includes(value)) return "info";
+  if (["Closed Won", "Completed", "Converted", "Published", "Complete", "Closed", "Active", "Pre-Qualified", "Contacted", "Approved", "Present", "Hired", "Paid", "Repaid", "Done", "Open"].includes(value)) return "good";
+  if (["Closed Lost", "Closed Lost to Competition", "Junk Lead", "Lost Lead", "Not Qualified", "Cancelled", "No answer", "Escalated", "Inactive", "Rejected", "Absent", "Withdrawn"].includes(value)) return "bad";
+  if (["Negotiation/Review", "Proposal/Price Quote", "In Progress", "Waiting for input", "On Hold", "Scheduled", "Planning", "Reviewed", "Attempted to Contact", "Contact in Future", "Pending", "Late", "Half day", "Interview", "Offer", "Submitted", "Requested", "On hold"].includes(value)) return "warn";
+  if (["New", "Not Started", "Not Contacted", "Qualification", "Draft", "Screening", "On leave", "Holiday", "Applied"].includes(value)) return "info";
   return "neutral";
 }
 

@@ -9,6 +9,7 @@ import { ActionError } from "@/lib/action-error";
 import { bookkeepingRecord, user } from "@/db/schema";
 import { assertCanRead, assertCanWrite, requireUser } from "@/lib/auth";
 import { canReadKind } from "@/lib/permissions";
+import { applyLoanRepayment } from "@/lib/hr-rules";
 import { sendEmailOrThrow } from "@/lib/email";
 import { createUploadUrl } from "@/lib/storage";
 import { dueDateForTerms, parseInvoiceLines } from "@/lib/invoice-utils";
@@ -1207,6 +1208,8 @@ export async function recordPayrollPayment(id: string, paymentDate: string, acco
     .update(bookkeepingRecord)
     .set({ data: { ...entry.data, status: "Paid", paidDate: paymentDate, paymentAccountId: account.id, paymentAccountName: name, paymentMethod: method }, updatedAt: new Date() })
     .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id)));
+  // The salary's loan deduction pays down the employee's HR loans.
+  await applyLoanRepayment(me.id, entry.data, 1);
   revalidatePath("/app", "layout");
 }
 
@@ -1224,6 +1227,7 @@ export async function undoPayrollPayment(id: string): Promise<void> {
     .update(bookkeepingRecord)
     .set({ data: { ...entry.data, status: "Unpaid", paidDate: "" }, updatedAt: new Date() })
     .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id)));
+  if (entry.data.status === "Paid") await applyLoanRepayment(me.id, entry.data, -1);
   revalidatePath("/app", "layout");
 }
 

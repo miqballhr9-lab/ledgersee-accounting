@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { toast } from "sonner";
 
+import { getAttachmentUploadTarget } from "@/app/actions";
 import { saveCrmRecord } from "@/app/crm-actions";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -32,6 +33,10 @@ const lookupKind: Partial<Record<NonNullable<CrmField["type"]>, string>> = {
   contact: "crm-contacts",
   deal: "crm-deals",
   campaign: "crm-campaigns",
+  employee: "employees",
+  department: "hr-departments",
+  leaveType: "hr-leave-types",
+  job: "hr-jobs",
 };
 
 function plusDays(days: number) {
@@ -77,12 +82,40 @@ function startValues(module: CrmModule, record: BookkeepingRecord | null, preset
     values.caseOrigin = "Phone";
   }
   if (module.kind === "crm-solutions") values.status = "Draft";
+  if (module.kind === "hr-attendance") Object.assign(values, { date: today(), status: "Present", checkIn: "09:00" });
+  if (module.kind === "hr-leaves") Object.assign(values, { fromDate: today(), toDate: today(), status: "Pending" });
+  if (module.kind === "hr-loans") Object.assign(values, { loanType: "Loan", requestDate: today(), installments: "6", status: "Requested" });
+  if (module.kind === "hr-claims") Object.assign(values, { date: today(), status: "Submitted" });
+  if (module.kind === "hr-jobs") Object.assign(values, { status: "Open", openings: "1", employmentType: "Full time" });
+  if (module.kind === "hr-candidates") Object.assign(values, { stage: "Applied" });
+  if (module.kind === "hr-onboarding") Object.assign(values, { status: "Not Started", dueDate: today() });
+  if (module.kind === "hr-appraisals") Object.assign(values, { status: "Draft", period: String(new Date().getFullYear()), reviewDate: today() });
+  if (module.kind === "hr-settlements") Object.assign(values, { status: "Draft", reason: "Resignation", lastWorkingDay: today(), gratuityDaysPerYear: "30" });
+  if (module.kind === "hr-leave-types") Object.assign(values, { paid: "true", daysPerYear: "14" });
+  if (module.kind === "hr-holidays") Object.assign(values, { type: "Public" });
+  if (!module.fields.some((field) => field.type === "owner")) delete values.owner;
   return { ...values, ...preset };
 }
 
 export default function CrmRecordEditor({ module, record, preset, open, onOpenChange, context, onSaved }: CrmRecordEditorProps) {
   const [values, setValues] = useState<Record<string, string>>(() => startValues(module, record, preset, context.me));
   const [saving, setSaving] = useState(false);
+  const [uploading, setUploading] = useState<string | null>(null);
+
+  async function upload(key: string, file: File | undefined) {
+    if (!file) return;
+    setUploading(key);
+    try {
+      const target = await getAttachmentUploadTarget(file.name, file.type, file.size);
+      const response = await fetch(target.uploadUrl, { method: "PUT", headers: { "Content-Type": file.type }, body: file });
+      if (!response.ok) throw new Error("The upload didn’t finish. Please try again.");
+      set({ [key]: target.publicUrl, [`${key}Name`]: file.name });
+    } catch (error) {
+      toast.error(errorText(error));
+    } finally {
+      setUploading(null);
+    }
+  }
   const [lastKey, setLastKey] = useState(`${record?.id ?? "new"}-${open}`);
   const key = `${record?.id ?? "new"}-${open}`;
   if (key !== lastKey) {
@@ -130,6 +163,14 @@ export default function CrmRecordEditor({ module, record, preset, open, onOpenCh
     if (field.readOnly) {
       const shown = field.key === "expectedRevenue" ? formatMoney(expected, context.currency) : value || "Assigned when saved";
       return <Input id={id} value={shown} readOnly className="bg-muted/50" />;
+    }
+    if (field.type === "file") {
+      return (
+        <div className="space-y-1.5">
+          <Input id={id} type="file" accept="application/pdf,image/png,image/jpeg,image/webp" disabled={uploading === field.key} onChange={(event) => void upload(field.key, event.target.files?.[0])} />
+          {uploading === field.key ? <p className="text-xs text-muted-foreground">Uploading…</p> : value ? <p className="flex items-center gap-2 text-xs"><a className="text-primary underline-offset-4 hover:underline" href={value} target="_blank" rel="noreferrer">{values[`${field.key}Name`] || "Uploaded file"}</a><button type="button" className="text-muted-foreground hover:text-destructive" onClick={() => set({ [field.key]: "", [`${field.key}Name`]: "" })}>Remove</button></p> : null}
+        </div>
+      );
     }
     if (field.type === "textarea") return <Textarea id={id} rows={3} value={value} onChange={(event) => set({ [field.key]: event.target.value })} placeholder={field.placeholder} />;
     if (field.type === "checkbox") {
@@ -236,7 +277,7 @@ export default function CrmRecordEditor({ module, record, preset, open, onOpenCh
         </form>
         <DialogFooter>
           <Button type="button" variant="outline" disabled={saving} onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button type="submit" form={`crm-form-${module.key}`} disabled={saving}>{saving ? "Saving…" : "Save"}</Button>
+          <Button type="submit" form={`crm-form-${module.key}`} disabled={saving || Boolean(uploading)}>{saving ? "Saving…" : "Save"}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

@@ -6,6 +6,17 @@ import { usePathname, useRouter } from "next/navigation";
 import {
   ArrowLeft,
   ArrowLeftRight,
+  BriefcaseBusiness,
+  CalendarCog,
+  CalendarDays,
+  Clock,
+  FileBadge,
+  HandCoins,
+  Network,
+  PartyPopper,
+  ReceiptText,
+  Star,
+  UserSearch,
   Banknote,
   ChartNoAxesCombined,
   BarChart3,
@@ -120,6 +131,19 @@ const icons: Record<string, LucideIcon> = {
   Megaphone,
   LifeBuoy,
   BookOpen,
+  Network,
+  Clock,
+  CalendarDays,
+  CalendarCog,
+  PartyPopper,
+  HandCoins,
+  ReceiptText,
+  FileBadge,
+  BriefcaseBusiness,
+  UserSearch,
+  Star,
+  LogOut,
+  UserRound,
 };
 
 const gearGroups = [
@@ -155,7 +179,7 @@ function itemHref(slug: string) {
 /** The dashboard lives at `/app` and CRM home at `/app/crm`, which prefix other routes, so they only match exactly. */
 function isItemActive(slug: string, pathname: string) {
   const href = itemHref(slug);
-  return pathname === href || (slug !== "dashboard" && slug !== "crm" && pathname.startsWith(`${href}/`));
+  return pathname === href || (slug !== "dashboard" && slug !== "crm" && slug !== "hr" && pathname.startsWith(`${href}/`));
 }
 
 function groupForPath(pathname: string) {

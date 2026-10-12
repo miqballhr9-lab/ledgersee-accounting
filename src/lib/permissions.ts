@@ -102,6 +102,7 @@ export function areaForPage(path: string): Area | null {
 export function homeFor(role: Role) {
   if (canAccess(role, "dashboard")) return "/app";
   if (canAccess(role, "crm")) return "/app/crm";
-  if (canAccess(role, "payroll")) return "/app/employees";
-  return "/app/profile";
+  if (canAccess(role, "hr")) return "/app/hr";
+  if (canAccess(role, "payroll")) return "/app/payroll";
+  return "/app/my";
 }

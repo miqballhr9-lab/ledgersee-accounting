@@ -24,6 +24,7 @@ import { sendEmail, sendEmailOrThrow } from "@/lib/email";
 import { describeAuthError } from "@/lib/errors";
 import { ActionError } from "@/lib/action-error";
 import { currentScheduledUser } from "@/lib/run-as-user";
+import { currentRoleOverride } from "@/lib/role-override";
 import { canAccess, canReadKind, canWriteKind, isRole, type Role } from "@/lib/permissions";
 
 /**
@@ -364,7 +365,9 @@ export async function requireUser(): Promise<WorkspaceUser> {
   // action's thrown message is what reaches the browser. Keep it that way — a code
   // or a stack trace here becomes a code or a stack trace on someone's screen.
   if (!user) throw new ActionError(describeAuthError("NOT_SIGNED_IN").message);
-  return asWorkspaceUser(user);
+  const workspaceUser = await asWorkspaceUser(user);
+  const override = currentRoleOverride();
+  return override ? { ...workspaceUser, role: override } : workspaceUser;
 }
 
 /** Throws unless the signed-in person's role may change records of this kind. */

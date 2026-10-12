@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
-import { CalendarClock, Check, FilePlus2, FileText, Mail, Pencil, Phone, Plus, RefreshCcw, StickyNote, Trash2, UserCheck } from "lucide-react";
+import { CalendarClock, Check, X, FilePlus2, FileText, Mail, Pencil, Phone, Plus, RefreshCcw, StickyNote, Trash2, UserCheck } from "lucide-react";
 
 import { addCrmNote, createDocumentFromDeal, deleteCrmRecords, updateCrmField } from "@/app/crm-actions";
 import { Button } from "@/components/ui/button";
@@ -189,6 +189,13 @@ export default function CrmRecordDetail({ record, context, onClose, onOpenRecord
             ) : null}
             {data.email ? <Button size="sm" variant="outline" className="gap-1.5" nativeButton={false} render={<a href={`mailto:${data.email}`} />}><Mail size={14} />Send email</Button> : null}
             {phone ? <Button size="sm" variant="outline" className="gap-1.5" nativeButton={false} render={<a href={`tel:${phone}`} />}><Phone size={14} />Call</Button> : null}
+            {mod?.quickActions?.filter((action) => data[action.key] !== action.value).map((action) => (
+              <Button key={action.label} type="button" size="sm" variant={action.tone === "primary" ? "default" : "outline"} className={`gap-1.5 ${action.tone === "danger" ? "text-destructive hover:text-destructive" : ""}`} disabled={Boolean(busy)} onClick={() => void act(action.label, async () => {
+                context.upsert(await updateCrmField(record.kind, [record.id], action.key, action.value));
+                toast.success(`${mod.label}: ${action.value}.`);
+                onRefresh();
+              })}>{action.tone === "danger" ? <X size={14} /> : <Check size={14} />}{action.label}</Button>
+            ))}
             {record.kind === "crm-tasks" && data.status !== "Completed" ? (
               <Button type="button" size="sm" variant="outline" className="gap-1.5" disabled={Boolean(busy)} onClick={() => void act("complete", async () => {
                 context.upsert(await updateCrmField("crm-tasks", [record.id], "status", "Completed"));
@@ -269,6 +276,7 @@ export default function CrmRecordDetail({ record, context, onClose, onOpenRecord
                             {target ? <button type="button" className="text-primary underline-offset-4 hover:underline" onClick={() => onOpenRecord(target)}>{value}</button>
                               : field.type === "select" && field.key === mod.statusKey ? <StatusBadge value={value} />
                               : field.type === "email" && value ? <a className="text-primary underline-offset-4 hover:underline" href={`mailto:${value}`}>{value}</a>
+                              : field.type === "file" && data[field.key] ? <a className="text-primary underline-offset-4 hover:underline" href={data[field.key]} target="_blank" rel="noreferrer">{value}</a>
                               : field.type === "url" && value ? <a className="text-primary underline-offset-4 hover:underline" href={/^https?:/.test(value) ? value : `https://${value}`} target="_blank" rel="noreferrer">{value}</a>
                               : value || <span className="text-muted-foreground">—</span>}
                           </dd>
@@ -317,12 +325,14 @@ export default function CrmRecordDetail({ record, context, onClose, onOpenRecord
                   ))}
                 </ul>
               </Section>
+              {mod?.section === "hr" ? null : <>
               <Section title="Open activities" count={openActivities.length} actions={newActivityButtons}>
                 <RelatedRows rows={openActivities} columns={activityColumns} onOpen={onOpenRecord} empty="No open activities. Add a task, meeting or call." />
               </Section>
               <Section title="Closed activities" count={closedActivities.length}>
                 <RelatedRows rows={closedActivities} columns={activityColumns} onOpen={onOpenRecord} empty="Nothing closed yet." />
               </Section>
+              </>}
               {isAccount ? (
                 <Section title="Contacts" count={contacts.length} actions={<Button type="button" size="xs" variant="outline" className="gap-1" onClick={() => onCreate(crmModule("contacts")!, { accountId: record.id, account: title })}><Plus size={12} />Contact</Button>}>
                   <RelatedRows rows={contacts} onOpen={onOpenRecord} empty="No contacts at this account yet." columns={[

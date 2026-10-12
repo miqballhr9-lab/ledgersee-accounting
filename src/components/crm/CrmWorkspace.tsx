@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { ArrowDownToLine, ChevronDown, Columns3, Ellipsis, KanbanSquare, List, Pencil, Plus, Search, SlidersHorizontal, Trash2, Upload, UserCheck, Users } from "lucide-react";
+import { ArrowDownToLine, CalendarCheck, ChevronDown, Scale, Columns3, Ellipsis, KanbanSquare, List, Pencil, Plus, Search, SlidersHorizontal, Trash2, Upload, UserCheck, Users } from "lucide-react";
 
 import { deleteCrmRecords, importCrmRecords, updateCrmField } from "@/app/crm-actions";
 import BulkActionsMenu from "@/components/bookkeeping/BulkActionsMenu";
@@ -20,6 +20,8 @@ import { parseCsv } from "@/lib/budget-utils";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
 import { crmModule, isClosedStage, type CrmModule, type CrmModuleKey, type CrmPage } from "@/lib/crm-config";
 import ConvertLeadDialog from "@/components/crm/ConvertLeadDialog";
+import AttendanceDialog from "@/components/hr/AttendanceDialog";
+import LeaveBalances from "@/components/hr/LeaveBalances";
 import CrmRecordDetail from "@/components/crm/CrmRecordDetail";
 import CrmRecordEditor from "@/components/crm/CrmRecordEditor";
 import {
@@ -36,7 +38,8 @@ import {
 } from "@/components/crm/crm-shared";
 
 interface CrmWorkspaceProps {
-  page: CrmPage;
+  /** A CRM page (leads, accounts, activities…) or an HR module key (leave-requests…). */
+  page: CrmPage | string;
   initialStore: CrmStore;
   currency: string;
   me: string;
@@ -45,7 +48,7 @@ interface CrmWorkspaceProps {
   openId?: string;
 }
 
-const pageInfo: Record<CrmPage, { title: string; description: string }> = {
+const pageInfo: Record<string, { title: string; description: string }> = {
   leads: { title: "Leads", description: crmModule("leads")!.description },
   contacts: { title: "Contacts", description: crmModule("contacts")!.description },
   accounts: { title: "Accounts", description: "The companies and people you sell to. Accounts are your customers in Sales, so their quotes, invoices and balances show up here too." },
@@ -107,7 +110,7 @@ export default function CrmWorkspace({ page, initialStore, currency, me, owners,
   }
   const [activityKey, setActivityKey] = useState<CrmModuleKey>("tasks");
   const mod = page === "accounts" ? null : crmModule(page === "activities" ? activityKey : page)!;
-  const [view, setView] = useState<"list" | "kanban">(page === "deals" ? "kanban" : "list");
+  const [view, setView] = useState<"list" | "kanban" | "balances">(page === "deals" || page === "candidates" ? "kanban" : "list");
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<ViewFilter>("all");
   const [statusFilter, setStatusFilter] = useState("");
@@ -118,6 +121,7 @@ export default function CrmWorkspace({ page, initialStore, currency, me, owners,
   const [busy, setBusy] = useState(false);
   const [massUpdate, setMassUpdate] = useState<{ key: string; value: string } | null>(null);
   const [dragging, setDragging] = useState<string | null>(null);
+  const [marking, setMarking] = useState(false);
   const [shownKind, setShownKind] = useState(mod?.kind);
   if (shownKind !== mod?.kind) {
     setShownKind(mod?.kind);
@@ -278,7 +282,8 @@ export default function CrmWorkspace({ page, initialStore, currency, me, owners,
     });
   }
 
-  const info = pageInfo[page];
+  const info = pageInfo[page] ?? { title: mod?.plural ?? "Records", description: mod?.description ?? "" };
+  const sectionLabel = mod?.section === "hr" ? "HR" : "CRM";
   const accountsStats = useMemo(() => {
     if (page !== "accounts") return new Map<string, { contacts: number; open: number; won: number; outstanding: number }>();
     const stats = new Map<string, { contacts: number; open: number; won: number; outstanding: number }>();
@@ -307,7 +312,7 @@ export default function CrmWorkspace({ page, initialStore, currency, me, owners,
     <div className="mx-auto w-full max-w-[1440px] px-4 py-6 sm:px-7 sm:py-8">
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div className="min-w-0">
-          <p className="text-xs font-medium uppercase tracking-[0.12em] text-primary">CRM / {info.title}</p>
+          <p className="text-xs font-medium uppercase tracking-[0.12em] text-primary">{sectionLabel} / {info.title}</p>
           <h1 className="mt-1 text-[26px] font-semibold tracking-tight sm:text-3xl">{info.title}</h1>
           <p className="mt-1.5 max-w-2xl text-sm text-muted-foreground">{info.description}</p>
         </div>
@@ -325,6 +330,7 @@ export default function CrmWorkspace({ page, initialStore, currency, me, owners,
             </DropdownMenu>
           ) : null}
           <input ref={fileInput} type="file" accept=".csv,text/csv" className="hidden" onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) void importFile(file); }} />
+          {mod?.kind === "hr-attendance" ? <Button type="button" variant="outline" className="gap-2" onClick={() => setMarking(true)}><CalendarCheck size={15} />Mark attendance</Button> : null}
           {mod ? <Button type="button" className="gap-2" onClick={() => openNew()}><Plus size={15} />Create {mod.label}</Button>
             : <Button className="gap-2" nativeButton={false} render={<Link href="/app/customers?new=1" />}><Plus size={15} />Create account</Button>}
         </div>
@@ -390,6 +396,7 @@ export default function CrmWorkspace({ page, initialStore, currency, me, owners,
             <div className="flex rounded-md border border-border p-0.5">
               <Button type="button" size="sm" variant={view === "list" ? "secondary" : "ghost"} className="gap-1.5" onClick={() => setView("list")}><List size={14} />List</Button>
               <Button type="button" size="sm" variant={view === "kanban" ? "secondary" : "ghost"} className="gap-1.5" onClick={() => setView("kanban")}><KanbanSquare size={14} />Kanban</Button>
+              {mod.kind === "hr-leaves" ? <Button type="button" size="sm" variant={view === "balances" ? "secondary" : "ghost"} className="gap-1.5" onClick={() => setView("balances")}><Scale size={14} />Balances</Button> : null}
             </div>
           ) : null}
           {mod && view === "list" ? (
@@ -462,6 +469,8 @@ export default function CrmWorkspace({ page, initialStore, currency, me, owners,
           )}
         </section>
       ) : null}
+
+      {mod?.kind === "hr-leaves" && view === "balances" ? <LeaveBalances employees={store.employees ?? []} leaveTypes={store["hr-leave-types"] ?? []} leaves={store["hr-leaves"] ?? []} /> : null}
 
       {mod && view === "kanban" && mod.kanbanKey ? (
         <section className="mt-4 flex gap-3 overflow-x-auto pb-3">
@@ -591,6 +600,8 @@ export default function CrmWorkspace({ page, initialStore, currency, me, owners,
         onConvert={setConverting}
         onRefresh={() => router.refresh()}
       />
+
+      {mod?.kind === "hr-attendance" ? <AttendanceDialog open={marking} onOpenChange={setMarking} context={context} /> : null}
 
       <ConvertLeadDialog
         lead={converting}
