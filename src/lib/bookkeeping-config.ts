@@ -506,9 +506,10 @@ export const navigationGroups: NavigationGroup[] = [
     items: [
       { slug: "hr", label: "HR home", icon: "Gauge" },
       { slug: "employees", label: "Employees", icon: "Users" },
-      { slug: "hr/departments", label: "Departments", icon: "Network" },
+      { slug: "payroll", label: "Payroll", icon: "Banknote" },
       { slug: "hr/attendance", label: "Attendance", icon: "Clock" },
       { slug: "hr/leave-requests", label: "Leave requests", icon: "CalendarDays" },
+      { slug: "hr/departments", label: "Departments", icon: "Network" },
       { slug: "hr/leave-types", label: "Leave types", icon: "CalendarCog" },
       { slug: "hr/holidays", label: "Holidays", icon: "PartyPopper" },
       { slug: "hr/loans", label: "Loans & advances", icon: "HandCoins" },
@@ -519,12 +520,6 @@ export const navigationGroups: NavigationGroup[] = [
       { slug: "hr/onboarding", label: "Onboarding", icon: "ListChecks" },
       { slug: "hr/appraisals", label: "Appraisals", icon: "Star" },
       { slug: "hr/settlements", label: "Final settlements", icon: "LogOut" },
-    ],
-  },
-  {
-    label: "Payroll",
-    items: [
-      { slug: "payroll", label: "Payroll", icon: "Banknote" },
     ],
   },
   {

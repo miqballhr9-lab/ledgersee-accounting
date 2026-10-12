@@ -4,6 +4,8 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import PaymentDialog from "@/components/bookkeeping/PaymentDialog";
 import PayrollSheet from "@/components/bookkeeping/PayrollSheet";
+import Link from "next/link";
+import { useNewRecordParam } from "@/hooks/use-new-record-param";
 import { paymentAccountType } from "@/lib/payment-accounts";
 import { useRouter } from "next/navigation";
 import { ArrowDownToLine, Ellipsis, ArrowUpDown, Banknote, CalendarDays, ChevronDown, CircleDollarSign, Copy, FileSpreadsheet, FileText, FileUp, ListChecks, Mail, Pencil, Plus, Printer, SlidersHorizontal, Trash2, Undo2, Users } from "lucide-react";
@@ -191,6 +193,8 @@ export default function PayrollWorkspace({ records, accounts, employees = [], as
   function openNewEntry() {
     setSheet({ key: ++sheetCount.current, month: selectedMonth });
   }
+  // "Prepare salary sheet" on HR home links here with ?new=1.
+  useNewRecordParam(openNewEntry);
 
   function openEditEntry(record: BookkeepingRecord) {
     setSheet({ key: ++sheetCount.current, month: record.data.month || selectedMonth });
@@ -349,9 +353,9 @@ export default function PayrollWorkspace({ records, accounts, employees = [], as
     <main className="space-y-6 px-4 py-6 sm:px-7 lg:px-8">
       <section className="flex flex-col gap-4 border-b border-border pb-5 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <p className="mb-2 text-xs font-semibold uppercase tracking-[0.16em] text-primary">People & payroll</p>
+          <p className="mb-2 text-xs font-semibold uppercase tracking-[0.16em] text-primary"><Link href="/app/hr" className="hover:underline">HR</Link> / Payroll</p>
           <h1 className="text-2xl font-semibold tracking-tight text-foreground">Payroll</h1>
-          <p className="mt-1 max-w-2xl text-sm text-muted-foreground">Prepare each employee’s monthly pay with Pakistan salary-tax estimates and a clear take-home total.</p>
+          <p className="mt-1 max-w-2xl text-sm text-muted-foreground">Prepare each employee’s monthly pay with salary-tax estimates for your country and a clear take-home total. Unpaid leave and loan installments from HR are applied for you.</p>
         </div>
         <Button onClick={openNewEntry} className="w-full shrink-0 sm:w-auto"><Plus size={16} /> Add payroll entry</Button>
       </section>

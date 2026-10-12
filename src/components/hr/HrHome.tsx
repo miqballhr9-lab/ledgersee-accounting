@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { BriefcaseBusiness, CalendarDays, Clock, FileWarning, HandCoins, Plus, Users } from "lucide-react";
+import { Banknote, BriefcaseBusiness, CalendarDays, Check, Clock, FileWarning, HandCoins, Plus, Users } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { formatMoney, StatusBadge, type CrmStore } from "@/components/crm/crm-shared";
@@ -53,6 +53,32 @@ export default function HrHome({ store, currency, asOfDate }: { store: CrmStore;
     ...pendingLoans.map((row) => ({ row, kind: "Loan", href: "/app/hr/loans", text: `${row.data.loanType} · ${formatMoney(row.data.amount, currency)}` })),
     ...pendingClaims.map((row) => ({ row, kind: "Claim", href: "/app/hr/expense-claims", text: `${row.data.category} · ${formatMoney(row.data.amount, currency)}` }))];
 
+  const month = asOfDate.slice(0, 7);
+  const monthName = new Date(`${month}-01T12:00:00Z`).toLocaleDateString("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
+  const monthPayroll = (store.payroll ?? []).filter((row) => row.data.month === month);
+  const paidCount = monthPayroll.filter((row) => row.data.status === "Paid").length;
+  const markedDays = new Set((store["hr-attendance"] ?? []).filter((row) => (row.data.date ?? "").startsWith(month)).map((row) => row.data.date)).size;
+  const unpaidLeaveDays = leaves
+    .filter((leave) => leave.data.status === "Approved" && leave.data.paid === "false" && (leave.data.fromDate ?? "").startsWith(month))
+    .reduce((sum, leave) => sum + Number(leave.data.days || 0), 0);
+  const activeLoans = (store["hr-loans"] ?? []).filter((loan) => loan.data.status === "Approved" && (!loan.data.startMonth || loan.data.startMonth <= month)).length;
+  const payrollGross = monthPayroll.length
+    ? monthPayroll.reduce((sum, row) => sum + Number(row.data.grossSalary || 0), 0)
+    : employees.reduce((sum, employee) => sum + Number(employee.data.baseSalary || 0), 0);
+  const payrollDeductions = monthPayroll.reduce((sum, row) => sum + Number(row.data.totalDeductions || 0), 0);
+  const payrollNet = monthPayroll.reduce((sum, row) => sum + Number(row.data.payableSalary || 0), 0);
+  const sheetReady = monthPayroll.length > 0 && monthPayroll.length >= employees.length;
+  const allPaid = monthPayroll.length > 0 && paidCount === monthPayroll.length;
+  const steps = [
+    { title: "Attendance", note: markedDays ? `${markedDays} ${markedDays === 1 ? "day" : "days"} marked this month` : "No days marked yet", done: markedDays > 0, current: false },
+    { title: "Leave & loans", note: `${unpaidLeaveDays} unpaid leave ${unpaidLeaveDays === 1 ? "day" : "days"} · ${activeLoans} loan ${activeLoans === 1 ? "installment" : "installments"}`, done: pendingLeaves.length === 0 && pendingLoans.length === 0, current: false },
+    { title: "Salary sheet", note: monthPayroll.length ? `${monthPayroll.length} of ${employees.length} prepared` : "Not prepared yet", done: sheetReady, current: !sheetReady },
+    { title: "Pay & payslips", note: monthPayroll.length ? `${paidCount} of ${monthPayroll.length} paid` : "Waiting for the salary sheet", done: allPaid, current: sheetReady && !allPaid },
+  ];
+  const nextStep = !sheetReady
+    ? { label: monthPayroll.length ? "Continue salary sheet" : "Prepare salary sheet", href: "/app/payroll?new=1" }
+    : !allPaid ? { label: "Pay salaries", href: "/app/payroll" } : { label: "View payslips", href: "/app/payroll" };
+
   const kpis = [
     { label: "Active employees", value: String(employees.length), note: joiners.length ? `${joiners.length} joined this month` : "No new joiners this month", icon: Users },
     { label: "Present today", value: attendanceToday.length ? `${present} / ${employees.length}` : "—", note: attendanceToday.length ? `${attendanceToday.length} marked` : "Not marked yet", icon: Clock },
@@ -67,16 +93,53 @@ export default function HrHome({ store, currency, asOfDate }: { store: CrmStore;
         <div className="min-w-0">
           <p className="text-xs font-medium uppercase tracking-[0.12em] text-primary">HR / Home</p>
           <h1 className="mt-1 text-[26px] font-semibold tracking-tight sm:text-3xl">People</h1>
-          <p className="mt-1.5 max-w-2xl text-sm text-muted-foreground">Today&apos;s attendance, who is away, what is waiting for approval, and your hiring at a glance.</p>
+          <p className="mt-1.5 max-w-2xl text-sm text-muted-foreground">Today&apos;s attendance, who is away, this month&apos;s payroll, what is waiting for approval, and your hiring at a glance.</p>
         </div>
         <div className="flex flex-wrap gap-2">
           <Button variant="outline" className="gap-2" nativeButton={false} render={<Link href="/app/hr/attendance" />}><Clock size={15} />Attendance</Button>
           <Button variant="outline" className="gap-2" nativeButton={false} render={<Link href="/app/hr/leave-requests?new=1" />}><Plus size={15} />Leave</Button>
+          <Button variant="outline" className="gap-2 border-primary text-primary" nativeButton={false} render={<Link href="/app/payroll" />}><Banknote size={15} />Run payroll</Button>
           <Button className="gap-2" nativeButton={false} render={<Link href="/app/employees?new=1" />}><Plus size={15} />Add employee</Button>
         </div>
       </header>
 
-      <section className="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+      <section aria-labelledby="payroll-month" className="mt-6 overflow-hidden rounded-lg border border-primary bg-card">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-primary/5 px-5 py-4">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.1em] text-primary">Payroll</p>
+            <h2 id="payroll-month" className="mt-0.5 text-lg font-semibold">{monthName} salaries</h2>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" nativeButton={false} render={<Link href="/app/payroll" />}>Open salary register</Button>
+            <Button nativeButton={false} render={<Link href={nextStep.href} />}>{nextStep.label}</Button>
+          </div>
+        </div>
+        <ol className="grid gap-4 px-5 py-4 sm:grid-cols-2 xl:grid-cols-4">
+          {steps.map((step, index) => (
+            <li key={step.title} className="flex items-start gap-2.5">
+              <span className={`grid size-7 shrink-0 place-items-center rounded-full text-xs font-bold ${step.done ? "bg-accent text-accent-foreground" : step.current ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"}`}>
+                {step.done ? <Check size={14} aria-label="Done" /> : index + 1}
+              </span>
+              <div><p className="text-sm font-semibold">{step.title}</p><p className="text-xs text-muted-foreground">{step.note}</p></div>
+            </li>
+          ))}
+        </ol>
+        <div className="grid border-t border-border sm:grid-cols-2 xl:grid-cols-4">
+          {[
+            ["Employees on payroll", String(employees.length)],
+            [monthPayroll.length ? "Gross" : "Gross (estimate)", formatMoney(payrollGross, currency)],
+            ["Tax & deductions", monthPayroll.length ? formatMoney(payrollDeductions, currency) : "—"],
+            ["Net payable", monthPayroll.length ? formatMoney(payrollNet, currency) : "—"],
+          ].map(([label, value], index) => (
+            <div key={label} className={`px-5 py-3.5 ${index ? "border-t border-border sm:border-t-0 sm:border-l" : ""}`}>
+              <p className="text-xs text-muted-foreground">{label}</p>
+              <p className={`mt-1 text-xl font-semibold tabular-nums ${label === "Net payable" ? "text-primary" : ""}`}>{value}</p>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
         {kpis.map((kpi) => (
           <div key={kpi.label} className="rounded-lg border border-border bg-card px-4 py-3.5">
             <div className="flex items-center justify-between gap-2 text-muted-foreground"><p className="text-xs">{kpi.label}</p><kpi.icon size={15} /></div>
