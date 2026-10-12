@@ -60,7 +60,7 @@ export default function RecordDetailPanel({ module, record, currency: fallbackCu
   const more = actions.filter((action) => !action.primary || action.destructive);
   const hasBalance = ["invoices", "bills"].includes(module.kind);
   // Like Zoho, only filled-in details are listed; the editor still shows every field.
-  const fields = module.fields.filter((field) => !["lineItems", "attachment", "logo"].includes(field.key) && field.type !== "file" && (field.type === "checkbox" || (field.key === "address" ? formatCustomerAddress(data) : data[field.key])?.trim()));
+  const fields = module.fields.filter((field) => !["lineItems", "attachment", "logo", "status"].includes(field.key) && !(field.key === "exchangeRate" && Number(data.exchangeRate || 1) === 1) && field.type !== "file" && (field.type === "checkbox" || (field.key === "address" ? formatCustomerAddress(data) : data[field.key])?.trim()));
   const timeline = [
     { at: record.createdAt, text: `${module.label} created` },
     ...(data.sentAt ? [{ at: data.sentAt, text: `${module.label} sent` }] : []),
@@ -127,11 +127,11 @@ export default function RecordDetailPanel({ module, record, currency: fallbackCu
           {tab === "overview" ? (
             <>
               {hasBalance || stats?.length ? (
-                <div className="grid gap-3 sm:grid-cols-3">
+                <div className="grid gap-2 sm:grid-cols-3 sm:gap-3">
                   {(stats ?? [["Amount", money(data.amount)], ["Paid", money(data.paidAmount)], [module.kind === "invoices" ? "Balance due" : "Still to pay", money(balanceOf(data))]]).map(([label, value], index) => (
-                    <div key={label} className="rounded-lg border border-border bg-card px-4 py-3">
-                      <p className="text-xs text-muted-foreground">{label}</p>
-                      <p className={`mt-1 text-lg font-semibold tabular-nums ${index === 2 ? "text-primary" : ""}`}>{value}</p>
+                    <div key={label} className="flex min-w-0 items-center justify-between gap-3 rounded-lg border border-border bg-card px-4 py-2.5 sm:block sm:py-3">
+                      <p className="truncate text-xs text-muted-foreground">{label}</p>
+                      <p className={`font-semibold tabular-nums sm:mt-1 sm:text-lg ${index === 2 ? "text-primary" : ""}`}>{value}</p>
                     </div>
                   ))}
                 </div>

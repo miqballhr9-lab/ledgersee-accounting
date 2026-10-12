@@ -201,10 +201,10 @@ export default function InventoryBulkCount({ products }: InventoryBulkCountProps
         }}
       />
       <Button type="button" variant="outline" className="gap-2" disabled={isBusy || products.length === 0} onClick={() => void downloadTemplate()}>
-        <ArrowDownToLine size={15} />Excel count template
+        <ArrowDownToLine size={15} />Count template
       </Button>
       <Button type="button" variant="outline" className="gap-2" disabled={isBusy || products.length === 0} onClick={() => uploadRef.current?.click()}>
-        {isBusy ? <FileSpreadsheet size={15} /> : <FileUp size={15} />}{isBusy ? "Reading…" : "Upload count sheet"}
+        {isBusy ? <FileSpreadsheet size={15} /> : <FileUp size={15} />}{isBusy ? "Reading…" : "Upload count"}
       </Button>
 
       <Dialog open={dialogOpen} onOpenChange={(open) => { if (!isBusy) setDialogOpen(open); }}>
