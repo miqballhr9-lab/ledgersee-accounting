@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
@@ -68,11 +68,16 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { navigationGroups } from "@/lib/bookkeeping-config";
+import { areaForPage, canAccess, homeFor, type Role } from "@/lib/permissions";
 import { signOut } from "@/lib/auth-client";
 
 interface AppFrameProps {
   userName: string;
   userEmail: string;
+  role: Role;
+  /** Whose business this is: the owner's name, shown as the workspace. */
+  workspaceName: string;
+  isOwner: boolean;
   children: React.ReactNode;
 }
 
@@ -161,9 +166,24 @@ function initials(name: string) {
   return name.trim().split(/\s+/).slice(0, 2).map((part) => part[0]?.toUpperCase() ?? "").join("") || "LL";
 }
 
-export default function AppFrame({ userName, userEmail, children }: AppFrameProps) {
+export default function AppFrame({ userName, userEmail, role, workspaceName, isOwner, children }: AppFrameProps) {
   const pathname = usePathname();
   const router = useRouter();
+  const allowed = (href: string) => {
+    const area = areaForPage(href);
+    return !area || canAccess(role, area);
+  };
+  const visibleGroups = navigationGroups
+    .map((group) => ({ ...group, items: group.items.filter((item) => allowed(itemHref(item.slug))) }))
+    .filter((group) => group.items.length);
+  const visibleGearGroups = gearGroups
+    .map((group) => ({ ...group, items: group.items.filter((item) => allowed(item.href)) }))
+    .filter((group) => group.items.length);
+  const blocked = !allowed(pathname);
+  useEffect(() => {
+    // The dashboard is everyone's default address; send people without it to their own start page.
+    if (blocked && pathname === "/app") router.replace(homeFor(role));
+  }, [blocked, pathname, role, router]);
   const [menuOpen, setMenuOpen] = useState(false);
   const [isSigningOut, setIsSigningOut] = useState(false);
   const [openGroup, setOpenGroup] = useState<string | null>(() => groupForPath(pathname) ?? "Overview");
@@ -212,13 +232,13 @@ export default function AppFrame({ userName, userEmail, children }: AppFrameProp
         <div className="mx-3 mt-4 rounded-lg border border-sidebar-border bg-sidebar-accent/40 px-3 py-2.5">
           <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-sidebar-foreground/50">Business workspace</p>
           <div className="mt-1 flex items-center justify-between gap-2">
-            <span className="truncate text-sm font-medium">{userName || "My business"}</span>
+            <span className="truncate text-sm font-medium">{workspaceName || userName || "My business"}</span>
             <ChevronDown size={14} className="shrink-0 text-sidebar-foreground/50" />
           </div>
         </div>
 
         <nav aria-label="Main navigation" className="mt-4 flex-1 space-y-2 overflow-y-auto px-3 pb-5">
-          {navigationGroups.map((group) => {
+          {visibleGroups.map((group) => {
             const isOpen = openGroup === group.label;
             return (
               <Collapsible
@@ -263,7 +283,7 @@ export default function AppFrame({ userName, userEmail, children }: AppFrameProp
             <span className="grid size-9 shrink-0 place-items-center rounded-full bg-sidebar-accent text-xs font-semibold text-sidebar-primary">{initials(userName || userEmail)}</span>
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-medium">{userName || "Account owner"}</p>
-              <p className="truncate text-xs text-sidebar-foreground/50">{userEmail}</p>
+              <p className="truncate text-xs text-sidebar-foreground/50">{isOwner ? userEmail : `${role} · ${userEmail}`}</p>
             </div>
             <Button variant="ghost" size="sm" className="px-2 text-xs text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground" onClick={handleSignOut} disabled={isSigningOut}>
               {isSigningOut ? "…" : "Sign out"}
@@ -287,7 +307,7 @@ export default function AppFrame({ userName, userEmail, children }: AppFrameProp
             </div>
           </div>
           <div className="flex items-center gap-2 sm:gap-3">
-            <CommandMenu icons={icons} />
+            <CommandMenu icons={icons} canOpen={allowed} />
             <span className="hidden rounded-full border border-border bg-background px-3 py-1.5 text-[11px] font-medium text-muted-foreground xl:inline-flex">Business account</span>
             <DropdownMenu>
               <DropdownMenuTrigger render={<Button variant="outline" size="icon" aria-label="Open settings and tools" title="Settings and tools" className="shrink-0" />}>
@@ -295,7 +315,7 @@ export default function AppFrame({ userName, userEmail, children }: AppFrameProp
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" sideOffset={10} className="max-h-[calc(100dvh-6rem)] w-[min(94vw,48rem)] overflow-y-auto p-4">
                 <div className="grid gap-x-6 gap-y-4 sm:grid-cols-2">
-                  {gearGroups.map((group) => (
+                  {visibleGearGroups.map((group) => (
                     <DropdownMenuGroup key={group.label}>
                       <DropdownMenuLabel className="px-2 pb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">{group.label}</DropdownMenuLabel>
                       <div className="space-y-1">
@@ -335,7 +355,14 @@ export default function AppFrame({ userName, userEmail, children }: AppFrameProp
           </div>
         </header>
         <main className="min-h-0 flex-1 overflow-y-auto">
-          {children}
+          {blocked ? (
+            <div className="mx-auto max-w-lg px-4 py-20 text-center">
+              <div className="mx-auto grid size-11 place-items-center rounded-full bg-primary/10 text-primary"><ShieldCheck size={20} /></div>
+              <h1 className="mt-4 text-xl font-semibold">This page isn’t part of your role</h1>
+              <p className="mt-1.5 text-sm text-muted-foreground">You’re signed in as {role} in {workspaceName}. Ask an Admin in your business if you need access.</p>
+              <Button className="mt-5" nativeButton={false} render={<Link href={homeFor(role)} />}>Go to my start page</Button>
+            </div>
+          ) : children}
         </main>
       </div>
     </div>

@@ -20,7 +20,7 @@ export async function loadCrmData() {
   return {
     store,
     me: me.name,
-    owners: [...new Set([me.name, ...teamNames])],
+    owners: [...new Set([me.workspaceName, me.name, ...teamNames])],
     currency: groups.settings?.[0]?.data.currency || "USD",
   };
 }

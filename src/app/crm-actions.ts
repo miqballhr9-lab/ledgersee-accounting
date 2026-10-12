@@ -7,7 +7,7 @@ import { db } from "@/db";
 import { bookkeepingRecord } from "@/db/schema";
 import { saveBookkeepingRecord } from "@/app/actions";
 import { ActionError } from "@/lib/action-error";
-import { requireUser } from "@/lib/auth";
+import { assertCanWrite, requireUser } from "@/lib/auth";
 import type { BookkeepingRecord, RecordKind } from "@/lib/bookkeeping-types";
 import {
   crmKinds,
@@ -194,6 +194,7 @@ async function nextNumber(userId: string, kind: string, key: string, prefix: str
 
 export async function saveCrmRecord(kind: string, input: Record<string, string>, id?: string): Promise<BookkeepingRecord> {
   const me = await requireUser();
+  assertCanWrite(me, kind);
   const mod = crmModuleFor(kind);
   const context = await lookupContext(me.id);
   let existing: StoredRow | undefined;
@@ -219,6 +220,7 @@ export async function saveCrmRecord(kind: string, input: Record<string, string>,
 /** Changes one field on several records at once: mass update, and moving cards on the Kanban board. */
 export async function updateCrmField(kind: string, ids: string[], key: string, value: string): Promise<BookkeepingRecord[]> {
   const me = await requireUser();
+  assertCanWrite(me, kind);
   const mod = crmModuleFor(kind);
   const field = mod.fields.find((item) => item.key === key);
   if (!field || field.readOnly || !["select", "owner", "date", "checkbox"].includes(field.type ?? "text")) throw new ActionError("That field can’t be changed in bulk.");
@@ -241,6 +243,7 @@ export async function updateCrmField(kind: string, ids: string[], key: string, v
 
 export async function deleteCrmRecords(kind: string, ids: string[]): Promise<void> {
   const me = await requireUser();
+  assertCanWrite(me, "crm-notes");
   if (kind !== "crm-notes") crmModuleFor(kind);
   if (!ids.length) return;
   await db.transaction(async (transaction) => {
@@ -258,6 +261,7 @@ export async function deleteCrmRecords(kind: string, ids: string[]): Promise<voi
 
 export async function addCrmNote(parentKind: string, parentId: string, title: string, content: string): Promise<BookkeepingRecord> {
   const me = await requireUser();
+  assertCanWrite(me, "crm-notes");
   if (parentKind !== "customers" && !crmKinds.includes(parentKind as RecordKind)) throw new ActionError("Notes can’t be added here.");
   const text = content.trim().slice(0, 8000);
   if (!text) throw new ActionError("Write the note first.");
@@ -287,6 +291,8 @@ export interface ConvertLeadInput {
 /** Converts a lead into an account (customer), a contact and, if asked, a deal, as Zoho CRM does. */
 export async function convertLead(leadId: string, input: ConvertLeadInput): Promise<{ accountId: string; contactId: string; dealId: string }> {
   const me = await requireUser();
+  assertCanWrite(me, "crm-leads");
+  assertCanWrite(me, "customers");
   const [lead] = await db.select().from(bookkeepingRecord)
     .where(and(eq(bookkeepingRecord.id, leadId), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "crm-leads"))).limit(1);
   if (!lead) throw new ActionError("We couldn’t find that lead. Refresh and try again.");
@@ -443,6 +449,8 @@ export async function convertLead(leadId: string, input: ConvertLeadInput): Prom
 /** Creates a draft quote (estimate) or invoice in Sales for a deal's account, so nothing is typed twice. */
 export async function createDocumentFromDeal(dealId: string, target: "estimates" | "invoices"): Promise<{ id: string; number: string; href: string }> {
   const me = await requireUser();
+  assertCanWrite(me, "crm-deals");
+  assertCanWrite(me, target);
   const [deal] = await db.select().from(bookkeepingRecord)
     .where(and(eq(bookkeepingRecord.id, dealId), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "crm-deals"))).limit(1);
   if (!deal) throw new ActionError("We couldn’t find that deal. Refresh and try again.");
@@ -493,6 +501,7 @@ export async function createDocumentFromDeal(dealId: string, target: "estimates"
 /** Imports rows from a CSV file; each row is checked like a record typed by hand. */
 export async function importCrmRecords(kind: string, rows: Record<string, string>[]): Promise<{ created: number; failed: { row: number; message: string }[] }> {
   const me = await requireUser();
+  assertCanWrite(me, kind);
   const mod = crmModuleFor(kind);
   if (!rows.length) throw new ActionError("The file has no rows to import.");
   if (rows.length > MAX_IMPORT_ROWS) throw new ActionError(`Import up to ${MAX_IMPORT_ROWS} rows at a time.`);

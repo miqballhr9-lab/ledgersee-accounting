@@ -34,9 +34,11 @@ const createActions = [
 
 interface CommandMenuProps {
   icons: Record<string, LucideIcon>;
+  /** Whether the signed-in person's role can open a page; others are left out. */
+  canOpen?: (href: string) => boolean;
 }
 
-export default function CommandMenu({ icons }: CommandMenuProps) {
+export default function CommandMenu({ icons, canOpen = () => true }: CommandMenuProps) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
 
@@ -74,7 +76,7 @@ export default function CommandMenu({ icons }: CommandMenuProps) {
           <CommandList className="max-h-[min(60dvh,26rem)]">
             <CommandEmpty>Nothing matches that.</CommandEmpty>
             <CommandGroup heading="Create">
-              {createActions.map((action) => (
+              {createActions.filter((action) => canOpen(action.href)).map((action) => (
                 <CommandItem key={action.href} value={action.label} keywords={[...action.keywords]} onSelect={() => go(action.href)}>
                   <Plus className="text-primary" />
                   <span>{action.label}</span>
@@ -82,9 +84,9 @@ export default function CommandMenu({ icons }: CommandMenuProps) {
                 </CommandItem>
               ))}
             </CommandGroup>
-            {navigationGroups.map((group) => (
+            {navigationGroups.filter((group) => group.items.some((item) => canOpen(item.slug === "dashboard" ? "/app" : `/app/${item.slug}`))).map((group) => (
               <CommandGroup key={group.label} heading={group.label}>
-                {group.items.map((item) => {
+                {group.items.filter((item) => canOpen(item.slug === "dashboard" ? "/app" : `/app/${item.slug}`)).map((item) => {
                   const Icon = icons[item.icon] ?? FileText;
                   const href = item.slug === "dashboard" ? "/app" : `/app/${item.slug}`;
                   return (

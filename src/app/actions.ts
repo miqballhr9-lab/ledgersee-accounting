@@ -7,7 +7,8 @@ import { revalidatePath } from "@/lib/revalidate";
 import { db } from "@/db";
 import { ActionError } from "@/lib/action-error";
 import { bookkeepingRecord, user } from "@/db/schema";
-import { requireUser } from "@/lib/auth";
+import { assertCanRead, assertCanWrite, requireUser } from "@/lib/auth";
+import { canReadKind } from "@/lib/permissions";
 import { sendEmailOrThrow } from "@/lib/email";
 import { createUploadUrl } from "@/lib/storage";
 import { dueDateForTerms, parseInvoiceLines } from "@/lib/invoice-utils";
@@ -42,7 +43,7 @@ export async function updateProfileName(input: string): Promise<{ ok: true; name
   await db
     .update(user)
     .set({ name, updatedAt: new Date() })
-    .where(eq(user.id, me.id));
+    .where(eq(user.id, me.actorId));
   revalidatePath("/app", "layout");
   return { ok: true, name };
 }
@@ -54,11 +55,13 @@ export async function exportMyAccountData() {
     .from(bookkeepingRecord)
     .where(eq(bookkeepingRecord.userId, me.id))
     .orderBy(desc(bookkeepingRecord.updatedAt));
+  // A team member exports only their own profile; the business's records are the owner's to export.
+  const exportable = me.role === "Admin" ? records : [];
 
   return {
     exportedAt: new Date().toISOString(),
     account: { name: me.name, email: me.email },
-    records: records.map((record) => ({
+    records: exportable.map((record) => ({
       ...record,
       createdAt: record.createdAt.toISOString(),
       updatedAt: record.updatedAt.toISOString(),
@@ -200,6 +203,7 @@ function normalizePayrollData(data: Record<string, string>): Record<string, stri
 
 export async function listBookkeepingRecords(kind: string): Promise<BookkeepingRecord[]> {
   const me = await requireUser();
+  assertCanRead(me, kind);
   if (!isRecordKind(kind)) throw new ActionError("That section isn’t available.");
 
   const rows = await db
@@ -219,10 +223,13 @@ export async function listBookkeepingRecordGroups(
   if (!uniqueKinds.length) return {};
 
   const me = await requireUser();
+  // Kinds this role can't open come back empty, so a page still renders what it may show.
+  const readable = uniqueKinds.filter((kind) => canReadKind(me.role, kind));
+  if (!readable.length) return {};
   const rows = await db
     .select()
     .from(bookkeepingRecord)
-    .where(and(eq(bookkeepingRecord.userId, me.id), inArray(bookkeepingRecord.kind, uniqueKinds)))
+    .where(and(eq(bookkeepingRecord.userId, me.id), inArray(bookkeepingRecord.kind, readable)))
     .orderBy(desc(bookkeepingRecord.updatedAt));
 
   return rows.reduce<Partial<Record<RecordKind, BookkeepingRecord[]>>>((groups, row) => {
@@ -240,7 +247,7 @@ export async function listAllBookkeepingRecords(): Promise<BookkeepingRecord[]> 
     .where(eq(bookkeepingRecord.userId, me.id))
     .orderBy(desc(bookkeepingRecord.updatedAt));
 
-  return rows.map(serializeRow);
+  return rows.filter((row) => canReadKind(me.role, row.kind)).map(serializeRow);
 }
 
 export async function saveBookkeepingRecord(
@@ -249,8 +256,10 @@ export async function saveBookkeepingRecord(
   id?: string,
 ): Promise<BookkeepingRecord> {
   const me = await requireUser();
+  assertCanWrite(me, kind);
   if (!isRecordKind(kind)) throw new ActionError("That section isn’t available.");
   if (kind === "reconciliations") throw new ActionError("Completed reconciliations can only be created from the reconciliation screen.");
+  if (kind === "team-members") throw new ActionError("Add and change team members from Users & roles.");
   let data = amountFromLineItems(sanitizePayload(input), kind);
   if (kind === "purchase-orders" && !id) data = { ...data, status: "Draft" };
   if (kind === "payroll") {
@@ -577,6 +586,7 @@ export async function saveBookkeepingRecord(
 
 export async function importBookkeepingItems(input: ItemImportRow[]): Promise<BookkeepingRecord[]> {
   const me = await requireUser();
+  assertCanWrite(me, "items");
   if (!Array.isArray(input) || input.length === 0 || input.length > MAX_ITEM_IMPORT_ROWS) {
     throw new ActionError(`Choose between 1 and ${MAX_ITEM_IMPORT_ROWS} item rows to import.`);
   }
@@ -644,6 +654,7 @@ export async function importBookkeepingItems(input: ItemImportRow[]): Promise<Bo
  */
 export async function addStandardAccounts(): Promise<{ added: number; records: BookkeepingRecord[] }> {
   const me = await requireUser();
+  assertCanWrite(me, "accounts");
 
   return db.transaction(async (transaction) => {
     const existing = await transaction
@@ -680,7 +691,7 @@ function isBudgetDate(value: unknown): value is string {
 }
 
 export async function saveBudgetPlan(input: unknown, id?: string): Promise<BookkeepingRecord> {
-  await requireUser();
+  assertCanWrite(await requireUser(), "budgets");
   if (!input || typeof input !== "object" || Array.isArray(input)) throw new ActionError("Check the budget details and try again.");
   const form = input as Record<string, unknown>;
   const name = typeof form.name === "string" ? form.name.trim().slice(0, 100) : "";
@@ -728,6 +739,7 @@ export async function saveBudgetPlan(input: unknown, id?: string): Promise<Bookk
 
 export async function importPayrollCsv(input: string): Promise<{ created: number; updated: number; records: BookkeepingRecord[] }> {
   const me = await requireUser();
+  assertCanWrite(me, "payroll");
   if (input.length > 2_000_000) throw new ActionError("The payroll CSV is too large. Keep it under 2 MB.");
   const [rawHeaders, ...rows] = parseCsv(input);
   if (!rawHeaders || !rows.length) throw new ActionError("The payroll CSV needs a header row and at least one employee.");
@@ -824,6 +836,7 @@ export async function importPayrollCsv(input: string): Promise<{ created: number
 
 export async function sendPayrollSlip(id: string): Promise<void> {
   const me = await requireUser();
+  assertCanWrite(me, "payroll");
   const [record] = await db
     .select()
     .from(bookkeepingRecord)
@@ -865,6 +878,7 @@ function escapeBudgetHtml(value: string) {
 
 export async function sendBudgetSummary(id: string, recipient: string): Promise<void> {
   const me = await requireUser();
+  assertCanRead(me, "budgets");
   const email = recipient.trim().toLowerCase();
   if (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new ActionError("Enter a valid recipient email address.");
   const [budgetRow] = await db
@@ -902,8 +916,10 @@ export async function sendBudgetSummary(id: string, recipient: string): Promise<
 
 export async function deleteBookkeepingRecord(kind: string, id: string): Promise<void> {
   const me = await requireUser();
+  assertCanWrite(me, kind);
   if (!isRecordKind(kind)) throw new ActionError("That section isn’t available.");
   if (kind === "reconciliations") throw new ActionError("Completed reconciliations can’t be deleted.");
+  if (kind === "team-members") throw new ActionError("Remove team members from Users & roles.");
   if (kind === "bills" || kind === "expenses") {
     await db.transaction(async (transaction) => {
       const [record] = await transaction
@@ -984,6 +1000,7 @@ export async function recordInvoicePayment(
   accountId: string,
 ): Promise<void> {
   const me = await requireUser();
+  assertCanWrite(me, "invoices");
   const amount = Number(amountInput);
   if (!Number.isFinite(amount) || amount <= 0) throw new ActionError("Enter a payment amount greater than zero.");
 
@@ -1045,6 +1062,7 @@ export async function recordInvoicePayment(
  */
 export async function undoInvoicePayments(id: string): Promise<void> {
   const me = await requireUser();
+  assertCanWrite(me, "invoices");
   await db.transaction(async (transaction) => {
     const [invoice] = await transaction
       .select()
@@ -1094,6 +1112,7 @@ function isPaymentDate(value: string) {
 /** Pays a bill's remaining balance from a Cash, Bank or Credit card account and records where it came from. */
 export async function recordBillPayment(id: string, paymentDate: string, accountId: string): Promise<void> {
   const me = await requireUser();
+  assertCanWrite(me, "bills");
   if (!isPaymentDate(paymentDate)) throw new ActionError("Choose a payment date.");
   const { account, method, name } = await findPaymentAccount(me.id, accountId);
   await db.transaction(async (transaction) => {
@@ -1127,6 +1146,7 @@ export async function recordBillPayment(id: string, paymentDate: string, account
 /** Removes the payments recorded on a bill so it can be corrected and paid again. */
 export async function undoBillPayments(id: string): Promise<void> {
   const me = await requireUser();
+  assertCanWrite(me, "bills");
   await db.transaction(async (transaction) => {
     const [bill] = await transaction
       .select()
@@ -1153,6 +1173,7 @@ export async function undoBillPayments(id: string): Promise<void> {
 /** Records which Cash, Bank or Credit card account paid an expense. */
 export async function recordExpensePayment(id: string, paymentDate: string, accountId: string): Promise<void> {
   const me = await requireUser();
+  assertCanWrite(me, "expenses");
   if (!isPaymentDate(paymentDate)) throw new ActionError("Choose a payment date.");
   const { account, method, name } = await findPaymentAccount(me.id, accountId);
   const [expense] = await db
@@ -1172,6 +1193,7 @@ export async function recordExpensePayment(id: string, paymentDate: string, acco
 /** Records a salary as paid from a Cash, Bank or Credit card account. */
 export async function recordPayrollPayment(id: string, paymentDate: string, accountId: string): Promise<void> {
   const me = await requireUser();
+  assertCanWrite(me, "payroll");
   if (!isPaymentDate(paymentDate)) throw new ActionError("Choose a payment date.");
   const { account, method, name } = await findPaymentAccount(me.id, accountId);
   const [entry] = await db
@@ -1191,6 +1213,7 @@ export async function recordPayrollPayment(id: string, paymentDate: string, acco
 /** Clears the payment recorded on a salary so it shows as unpaid again. */
 export async function undoPayrollPayment(id: string): Promise<void> {
   const me = await requireUser();
+  assertCanWrite(me, "payroll");
   const [entry] = await db
     .select()
     .from(bookkeepingRecord)
@@ -1207,6 +1230,7 @@ export async function undoPayrollPayment(id: string): Promise<void> {
 /** Clears the payment recorded on an expense so it can be paid from another account. */
 export async function undoExpensePayment(id: string): Promise<void> {
   const me = await requireUser();
+  assertCanWrite(me, "expenses");
   const [expense] = await db
     .select()
     .from(bookkeepingRecord)
@@ -1223,6 +1247,7 @@ export async function undoExpensePayment(id: string): Promise<void> {
 /** Records a supplier credit note as refunded into a Cash, Bank or Credit card account. */
 export async function refundSupplierCredit(id: string, refundDate: string, accountId: string): Promise<void> {
   const me = await requireUser();
+  assertCanWrite(me, "supplier-credits");
   if (!isPaymentDate(refundDate)) throw new ActionError("Choose a refund date.");
   const { account, method, name } = await findPaymentAccount(me.id, accountId);
   const [credit] = await db
@@ -1241,6 +1266,7 @@ export async function refundSupplierCredit(id: string, refundDate: string, accou
 
 export async function markRecordPaid(kind: string, id: string): Promise<void> {
   const me = await requireUser();
+  assertCanWrite(me, kind);
   if (kind !== "bills" && kind !== "invoices") throw new ActionError("That payment action isn’t available here.");
   const [row] = await db
     .select()
@@ -1269,6 +1295,7 @@ export async function convertBookkeepingRecord(id: string, target?: string): Pro
       .limit(1);
     if (!source) throw new ActionError("We couldn’t find that record. Refresh and try again.");
     const sourceKind = source.kind as RecordKind;
+    assertCanWrite(me, sourceKind);
     const defaultTarget = convertTargets[sourceKind];
     const targetKind = target && target !== defaultTarget
       ? optionalConvertTargets[sourceKind]?.find((kind) => kind === target)
@@ -1379,6 +1406,7 @@ export async function convertPurchaseOrderToExpense(
   paymentAccountId?: string,
 ): Promise<void> {
   const me = await requireUser();
+  assertCanWrite(me, "expenses");
   await db.transaction(async (transaction) => {
     const [order] = await transaction
       .select()
@@ -1469,6 +1497,7 @@ export async function createInventoryMovement(input: {
   notes?: string;
 }): Promise<BookkeepingRecord> {
   const me = await requireUser();
+  assertCanWrite(me, "inventory-movements");
   const itemId = input.itemId.trim();
   const quantity = Number(input.quantity);
   const date = input.date.trim();
@@ -1546,6 +1575,7 @@ export async function advancePurchaseOrder(
   action: "send-rfq" | "confirm" | "receive" | "cancel",
 ): Promise<{ status: string }> {
   const me = await requireUser();
+  assertCanWrite(me, "purchase-orders");
   if (!["send-rfq", "confirm", "receive", "cancel"].includes(action)) throw new ActionError("That purchase order action isn’t available.");
   const [order] = await db
     .select()
@@ -1691,6 +1721,7 @@ export async function advancePurchaseOrder(
 
 export async function toggleTransactionMatch(id: string): Promise<void> {
   const me = await requireUser();
+  assertCanWrite(me, "transactions");
   const [transaction] = await db
     .select()
     .from(bookkeepingRecord)
@@ -1714,6 +1745,7 @@ export async function completeBankReconciliation(
   transactionIds: string[],
 ): Promise<BookkeepingRecord> {
   const me = await requireUser();
+  assertCanWrite(me, "reconciliations");
   const endingBalance = Number(endingBalanceInput);
   const parsedStatementDate = new Date(`${statementDate}T00:00:00.000Z`);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(statementDate) || Number.isNaN(parsedStatementDate.getTime()) || parsedStatementDate.toISOString().slice(0, 10) !== statementDate) {
@@ -1836,6 +1868,7 @@ export async function completeBankReconciliation(
 
 export async function applyCreditNote(id: string): Promise<void> {
   const me = await requireUser();
+  assertCanWrite(me, "credit-notes");
   const [creditNote] = await db
     .select()
     .from(bookkeepingRecord)
@@ -1876,6 +1909,7 @@ export async function applyCreditNote(id: string): Promise<void> {
 
 export async function applySupplierCredit(id: string): Promise<void> {
   const me = await requireUser();
+  assertCanWrite(me, "supplier-credits");
   await db.transaction(async (transaction) => {
     const [credit] = await transaction
       .select()
@@ -1921,6 +1955,7 @@ export async function applySupplierCredit(id: string): Promise<void> {
 
 export async function generateRecurringInvoice(id: string): Promise<void> {
   const me = await requireUser();
+  assertCanWrite(me, "invoices");
   const [schedule] = await db
     .select()
     .from(bookkeepingRecord)
@@ -1972,6 +2007,7 @@ export async function generateRecurringInvoice(id: string): Promise<void> {
 
 export async function sendInvoiceRecord(id: string): Promise<string> {
   const me = await requireUser();
+  assertCanWrite(me, "invoices");
   const [invoice] = await db
     .select()
     .from(bookkeepingRecord)
@@ -2024,6 +2060,7 @@ export async function sendInvoiceRecord(id: string): Promise<string> {
 
 export async function createInvoiceShareLink(id: string): Promise<string> {
   const me = await requireUser();
+  assertCanWrite(me, "invoices");
   const [invoice] = await db
     .select()
     .from(bookkeepingRecord)
@@ -2051,6 +2088,7 @@ const customerDocumentDetails: Record<CustomerDocumentKind, { label: string; num
 
 export async function createCustomerDocumentShareLink(id: string, kind: CustomerDocumentKind): Promise<string> {
   const me = await requireUser();
+  assertCanWrite(me, kind);
   const [document] = await db
     .select()
     .from(bookkeepingRecord)
@@ -2071,6 +2109,7 @@ export async function createCustomerDocumentShareLink(id: string, kind: Customer
 
 export async function sendCustomerDocumentRecord(id: string, kind: CustomerDocumentKind): Promise<string> {
   const me = await requireUser();
+  assertCanWrite(me, kind);
   const [document] = await db
     .select()
     .from(bookkeepingRecord)
@@ -2122,6 +2161,7 @@ export async function sendCustomerDocumentRecord(id: string, kind: CustomerDocum
 
 export async function duplicateCustomerDocumentRecord(id: string, kind: CustomerDocumentKind): Promise<BookkeepingRecord> {
   const me = await requireUser();
+  assertCanWrite(me, kind);
   const [document] = await db
     .select()
     .from(bookkeepingRecord)
@@ -2163,6 +2203,7 @@ export async function duplicateCustomerDocumentRecord(id: string, kind: Customer
 
 export async function duplicateInvoiceRecord(id: string): Promise<BookkeepingRecord> {
   const me = await requireUser();
+  assertCanWrite(me, "invoices");
   const [invoice] = await db
     .select()
     .from(bookkeepingRecord)
@@ -2206,7 +2247,8 @@ export async function getAttachmentUploadTarget(
   contentType: string,
   size: number,
 ): Promise<{ uploadUrl: string; publicUrl: string }> {
-  await requireUser();
+  const me = await requireUser();
+  if (me.role === "Viewer") throw new ActionError("Your role doesn’t allow changing records. Ask an Admin in your business.");
   if (size > 10 * 1024 * 1024) throw new ActionError("Attachments must be 10 MB or smaller.");
   const target = await createUploadUrl({ filename, contentType, size });
   return { uploadUrl: target.uploadUrl, publicUrl: target.publicUrl };
@@ -2217,6 +2259,7 @@ export async function saveBulkInventoryCount(input: {
   reference?: string;
 }): Promise<{ checkedCount: number; adjustedCount: number }> {
   const me = await requireUser();
+  assertCanWrite(me, "inventory-movements");
   const rows: InventoryCountRow[] = [];
   const seenItemIds = new Set<string>();
 

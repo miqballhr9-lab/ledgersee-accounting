@@ -14,6 +14,7 @@
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { genericOAuth, magicLink } from "better-auth/plugins";
+import { and, eq, sql } from "drizzle-orm";
 import { headers } from "next/headers";
 import { cache } from "react";
 
@@ -23,6 +24,7 @@ import { sendEmail, sendEmailOrThrow } from "@/lib/email";
 import { describeAuthError } from "@/lib/errors";
 import { ActionError } from "@/lib/action-error";
 import { currentScheduledUser } from "@/lib/run-as-user";
+import { canAccess, canReadKind, canWriteKind, isRole, type Role } from "@/lib/permissions";
 
 /**
  * Which origin this app answers on — resolved PER REQUEST, not pinned at build.
@@ -295,6 +297,55 @@ export const getUser = cache(async function getUser() {
   return result?.user ?? null;
 });
 
+export type SignedInUser = Omit<typeof schema.user.$inferSelect, "image"> & { image?: string | null };
+
+/**
+ * The signed-in person as seen by the data layer.
+ *
+ * `id` is the WORKSPACE owner's id — the value every bookkeeping query filters
+ * by — so a team member invited into someone's business reads and writes that
+ * business's records. `actorId` and `name` are the person actually signed in,
+ * for "created by" notes and their own profile. Someone who isn't a member of
+ * anyone's workspace is the owner of their own, with the Admin role.
+ */
+export interface WorkspaceUser extends SignedInUser {
+  actorId: string;
+  ownerId: string;
+  role: Role;
+  isOwner: boolean;
+  /** The owner's name, for "Business workspace" and document headers. */
+  workspaceName: string;
+}
+
+/** The active membership of a signed-in person in someone else's workspace, if any. */
+const membershipFor = cache(async function membershipFor(userId: string) {
+  const [membership] = await db
+    .select()
+    .from(schema.bookkeepingRecord)
+    .where(and(
+      eq(schema.bookkeepingRecord.kind, "team-members"),
+      sql`${schema.bookkeepingRecord.data}->>'memberUserId' = ${userId}`,
+      sql`${schema.bookkeepingRecord.data}->>'status' = 'Active'`,
+      sql`coalesce(${schema.bookkeepingRecord.data}->>'enabled', 'true') <> 'false'`,
+    ))
+    .limit(1);
+  if (!membership || membership.userId === userId) return null;
+  const [owner] = await db.select({ name: schema.user.name }).from(schema.user).where(eq(schema.user.id, membership.userId)).limit(1);
+  return { ownerId: membership.userId, role: isRole(membership.data.role) ? membership.data.role : "Viewer" as Role, ownerName: owner?.name ?? "Business" };
+});
+
+async function asWorkspaceUser(signedIn: SignedInUser): Promise<WorkspaceUser> {
+  const membership = await membershipFor(signedIn.id);
+  if (!membership) return { ...signedIn, actorId: signedIn.id, ownerId: signedIn.id, role: "Admin", isOwner: true, workspaceName: signedIn.name };
+  return { ...signedIn, id: membership.ownerId, actorId: signedIn.id, ownerId: membership.ownerId, role: membership.role, isOwner: false, workspaceName: membership.ownerName };
+}
+
+/** The signed-in person in their workspace, or null. For layouts and pages that redirect. */
+export async function getWorkspaceUser(): Promise<WorkspaceUser | null> {
+  const signedIn = await getUser();
+  return signedIn ? asWorkspaceUser(signedIn) : null;
+}
+
 /**
  * The signed-in user, or throw.
  *
@@ -304,14 +355,29 @@ export const getUser = cache(async function getUser() {
  * becomes `undefined` in a `where` clause and matches nothing — or, worse,
  * everything.
  */
-export async function requireUser() {
+export async function requireUser(): Promise<WorkspaceUser> {
   // Set only inside the scheduled automation job; never for a browser request.
   const scheduled = currentScheduledUser();
-  if (scheduled) return scheduled;
+  if (scheduled) return { ...scheduled, actorId: scheduled.id, ownerId: scheduled.id, role: "Admin", isOwner: true, workspaceName: scheduled.name };
   const user = await getUser();
   // The message is already a sentence worth showing, because it will be: a server
   // action's thrown message is what reaches the browser. Keep it that way — a code
   // or a stack trace here becomes a code or a stack trace on someone's screen.
   if (!user) throw new ActionError(describeAuthError("NOT_SIGNED_IN").message);
-  return user;
+  return asWorkspaceUser(user);
+}
+
+/** Throws unless the signed-in person's role may change records of this kind. */
+export function assertCanWrite(me: WorkspaceUser, kind: string) {
+  if (!canWriteKind(me.role, kind)) throw new ActionError("Your role doesn’t allow changing this. Ask an Admin in your business.");
+}
+
+/** Throws unless the signed-in person's role may open records of this kind. */
+export function assertCanRead(me: WorkspaceUser, kind: string) {
+  if (!canReadKind(me.role, kind)) throw new ActionError("Your role doesn’t allow opening this. Ask an Admin in your business.");
+}
+
+/** Throws unless the signed-in person is an Admin of their workspace. */
+export function assertAdmin(me: WorkspaceUser) {
+  if (!canAccess(me.role, "admin", "write")) throw new ActionError("Only an Admin can do this.");
 }

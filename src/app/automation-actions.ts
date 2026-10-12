@@ -7,7 +7,7 @@ import { db } from "@/db";
 import { bookkeepingRecord } from "@/db/schema";
 import { deleteBookkeepingRecord, generateRecurringInvoice, saveBookkeepingRecord } from "@/app/actions";
 import { ActionError } from "@/lib/action-error";
-import { requireUser } from "@/lib/auth";
+import { assertAdmin, requireUser } from "@/lib/auth";
 import { sendEmailOrThrow } from "@/lib/email";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
 import { runCaseEscalation, runLeadFollowUp, runOverdueTasks, runStaleDeals, runWonDealInvoices } from "@/lib/crm-automation";
@@ -54,12 +54,14 @@ export interface AutomationState {
 
 export async function getAutomationState(): Promise<AutomationState> {
   const me = await requireUser();
+  assertAdmin(me);
   const [mode, rules, log] = await Promise.all([currentMode(me.id), rowsOfKind(me.id, "automation-rules"), rowsOfKind(me.id, "automation-log")]);
   return { mode, rules: rules.map(toRecord), log: log.slice(0, 100).map(toRecord) };
 }
 
 export async function setAutomationMode(mode: AutomationMode): Promise<void> {
   const me = await requireUser();
+  assertAdmin(me);
   if (mode !== "Manual" && mode !== "Automation") throw new ActionError("Choose Manual or Automation mode.");
   const [settings] = await rowsOfKind(me.id, "automation-settings");
   if (settings) {
@@ -107,6 +109,7 @@ function ruleData(input: AutomationRuleInput, previous?: Record<string, string>)
 
 export async function saveAutomationRule(input: AutomationRuleInput, id?: string): Promise<void> {
   const me = await requireUser();
+  assertAdmin(me);
   if (id) {
     const [existing] = await db.select().from(bookkeepingRecord).where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "automation-rules"))).limit(1);
     if (!existing) throw new ActionError("We couldn’t find that rule. Refresh and try again.");
@@ -119,6 +122,7 @@ export async function saveAutomationRule(input: AutomationRuleInput, id?: string
 
 export async function deleteAutomationRule(id: string): Promise<void> {
   const me = await requireUser();
+  assertAdmin(me);
   await db.delete(bookkeepingRecord).where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "automation-rules")));
   revalidatePath("/app/automation");
 }
@@ -126,6 +130,7 @@ export async function deleteAutomationRule(id: string): Promise<void> {
 /** Adds the recommended rules (one per action) that the business doesn't have yet. */
 export async function addRecommendedRules(): Promise<void> {
   const me = await requireUser();
+  assertAdmin(me);
   const existing = await rowsOfKind(me.id, "automation-rules");
   for (const template of automationTemplates) {
     if (existing.some((row) => row.data.action === template.action)) continue;
@@ -383,6 +388,7 @@ async function executeRule(userId: string, rule: StoredRow, trigger: "Scheduled"
 /** "Run now": runs one rule immediately, in either mode. */
 export async function runAutomationRule(id: string): Promise<void> {
   const me = await requireUser();
+  assertAdmin(me);
   const [rule] = await db.select().from(bookkeepingRecord).where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "automation-rules"))).limit(1);
   if (!rule) throw new ActionError("We couldn’t find that rule. Refresh and try again.");
   await executeRule(me.id, rule, "Run now");
@@ -396,6 +402,8 @@ export async function runAutomationRule(id: string): Promise<void> {
  */
 export async function runDueAutomations(): Promise<void> {
   const me = await requireUser();
+  // Rules act for the whole business, so only its Admins set them off; the daily job covers the rest.
+  if (me.role !== "Admin") return;
   if ((await currentMode(me.id)) !== "Automation") return;
   await withoutRevalidation(() => runDueRules(me.id));
 }
@@ -423,6 +431,7 @@ async function runDueRules(userId: string) {
 
 async function updateLogItem(logId: string, recordId: string, status: AutomationItem["status"]) {
   const me = await requireUser();
+  assertAdmin(me);
   const [log] = await db.select().from(bookkeepingRecord).where(and(eq(bookkeepingRecord.id, logId), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "automation-log"))).limit(1);
   if (!log) throw new ActionError("We couldn’t find that automation run. Refresh and try again.");
   const items = parseAutomationItems(log.data.items);

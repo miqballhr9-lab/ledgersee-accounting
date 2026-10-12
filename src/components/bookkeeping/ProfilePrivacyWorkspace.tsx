@@ -1,10 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { Download, LockKeyhole, Save, UserRound } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { Download, LockKeyhole, LogOut, Save, UserRound } from "lucide-react";
 import { readableError } from "@/lib/action-error";
 
 import { exportMyAccountData, updateProfileName } from "@/app/actions";
+import { leaveBusiness } from "@/app/team-actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -12,9 +14,13 @@ import { Label } from "@/components/ui/label";
 interface ProfilePrivacyWorkspaceProps {
   initialName: string;
   email: string;
+  /** Set when this person works in someone else's business as a team member. */
+  membership?: { business: string; role: string } | null;
 }
 
-export default function ProfilePrivacyWorkspace({ initialName, email }: ProfilePrivacyWorkspaceProps) {
+export default function ProfilePrivacyWorkspace({ initialName, email, membership }: ProfilePrivacyWorkspaceProps) {
+  const router = useRouter();
+  const [isLeaving, setIsLeaving] = useState(false);
   const [name, setName] = useState(initialName);
   const [notice, setNotice] = useState("");
   const [isSaving, setIsSaving] = useState(false);
@@ -108,6 +114,26 @@ export default function ProfilePrivacyWorkspace({ initialName, email }: ProfileP
           </Button>
         </section>
       </div>
+
+      {membership ? (
+        <section className="rounded-xl border border-border bg-card p-5 sm:p-6" aria-labelledby="team-title">
+          <h2 id="team-title" className="text-base font-semibold">Your business access</h2>
+          <p className="mt-1 text-sm text-muted-foreground">You work in <span className="font-medium text-foreground">{membership.business}</span> as <span className="font-medium text-foreground">{membership.role}</span>. Its records belong to that business, not to your account.</p>
+          <Button type="button" variant="outline" className="mt-4 gap-2 text-destructive hover:text-destructive" disabled={isLeaving} onClick={async () => {
+            if (!window.confirm(`Leave ${membership.business}? You’ll need a new invitation to come back.`)) return;
+            setIsLeaving(true);
+            try {
+              await leaveBusiness();
+              router.replace("/app");
+              router.refresh();
+            } catch (error) {
+              setNotice(error instanceof Error ? readableError(error) : "We couldn’t do that. Try again.");
+            } finally {
+              setIsLeaving(false);
+            }
+          }}><LogOut size={15} />{isLeaving ? "Leaving…" : `Leave ${membership.business}`}</Button>
+        </section>
+      ) : null}
 
       <p className="min-h-5 text-sm text-muted-foreground" role="status" aria-live="polite">{notice}</p>
     </div>
