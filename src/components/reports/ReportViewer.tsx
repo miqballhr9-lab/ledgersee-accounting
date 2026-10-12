@@ -22,6 +22,7 @@ import {
   type ColumnsBy, type Compare, type PeriodPreset, type ReportLine, type ReportOptions, type ReportResult, type ZoomSpec,
 } from "@/lib/reports";
 import { useFavouriteReports } from "@/components/reports/use-favourite-reports";
+import { buildListReport } from "@/lib/report-lists";
 import { BudgetReport, BusinessSnapshot } from "@/components/reports/SummaryReports";
 
 interface ReportViewerProps {
@@ -39,13 +40,20 @@ interface NumberFormat {
 const sourceSlug: Record<string, string> = {
   invoices: "invoices", bills: "bills", expenses: "expenses", "credit-notes": "credit-notes", "supplier-credits": "supplier-credits",
   journals: "journals", transactions: "transactions", accounts: "accounts", payroll: "payroll",
+  customers: "customers", vendors: "vendors", estimates: "estimates", "sales-orders": "sales-orders", "purchase-orders": "purchase-orders",
 };
 
 const asOfEngines = new Set(["bs", "trial-balance", "ar-ageing", "ap-ageing"]);
+/** List reports that show balances on one date rather than activity over a period. */
+const asOfReports = new Set([
+  "accounts-receivable-ageing-detail", "accounts-payable-ageing-detail", "collections-report", "customer-balance-summary", "customer-balance-detail",
+  "supplier-balance-summary", "supplier-balance-detail", "open-invoices", "unpaid-bills", "open-purchase-order-list", "customer-contact-list", "supplier-contact-list",
+]);
+const isAsOfReport = (report: ReportDefinition) => asOfEngines.has(report.engine ?? "") || asOfReports.has(report.key);
 
 function readOptions(params: URLSearchParams, report: ReportDefinition, today: string, fiscalStart: number, earliest: string, defaultMethod: AccountingMethod) {
   const defaults = report.defaults ?? {};
-  const preset = (params.get("period") as PeriodPreset | null) ?? (asOfEngines.has(report.engine ?? "") ? "today" : "this-year-to-date");
+  const preset = (params.get("period") as PeriodPreset | null) ?? (isAsOfReport(report) ? "today" : "this-year-to-date");
   const range = preset === "custom" ? { from: params.get("from") ?? today, to: params.get("to") ?? today } : presetRange(preset, today, fiscalStart, earliest);
   const compare = (params.get("compare") as Compare | null) ?? defaults.compare ?? "none";
   const options: ReportOptions = {
@@ -81,7 +89,7 @@ export default function ReportViewer({ reportKey, records, today }: ReportViewer
   const query = params.toString();
   const { preset, options, method } = useMemo(() => readOptions(new URLSearchParams(query), report, today, ledger.fiscalYearStartMonth, earliestDate(ledger), defaultMethod), [query, report, today, ledger, defaultMethod]);
   const engine = report.engine;
-  const isAsOf = asOfEngines.has(engine ?? "");
+  const isAsOf = isAsOfReport(report);
 
   const [draft, setDraft] = useState(() => ({ preset, from: options.from, to: options.to, columnsBy: options.columnsBy, compare: options.compare, showChange: options.showChange, showPctChange: options.showPctChange, allRows: options.allRows, method }));
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
@@ -117,9 +125,10 @@ export default function ReportViewer({ reportKey, records, today }: ReportViewer
       case "ar-ageing": return ageingSummary(records, ledger, "receivable", options);
       case "ap-ageing": return ageingSummary(records, ledger, "payable", options);
       case "tax-summary": return taxSummary(ledger, options);
+      case "list": return buildListReport(report.key, records, ledger, options);
       default: return null;
     }
-  }, [engine, ledger, records, zoom, options]);
+  }, [engine, ledger, records, zoom, options, report.key]);
 
   const showCustomerColumns = engine === "pnl";
   const canCompare = draft.columnsBy === "total" || engine === "bs";
@@ -367,7 +376,7 @@ export default function ReportViewer({ reportKey, records, today }: ReportViewer
                   <thead>
                     <tr className="border-b border-foreground text-xs">
                       <th className="px-3 py-2" aria-label="Account" />
-                      {result.columns.map((column) => <th key={column.key} className={`whitespace-nowrap px-3 py-2 font-semibold uppercase ${column.kind === "text" ? "text-left" : "text-right"}`}>{column.label}</th>)}
+                      {result.columns.map((column) => <th key={column.key} className={`whitespace-nowrap ${result.columns.length > 6 ? "px-2 text-[11px]" : "px-3"} py-2 font-semibold uppercase ${column.kind === "text" ? "text-left" : "text-right"}`}>{column.label}</th>)}
                     </tr>
                   </thead>
                   <tbody>
@@ -394,7 +403,7 @@ export default function ReportViewer({ reportKey, records, today }: ReportViewer
                             const zoomSpec = line.zooms?.[index];
                             const negative = typeof value === "number" && value < -0.004 && format.negative === "red";
                             return (
-                              <td key={column.key} className={`whitespace-nowrap px-3 py-1.5 tabular-nums ${column.kind === "text" ? "text-left" : "text-right"} ${bold ? "font-semibold" : ""} ${border} ${negative ? "text-destructive" : ""} ${column.key === "memo" ? "max-w-[260px] truncate" : ""}`}>
+                              <td key={column.key} className={`whitespace-nowrap ${result.columns.length > 6 ? "px-2" : "px-3"} py-1.5 tabular-nums ${column.kind === "text" ? "text-left" : "text-right"} ${bold ? "font-semibold" : ""} ${border} ${negative ? "text-destructive" : ""} ${column.key === "memo" ? "max-w-[260px] truncate" : ""}`}>
                                 {zoomSpec && text && !isSection ? <Link href={zoomHref(zoomSpec, line.label)} onClick={(event) => event.stopPropagation()} className="text-primary hover:underline print:text-foreground">{text}</Link> : text}
                               </td>
                             );

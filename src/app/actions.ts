@@ -956,6 +956,11 @@ export async function deleteBookkeepingRecord(kind: string, id: string): Promise
 
       await transaction.delete(bookkeepingRecord)
         .where(and(eq(bookkeepingRecord.id, record.id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, kind)));
+      // A deleted bill takes its payments with it, so they don't linger in banking and reports.
+      if (kind === "bills") {
+        await transaction.delete(bookkeepingRecord)
+          .where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "payments"), sql`${bookkeepingRecord.data}->>'billId' = ${record.id}`));
+      }
     });
     revalidatePath("/app", "layout");
     return;
@@ -999,6 +1004,11 @@ export async function deleteBookkeepingRecord(kind: string, id: string): Promise
     .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, kind)))
     .returning({ id: bookkeepingRecord.id });
   if (!deleted) throw new ActionError("We couldn’t find that record. Refresh and try again.");
+  // A deleted invoice takes its payments with it, so they don't linger in banking and reports.
+  if (kind === "invoices") {
+    await db.delete(bookkeepingRecord)
+      .where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "payments"), sql`${bookkeepingRecord.data}->>'invoiceId' = ${id}`));
+  }
   revalidatePath("/app", "layout");
 }
 

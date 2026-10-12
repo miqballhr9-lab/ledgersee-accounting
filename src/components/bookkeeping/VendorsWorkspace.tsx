@@ -9,7 +9,7 @@ import { deleteBookkeepingRecord } from "@/app/actions";
 import RecordEditor from "@/components/bookkeeping/RecordEditor";
 import RecordDetailPanel from "@/components/bookkeeping/RecordDetailPanel";
 import { StatusBadge } from "@/components/crm/crm-shared";
-import { useNewRecordParam } from "@/hooks/use-new-record-param";
+import { useNewRecordParam, useOpenRecordParam } from "@/hooks/use-new-record-param";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
@@ -118,6 +118,7 @@ export default function VendorsWorkspace({ records: initialRecords, bills, accou
   }
 
   useNewRecordParam(openNewVendor);
+  useOpenRecordParam(setDetailId);
 
   function openEditVendor(vendor: BookkeepingRecord) {
     setEditingRecord(vendor);

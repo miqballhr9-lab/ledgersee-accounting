@@ -5,7 +5,7 @@
 
 export type ReportEngine =
   | "pnl" | "bs" | "cf" | "pnl-detail" | "bs-detail" | "general-ledger" | "trial-balance"
-  | "sales-by-customer" | "ar-ageing" | "ap-ageing" | "tax-summary" | "snapshot" | "budget-overview" | "budget-vs-actuals";
+  | "sales-by-customer" | "ar-ageing" | "ap-ageing" | "tax-summary" | "snapshot" | "budget-overview" | "budget-vs-actuals" | "list";
 
 export interface ReportDefinition {
   key: string;
@@ -57,13 +57,13 @@ export const reportCategories: ReportCategory[] = [
     label: "Who owes you",
     reports: [
       { key: "accounts-receivable-ageing-summary", label: "Accounts receivable ageing summary", description: "Unpaid customer balances, grouped by how late they are.", ready: true, engine: "ar-ageing" },
-      soon("accounts-receivable-ageing-detail", "Accounts receivable ageing detail", "Each unpaid invoice, grouped by how late it is."),
-      soon("collections-report", "Collections Report", "Overdue invoices with customer contact details."),
-      soon("customer-balance-summary", "Customer Balance Summary", "What each customer owes."),
-      soon("customer-balance-detail", "Customer Balance Detail", "Each customer's open invoices and payments."),
-      soon("invoice-list", "Invoice List", "All invoices in a period."),
-      soon("open-invoices", "Open Invoices", "Invoices not yet fully paid."),
-      soon("statement-list", "Statement List", "Customer statements sent."),
+      { key: "accounts-receivable-ageing-detail", label: "Accounts receivable ageing detail", description: "Each unpaid invoice, grouped by how late it is.", ready: true, engine: "list" },
+      { key: "collections-report", label: "Collections Report", description: "Overdue invoices with customer contact details.", ready: true, engine: "list" },
+      { key: "customer-balance-summary", label: "Customer Balance Summary", description: "What each customer owes.", ready: true, engine: "list" },
+      { key: "customer-balance-detail", label: "Customer Balance Detail", description: "Each customer's open invoices and payments.", ready: true, engine: "list" },
+      { key: "invoice-list", label: "Invoice List", description: "All invoices in a period.", ready: true, engine: "list" },
+      { key: "open-invoices", label: "Open Invoices", description: "Invoices not yet fully paid.", ready: true, engine: "list" },
+      { key: "customer-statement", label: "Customer Statements", description: "Each customer's invoices, payments and credits with a running balance.", ready: true, engine: "list" },
     ],
   },
   {
@@ -71,13 +71,13 @@ export const reportCategories: ReportCategory[] = [
     label: "Sales and customers",
     reports: [
       { key: "sales-by-customer-summary", label: "Sales by Customer Summary", description: "Total sales for each customer.", ready: true, engine: "sales-by-customer" },
-      soon("sales-by-customer-detail", "Sales by Customer Detail", "Each sale, grouped by customer."),
-      soon("sales-by-product-summary", "Sales by Product/Service Summary", "Quantity and sales for each item."),
-      soon("sales-by-product-detail", "Sales by Product/Service Detail", "Each sale, grouped by item."),
-      soon("estimates-by-customer", "Estimates by Customer", "Estimates, grouped by customer."),
-      soon("sales-order-list", "Sales Order List", "Sales orders and their status."),
-      soon("payment-method-list", "Payment Method List", "Payments received, by method."),
-      soon("customer-contact-list", "Customer Contact List", "Customer names, emails and phone numbers."),
+      { key: "sales-by-customer-detail", label: "Sales by Customer Detail", description: "Each sale, grouped by customer.", ready: true, engine: "list" },
+      { key: "sales-by-product-summary", label: "Sales by Product/Service Summary", description: "Quantity and sales for each item.", ready: true, engine: "list" },
+      { key: "sales-by-product-detail", label: "Sales by Product/Service Detail", description: "Each sale, grouped by item.", ready: true, engine: "list" },
+      { key: "estimates-by-customer", label: "Estimates by Customer", description: "Estimates, grouped by customer.", ready: true, engine: "list" },
+      { key: "sales-order-list", label: "Sales Order List", description: "Sales orders and their status.", ready: true, engine: "list" },
+      { key: "payment-method-list", label: "Payment Method List", description: "Payments received, by method.", ready: true, engine: "list" },
+      { key: "customer-contact-list", label: "Customer Contact List", description: "Customer names, emails and phone numbers.", ready: true, engine: "list" },
     ],
   },
   {
@@ -85,23 +85,23 @@ export const reportCategories: ReportCategory[] = [
     label: "What you owe",
     reports: [
       { key: "accounts-payable-ageing-summary", label: "Accounts payable ageing summary", description: "Unpaid supplier balances, grouped by how late they are.", ready: true, engine: "ap-ageing" },
-      soon("accounts-payable-ageing-detail", "Accounts payable ageing detail", "Each unpaid bill, grouped by how late it is."),
-      soon("supplier-balance-summary", "Supplier Balance Summary", "What you owe each supplier."),
-      soon("supplier-balance-detail", "Supplier Balance Detail", "Each supplier's open bills and payments."),
-      soon("unpaid-bills", "Unpaid Bills", "Bills not yet fully paid."),
-      soon("bill-payment-list", "Bill Payment List", "Bill payments in a period."),
+      { key: "accounts-payable-ageing-detail", label: "Accounts payable ageing detail", description: "Each unpaid bill, grouped by how late it is.", ready: true, engine: "list" },
+      { key: "supplier-balance-summary", label: "Supplier Balance Summary", description: "What you owe each supplier.", ready: true, engine: "list" },
+      { key: "supplier-balance-detail", label: "Supplier Balance Detail", description: "Each supplier's open bills and payments.", ready: true, engine: "list" },
+      { key: "unpaid-bills", label: "Unpaid Bills", description: "Bills not yet fully paid.", ready: true, engine: "list" },
+      { key: "bill-payment-list", label: "Bill Payment List", description: "Bill payments in a period.", ready: true, engine: "list" },
     ],
   },
   {
     key: "expenses-and-suppliers",
     label: "Expenses and suppliers",
     reports: [
-      soon("expenses-by-supplier-summary", "Expenses by Supplier Summary", "What you spent with each supplier."),
-      soon("purchases-by-supplier-detail", "Purchases by Supplier Detail", "Each purchase, grouped by supplier."),
-      soon("purchases-by-product-detail", "Purchases by Product/Service Detail", "Each purchase, grouped by item."),
-      soon("open-purchase-order-list", "Open Purchase Order List", "Purchase orders not yet received."),
-      soon("transaction-list-by-supplier", "Transaction List by Supplier", "All transactions, grouped by supplier."),
-      soon("supplier-contact-list", "Supplier Contact List", "Supplier names, emails and phone numbers."),
+      { key: "expenses-by-supplier-summary", label: "Expenses by Supplier Summary", description: "What you spent with each supplier.", ready: true, engine: "list" },
+      { key: "purchases-by-supplier-detail", label: "Purchases by Supplier Detail", description: "Each purchase, grouped by supplier.", ready: true, engine: "list" },
+      { key: "purchases-by-product-detail", label: "Purchases by Product/Service Detail", description: "Each purchase, grouped by item.", ready: true, engine: "list" },
+      { key: "open-purchase-order-list", label: "Open Purchase Order List", description: "Purchase orders not yet received.", ready: true, engine: "list" },
+      { key: "transaction-list-by-supplier", label: "Transaction List by Supplier", description: "All transactions, grouped by supplier.", ready: true, engine: "list" },
+      { key: "supplier-contact-list", label: "Supplier Contact List", description: "Supplier names, emails and phone numbers.", ready: true, engine: "list" },
     ],
   },
   {
@@ -109,9 +109,9 @@ export const reportCategories: ReportCategory[] = [
     label: "Sales tax",
     reports: [
       { key: "tax-summary", label: "Tax Summary", description: "Tax collected, tax paid and what is left to pay.", ready: true, engine: "tax-summary" },
-      soon("tax-detail", "Tax Detail", "Each transaction with tax on it."),
+      { key: "tax-detail", label: "Tax Detail", description: "Each transaction with tax on it.", ready: true, engine: "list" },
       soon("tax-exception", "Tax Exception", "Changes to transactions in periods already filed."),
-      soon("taxable-sales-summary", "Taxable Sales Summary", "Taxable and non-taxable sales."),
+      { key: "taxable-sales-summary", label: "Taxable Sales Summary", description: "Taxable and non-taxable sales.", ready: true, engine: "list" },
     ],
   },
   {
