@@ -1,7 +1,7 @@
 "use server";
 
 import { and, eq, inArray } from "drizzle-orm";
-import { revalidatePath } from "next/cache";
+import { revalidatePath } from "@/lib/revalidate";
 
 import { db } from "@/db";
 import { bookkeepingRecord } from "@/db/schema";
@@ -441,7 +441,7 @@ export async function convertLead(leadId: string, input: ConvertLeadInput): Prom
 }
 
 /** Creates a draft quote (estimate) or invoice in Sales for a deal's account, so nothing is typed twice. */
-export async function createDocumentFromDeal(dealId: string, target: "estimates" | "invoices"): Promise<{ number: string; href: string }> {
+export async function createDocumentFromDeal(dealId: string, target: "estimates" | "invoices"): Promise<{ id: string; number: string; href: string }> {
   const me = await requireUser();
   const [deal] = await db.select().from(bookkeepingRecord)
     .where(and(eq(bookkeepingRecord.id, dealId), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "crm-deals"))).limit(1);
@@ -468,16 +468,17 @@ export async function createDocumentFromDeal(dealId: string, target: "estimates"
     crmDeal: deal.data.dealName ?? "",
   };
   let number: string;
+  let created: BookkeepingRecord;
   if (target === "estimates") {
     const highest = existing.reduce((max, row) => Math.max(max, Number((row.data.estimateNumber ?? "").replace(/\D/g, "")) || 0), 0);
     number = `EST-${String(highest + 1).padStart(4, "0")}`;
-    await saveBookkeepingRecord("estimates", { ...common, estimateNumber: number, date: today, expiryDate: "" });
+    created = await saveBookkeepingRecord("estimates", { ...common, estimateNumber: number, date: today, expiryDate: "" });
   } else {
     const prefix = settings?.invoicePrefix || "INV-";
     const highest = existing.reduce((max, row) => Math.max(max, Number((row.data.invoiceNumber ?? "").replace(/\D/g, "")) || 0), 0);
     const sequence = Math.max(highest + 1, Number(settings?.nextInvoiceNumber) || 1);
     number = `${prefix}${String(sequence).padStart(4, "0")}`;
-    await saveBookkeepingRecord("invoices", { ...common, invoiceNumber: number, issueDate: today, paymentTerms: customer?.data.paymentTerms || "30 days", paymentMethod: "Credit", paidAmount: "0" });
+    created = await saveBookkeepingRecord("invoices", { ...common, invoiceNumber: number, issueDate: today, paymentTerms: customer?.data.paymentTerms || "30 days", paymentMethod: "Credit", paidAmount: "0" });
   }
   const label = target === "estimates" ? "Quote" : "Invoice";
   const documents = deal.data.documents ? `${deal.data.documents}, ${number}` : number;
@@ -486,7 +487,7 @@ export async function createDocumentFromDeal(dealId: string, target: "estimates"
     updatedAt: new Date(),
   }).where(eq(bookkeepingRecord.id, deal.id));
   revalidatePath("/app", "layout");
-  return { number, href: target === "estimates" ? "/app/estimates" : "/app/invoices" };
+  return { id: created.id, number, href: target === "estimates" ? "/app/estimates" : "/app/invoices" };
 }
 
 /** Imports rows from a CSV file; each row is checked like a record typed by hand. */

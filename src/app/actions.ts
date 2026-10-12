@@ -2,7 +2,7 @@
 
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { randomBytes } from "node:crypto";
-import { revalidatePath } from "next/cache";
+import { revalidatePath } from "@/lib/revalidate";
 
 import { db } from "@/db";
 import { ActionError } from "@/lib/action-error";

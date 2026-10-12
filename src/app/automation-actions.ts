@@ -1,7 +1,7 @@
 "use server";
 
 import { and, desc, eq, sql } from "drizzle-orm";
-import { revalidatePath } from "next/cache";
+import { revalidatePath, withoutRevalidation } from "@/lib/revalidate";
 
 import { db } from "@/db";
 import { bookkeepingRecord } from "@/db/schema";
@@ -10,8 +10,10 @@ import { ActionError } from "@/lib/action-error";
 import { requireUser } from "@/lib/auth";
 import { sendEmailOrThrow } from "@/lib/email";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
+import { runCaseEscalation, runLeadFollowUp, runOverdueTasks, runStaleDeals, runWonDealInvoices } from "@/lib/crm-automation";
 import {
   automationTemplate,
+  automationTemplates,
   isAutomationAction,
   nextExecutionDate,
   parseAutomationItems,
@@ -125,7 +127,7 @@ export async function deleteAutomationRule(id: string): Promise<void> {
 export async function addRecommendedRules(): Promise<void> {
   const me = await requireUser();
   const existing = await rowsOfKind(me.id, "automation-rules");
-  for (const template of [{ action: "monthlyPayroll" as const }, { action: "recurringInvoices" as const }, { action: "bankRules" as const }, { action: "overdueReminders" as const }]) {
+  for (const template of automationTemplates) {
     if (existing.some((row) => row.data.action === template.action)) continue;
     const details = automationTemplate(template.action)!;
     await db.insert(bookkeepingRecord).values({
@@ -328,6 +330,13 @@ async function runOverdueReminders(userId: string, rule: StoredRow, sendNow: boo
   return { items, errors, summary };
 }
 
+/** The rule's "days" condition, falling back to its template's default. */
+function ruleDays(rule: StoredRow) {
+  const fallback = automationTemplate(rule.data.action)?.conditions?.find((condition) => condition.key === "days")?.defaultValue ?? "0";
+  const days = Number(rule.data.days ?? fallback);
+  return Number.isFinite(days) && days >= 0 ? days : Number(fallback);
+}
+
 async function executeRule(userId: string, rule: StoredRow, trigger: "Scheduled" | "Run now") {
   const action = rule.data.action;
   const needsApproval = rule.data.requireApproval !== "false";
@@ -339,7 +348,17 @@ async function executeRule(userId: string, rule: StoredRow, trigger: "Scheduled"
         ? await runBankRules(userId)
         : action === "overdueReminders"
           ? await runOverdueReminders(userId, rule, !needsApproval)
-          : { items: [], errors: [`Unknown action ${action}.`], summary: "Nothing ran." };
+          : action === "crmLeadFollowUp"
+            ? await runLeadFollowUp(userId, ruleDays(rule))
+            : action === "crmStaleDeals"
+              ? await runStaleDeals(userId, ruleDays(rule))
+              : action === "crmWonDealInvoices"
+                ? await runWonDealInvoices(userId)
+                : action === "crmOverdueTasks"
+                  ? await runOverdueTasks(userId, ruleDays(rule))
+                  : action === "crmCaseEscalation"
+                    ? await runCaseEscalation(userId, ruleDays(rule))
+                    : { items: [], errors: [`Unknown action ${action}.`], summary: "Nothing ran." };
   const items = result.items.map((item) => ({ ...item, status: item.status === "Done" ? "Done" : needsApproval ? "Pending approval" : "Done" }));
   await db.insert(bookkeepingRecord).values({
     userId,
@@ -378,7 +397,11 @@ export async function runAutomationRule(id: string): Promise<void> {
 export async function runDueAutomations(): Promise<void> {
   const me = await requireUser();
   if ((await currentMode(me.id)) !== "Automation") return;
-  const rules = await rowsOfKind(me.id, "automation-rules");
+  await withoutRevalidation(() => runDueRules(me.id));
+}
+
+async function runDueRules(userId: string) {
+  const rules = await rowsOfKind(userId, "automation-rules");
   const now = today();
   for (const rule of rules) {
     if (rule.data.active !== "true" || !rule.data.nextRun || rule.data.nextRun > now) continue;
@@ -387,11 +410,11 @@ export async function runDueAutomations(): Promise<void> {
     const claimed = await db
       .update(bookkeepingRecord)
       .set({ data: { ...rule.data, nextRun }, updatedAt: new Date() })
-      .where(and(eq(bookkeepingRecord.id, rule.id), eq(bookkeepingRecord.userId, me.id), sql`${bookkeepingRecord.data}->>'nextRun' = ${rule.data.nextRun}`))
+      .where(and(eq(bookkeepingRecord.id, rule.id), eq(bookkeepingRecord.userId, userId), sql`${bookkeepingRecord.data}->>'nextRun' = ${rule.data.nextRun}`))
       .returning();
     if (!claimed[0]) continue;
     try {
-      await executeRule(me.id, claimed[0], "Scheduled");
+      await executeRule(userId, claimed[0], "Scheduled");
     } catch {
       // A failing rule must never stop the app from loading; the next run tries again.
     }

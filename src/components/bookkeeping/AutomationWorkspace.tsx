@@ -55,7 +55,16 @@ const itemHref: Record<string, { href: string; label: string }> = {
   payroll: { href: "/app/payroll", label: "Payroll" },
   invoices: { href: "/app/invoices", label: "Invoices" },
   transactions: { href: "/app/transactions", label: "Transactions" },
+  "crm-tasks": { href: "/app/crm/activities", label: "task" },
+  "crm-cases": { href: "/app/crm/cases", label: "case" },
 };
+
+/** CRM pages open the exact record; the others open their list. */
+function itemLink(kind: string, id: string) {
+  const target = itemHref[kind];
+  if (!target) return "/app";
+  return kind.startsWith("crm-") ? `${target.href}?open=${encodeURIComponent(id)}` : target.href;
+}
 
 function ruleConditions(rule: BookkeepingRecord) {
   return Object.fromEntries((automationTemplate(rule.data.action)?.conditions ?? []).map((condition) => [condition.key, rule.data[condition.key] ?? condition.defaultValue]));
@@ -227,7 +236,7 @@ export default function AutomationWorkspace({ mode: initialMode, rules, log }: A
             <div className="px-5 py-14 text-center">
               <div className="mx-auto grid size-11 place-items-center rounded-full bg-primary/10 text-primary"><Sparkles size={20} /></div>
               <h3 className="mt-4 font-semibold">No automation rules yet</h3>
-              <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">Start with the recommended rules: monthly payroll on the 1st, and daily recurring invoices, bank-rule matching and overdue reminders. Each asks for your approval before anything is kept or sent.</p>
+              <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">Start with the recommended rules: monthly payroll on the 1st; daily recurring invoices, bank-rule matching and overdue reminders; and CRM follow-ups for new leads and stale deals, invoices for won deals, and escalation of overdue tasks and old cases. Each asks for your approval before anything is kept or sent.</p>
               <Button className="mt-4 gap-2" disabled={busy === "recommended"} onClick={() => void act("recommended", () => addRecommendedRules(), "Recommended rules added.")}><Sparkles size={15} />Add recommended rules</Button>
             </div>
           )
@@ -240,14 +249,14 @@ export default function AutomationWorkspace({ mode: initialMode, rules, log }: A
                 <li key={`${run.id}-${item.id}`} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
                   <div className="min-w-0">
                     <p className="font-medium">{item.label}</p>
-                    <p className="mt-0.5 text-xs text-muted-foreground">{run.data.ruleName} · {run.data.trigger} · {when(run.data.ranAt)} · <Link href={itemHref[item.kind]?.href ?? "/app"} className="text-primary underline-offset-4 hover:underline">Open {itemHref[item.kind]?.label ?? "record"}</Link></p>
+                    <p className="mt-0.5 text-xs text-muted-foreground">{run.data.ruleName} · {run.data.trigger} · {when(run.data.ranAt)} · <Link href={itemLink(item.kind, item.id)} className="text-primary underline-offset-4 hover:underline">Open {itemHref[item.kind]?.label ?? "record"}</Link></p>
                   </div>
                   <div className="flex gap-2">
                     <Button type="button" size="sm" className="gap-1.5" disabled={Boolean(busy)} onClick={() => void act(`approve-${item.id}`, () => approveAutomationItem(run.id, item.id), "Approved.")}><Check size={14} />{item.onApprove === "sendReminder" ? "Approve & send" : "Approve"}</Button>
                     <Button type="button" size="sm" variant="outline" className="gap-1.5" disabled={Boolean(busy)} onClick={() => {
-                      const message = item.onReject === "restore" ? `Undo this match and put the transaction back as it was?` : item.onReject === "skip" ? `Skip this reminder? Nothing will be sent.` : `Reject and delete “${item.label}”?`;
-                      if (window.confirm(message)) void act(`reject-${item.id}`, () => rejectAutomationItem(run.id, item.id), item.onReject === "restore" ? "Match undone." : item.onReject === "skip" ? "Reminder skipped." : "Rejected and deleted.");
-                    }}><X size={14} />{item.onReject === "restore" ? "Undo match" : item.onReject === "skip" ? "Skip" : "Reject"}</Button>
+                      const message = item.onReject === "restore" ? (item.kind === "transactions" ? `Undo this match and put the transaction back as it was?` : `Undo this change and put “${item.label}” back as it was?`) : item.onReject === "skip" ? `Skip this reminder? Nothing will be sent.` : `Reject and delete “${item.label}”?`;
+                      if (window.confirm(message)) void act(`reject-${item.id}`, () => rejectAutomationItem(run.id, item.id), item.onReject === "restore" ? (item.kind === "transactions" ? "Match undone." : "Change undone.") : item.onReject === "skip" ? "Reminder skipped." : "Rejected and deleted.");
+                    }}><X size={14} />{item.onReject === "restore" ? (item.kind === "transactions" ? "Undo match" : "Undo change") : item.onReject === "skip" ? "Skip" : "Reject"}</Button>
                   </div>
                 </li>
               ))}

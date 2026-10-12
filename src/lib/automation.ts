@@ -8,7 +8,9 @@
  */
 
 export type AutomationMode = "Manual" | "Automation";
-export type AutomationAction = "monthlyPayroll" | "recurringInvoices" | "bankRules" | "overdueReminders";
+export type AutomationAction =
+  | "monthlyPayroll" | "recurringInvoices" | "bankRules" | "overdueReminders"
+  | "crmLeadFollowUp" | "crmStaleDeals" | "crmWonDealInvoices" | "crmOverdueTasks" | "crmCaseEscalation";
 export type AutomationTrigger = "monthly" | "daily";
 
 export interface AutomationTemplate {
@@ -58,6 +60,58 @@ export const automationTemplates: readonly AutomationTemplate[] = [
     conditions: [
       { key: "days", label: "Overdue by at least (days)", help: "Only invoices this many days past their due date.", defaultValue: "7" },
       { key: "minAmount", label: "Balance at least", help: "Skip small balances below this amount.", defaultValue: "0" },
+    ],
+  },
+  {
+    action: "crmLeadFollowUp",
+    name: "CRM: follow up new leads",
+    model: "CRM leads",
+    description: "Creates a “Call the lead” task for each lead still marked Not Contacted after the set days, assigned to the lead owner and due today. A lead gets one open follow-up task at a time.",
+    trigger: "daily",
+    dayOfMonth: "1",
+    conditions: [
+      { key: "days", label: "Not contacted for at least (days)", help: "Days since the lead was created.", defaultValue: "1" },
+    ],
+  },
+  {
+    action: "crmStaleDeals",
+    name: "CRM: follow up stale deals",
+    model: "CRM deals",
+    description: "Creates a follow-up task for each open deal that hasn't changed in the set days, or whose closing date has passed, so no deal is forgotten.",
+    trigger: "daily",
+    dayOfMonth: "1",
+    conditions: [
+      { key: "days", label: "No change for at least (days)", help: "Deals untouched this long get a follow-up task.", defaultValue: "14" },
+    ],
+  },
+  {
+    action: "crmWonDealInvoices",
+    name: "CRM: invoice won deals",
+    model: "CRM deals → Invoices",
+    description: "Creates a draft invoice in Sales for every Closed Won deal that has no quote or invoice yet, for the deal's account and amount. Rejecting deletes the draft.",
+    trigger: "daily",
+    dayOfMonth: "1",
+  },
+  {
+    action: "crmOverdueTasks",
+    name: "CRM: raise overdue tasks",
+    model: "CRM tasks",
+    description: "Raises the priority of open tasks overdue by the set days to High, so they top everyone's list. Rejecting puts the old priority back.",
+    trigger: "daily",
+    dayOfMonth: "1",
+    conditions: [
+      { key: "days", label: "Overdue by at least (days)", help: "Days past the task's due date.", defaultValue: "1" },
+    ],
+  },
+  {
+    action: "crmCaseEscalation",
+    name: "CRM: escalate old cases",
+    model: "CRM cases",
+    description: "Marks New or On Hold cases older than the set days as Escalated with High priority. Rejecting puts the old status and priority back.",
+    trigger: "daily",
+    dayOfMonth: "1",
+    conditions: [
+      { key: "days", label: "Open for at least (days)", help: "Days since the case was created.", defaultValue: "3" },
     ],
   },
 ];
