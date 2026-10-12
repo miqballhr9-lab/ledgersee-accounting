@@ -175,7 +175,7 @@ export default function BillsWorkspace({ records: initialRecords, vendors, accou
     await processBills(selectedBills, action);
   }
 
-  async function processBills(targets: BookkeepingRecord[], action: "pay" | "undo-payment" | "delete", payment?: { date: string; accountId: string }) {
+  async function processBills(targets: BookkeepingRecord[], action: "pay" | "undo-payment" | "delete", payment?: { date: string; accountId: string; amount?: string }) {
     setBulkPending(true);
     setActionMessage("");
     const done: string[] = [];
@@ -185,7 +185,7 @@ export default function BillsWorkspace({ records: initialRecords, vendors, accou
       try {
         if (action === "delete") await deleteBookkeepingRecord("bills", record.id);
         else if (action === "undo-payment") await undoBillPayments(record.id);
-        else if (payment) await recordBillPayment(record.id, payment.date, payment.accountId);
+        else if (payment) await recordBillPayment(record.id, payment.date, payment.accountId, payment.amount);
         done.push(record.id);
       } catch (error) {
         const message = error instanceof Error ? readableError(error) : "it couldn’t be updated.";
@@ -398,7 +398,8 @@ export default function BillsWorkspace({ records: initialRecords, vendors, accou
         submitLabel="Record payment"
         paymentAccounts={paymentAccounts}
         pending={bulkPending}
-        onSubmit={(date, accountId) => void processBills(paymentTargets ?? [], "pay", { date, accountId })}
+        amountDue={paymentTargets?.length === 1 ? amountDue(paymentTargets[0]) : undefined}
+        onSubmit={(date, accountId, amount) => void processBills(paymentTargets ?? [], "pay", { date, accountId, amount })}
       />
       {editorModule ? (
         <RecordDetailPanel

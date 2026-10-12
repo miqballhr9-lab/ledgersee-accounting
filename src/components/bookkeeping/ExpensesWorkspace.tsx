@@ -236,7 +236,17 @@ export default function ExpensesWorkspace({ expenses: initialExpenses, bills: in
 
   function isUnpaid(record: BookkeepingRecord) {
     if (record.kind === "bills") return !["Paid", "Cancelled"].includes(record.data.status ?? "") && billDue(record) > 0;
-    return record.data.status !== "Paid" && !record.data.paymentAccount;
+    return record.data.status !== "Paid" && (record.data.status === "Partially Paid" || !record.data.paymentAccount);
+  }
+
+  /** Whether anything has been paid, so the payment can be undone. */
+  function hasPayment(record: BookkeepingRecord) {
+    return Number(record.data.paidAmount || 0) > 0 || record.data.status === "Paid" || (record.kind === "expenses" && !isUnpaid(record));
+  }
+
+  /** What is still to pay on a bill or expense. */
+  function stillDue(record: BookkeepingRecord) {
+    return record.kind === "bills" ? billDue(record) : Math.max(0, Number(record.data.amount || 0) - Number(record.data.paidAmount || 0));
   }
 
   async function undoPayment(record: BookkeepingRecord) {
@@ -268,7 +278,7 @@ export default function ExpensesWorkspace({ expenses: initialExpenses, bills: in
     await processTransactions(selectedTransactions, "delete");
   }
 
-  async function processTransactions(targets: BookkeepingRecord[], action: "pay" | "delete", payment?: { date: string; accountId: string }) {
+  async function processTransactions(targets: BookkeepingRecord[], action: "pay" | "delete", payment?: { date: string; accountId: string; amount?: string }) {
     setBulkPending(true);
     setActionMessage("");
     const done: string[] = [];
@@ -277,7 +287,7 @@ export default function ExpensesWorkspace({ expenses: initialExpenses, bills: in
       const title = record.kind === "bills" ? record.data.billNumber || "Bill" : record.data.description || "Expense";
       try {
         if (action === "delete") await deleteBookkeepingRecord(record.kind, record.id);
-        else if (payment) await (record.kind === "bills" ? recordBillPayment(record.id, payment.date, payment.accountId) : recordExpensePayment(record.id, payment.date, payment.accountId));
+        else if (payment) await (record.kind === "bills" ? recordBillPayment(record.id, payment.date, payment.accountId, payment.amount) : recordExpensePayment(record.id, payment.date, payment.accountId, payment.amount));
         done.push(`${record.kind}-${record.id}`);
       } catch (error) {
         const message = error instanceof Error ? readableError(error) : "it couldn’t be updated.";
@@ -312,9 +322,8 @@ export default function ExpensesWorkspace({ expenses: initialExpenses, bills: in
   const detailRecord = records.find((record) => `${record.kind}-${record.id}` === detailKey) ?? null;
   const detailModule = detailRecord ? moduleBySlug(detailRecord.kind) : undefined;
   const detailActions: RecordMenuAction[] = detailRecord ? [
-    isUnpaid(detailRecord)
-      ? { key: "pay", label: "Record payment", icon: CircleDollarSign, primary: true, run: () => { setDetailKey(null); setPaymentTargets([detailRecord]); } }
-      : { key: "undo-payment", label: "Undo payment", icon: Undo2, run: () => { setDetailKey(null); void undoPayment(detailRecord); } },
+    ...(isUnpaid(detailRecord) ? [{ key: "pay", label: "Record payment", icon: CircleDollarSign, primary: true, run: () => { setDetailKey(null); setPaymentTargets([detailRecord]); } }] : []),
+    ...(hasPayment(detailRecord) ? [{ key: "undo-payment", label: "Undo payment", icon: Undo2, run: () => { setDetailKey(null); void undoPayment(detailRecord); } }] : []),
     { key: "edit", label: "Edit", icon: Pencil, primary: true, run: () => { setDetailKey(null); openEditTransaction(detailRecord); } },
     { key: "delete", label: "Delete", icon: Trash2, destructive: true, run: () => { setDetailKey(null); void handleDelete(detailRecord); } },
   ] : [];
@@ -474,9 +483,8 @@ export default function ExpensesWorkspace({ expenses: initialExpenses, bills: in
                           <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" aria-label="More transaction actions"><MoreHorizontal size={15} /></Button>} />
                           <DropdownMenuContent align="end">
                             <DropdownMenuItem onClick={() => openEditTransaction(record)}><Pencil size={14} />Edit</DropdownMenuItem>
-                            {isUnpaid(record)
-                              ? <DropdownMenuItem disabled={bulkPending} onClick={() => setPaymentTargets([record])}><CircleDollarSign size={14} />Record payment</DropdownMenuItem>
-                              : <DropdownMenuItem disabled={bulkPending} onClick={() => void undoPayment(record)}><Undo2 size={14} />Undo payment</DropdownMenuItem>}
+                            {isUnpaid(record) ? <DropdownMenuItem disabled={bulkPending} onClick={() => setPaymentTargets([record])}><CircleDollarSign size={14} />Record payment</DropdownMenuItem> : null}
+                            {hasPayment(record) ? <DropdownMenuItem disabled={bulkPending} onClick={() => void undoPayment(record)}><Undo2 size={14} />Undo payment</DropdownMenuItem> : null}
                             <DropdownMenuSeparator />
                             <DropdownMenuItem variant="destructive" disabled={pendingDelete === record.id} onClick={() => void handleDelete(record)}><Trash2 size={14} />Delete</DropdownMenuItem>
                           </DropdownMenuContent>
@@ -562,11 +570,12 @@ export default function ExpensesWorkspace({ expenses: initialExpenses, bills: in
         open={Boolean(paymentTargets)}
         onOpenChange={(open) => { if (!open) setPaymentTargets(null); }}
         title="Record payment"
-        description={`${paymentTargets?.length ?? 0} ${paymentTargets?.length === 1 ? "transaction" : "transactions"} · ${formatMoney(String((paymentTargets ?? []).reduce((sum, record) => sum + (record.kind === "bills" ? billDue(record) : Number(record.data.amount || 0)), 0)), currency)} · paid from Bank, Cash or Credit card`}
+        description={`${paymentTargets?.length ?? 0} ${paymentTargets?.length === 1 ? "transaction" : "transactions"} · ${formatMoney(String((paymentTargets ?? []).reduce((sum, record) => sum + stillDue(record), 0)), currency)} · paid from Bank, Cash or Credit card`}
         submitLabel="Record payment"
         paymentAccounts={paymentAccounts}
         pending={bulkPending}
-        onSubmit={(date, accountId) => void processTransactions(paymentTargets ?? [], "pay", { date, accountId })}
+        amountDue={paymentTargets?.length === 1 ? stillDue(paymentTargets[0]) : undefined}
+        onSubmit={(date, accountId, amount) => void processTransactions(paymentTargets ?? [], "pay", { date, accountId, amount })}
       />
 
       {detailModule ? (

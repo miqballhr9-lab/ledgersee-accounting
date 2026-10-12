@@ -839,6 +839,13 @@ export default function RecordEditor({ module, record, customers, vendors, items
                         </SelectContent>
                       </Select>
                       {!paymentAccounts.length && !record ? <NoAccountsNotice message="To record this as paid, add a Cash, Bank or Credit card account. Otherwise it stays unpaid on credit." /> : null}
+                      {!record && value && value !== "Credit" ? (
+                        <div className="mt-3 space-y-1.5">
+                          <Label htmlFor="field-amountPaid">{module.kind === "invoices" ? "Amount received" : "Amount paid"}</Label>
+                          <Input id="field-amountPaid" type="number" min="0.01" step="0.01" inputMode="decimal" value={values.amountPaid ?? ""} placeholder="Full amount" onChange={(event) => changeValue("amountPaid", event.target.value)} />
+                          <p className="text-xs text-muted-foreground">Leave empty for the full amount, or enter part of it; the rest stays open.</p>
+                        </div>
+                      ) : null}
                     </>
                   ) : null}
 

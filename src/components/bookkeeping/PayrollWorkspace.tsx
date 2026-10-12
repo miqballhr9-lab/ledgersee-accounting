@@ -122,7 +122,9 @@ function payrollColumns(currency: string): PayrollColumn[] {
       label: "Status",
       render: (record) => record.data.status === "Paid"
         ? <span className="inline-flex flex-col"><span className="inline-flex w-fit rounded-full bg-accent px-2 py-0.5 text-[11px] font-medium text-accent-foreground">Paid</span>{record.data.paidDate ? <span className="mt-0.5 text-[11px] text-muted-foreground">{record.data.paidDate}</span> : null}</span>
-        : <span className="inline-flex rounded-full bg-secondary px-2 py-0.5 text-[11px] font-medium text-secondary-foreground">Unpaid</span>,
+        : record.data.status === "Partially Paid"
+          ? <span className="inline-flex flex-col"><span className="inline-flex w-fit rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-medium text-blue-700 dark:bg-blue-950 dark:text-blue-300">Partially Paid</span><span className="mt-0.5 text-[11px] text-muted-foreground">{money(record.data.paidAmount)} paid</span></span>
+          : <span className="inline-flex rounded-full bg-secondary px-2 py-0.5 text-[11px] font-medium text-secondary-foreground">Unpaid</span>,
     },
     { key: "description", label: "Description", render: (record) => <span className="block max-w-56 truncate text-muted-foreground">{record.data.description || "—"}</span> },
   ];
@@ -265,16 +267,19 @@ export default function PayrollWorkspace({ records, accounts, employees = [], as
     else setPaymentTargets(unpaid);
   }
 
-  async function payTargets(date: string, accountId: string) {
+  async function payTargets(date: string, accountId: string, amount?: string) {
     const targets = paymentTargets ?? [];
     setIsPaying(true);
     let paid = 0;
     const account = paymentAccounts.find((item) => item.id === accountId);
-    const paidData = { status: "Paid", paidDate: date, paymentAccountId: accountId, paymentAccountName: account?.data.name || account?.data.code || "Account", paymentMethod: account ? paymentAccountType(account) ?? "" : "" };
+    const paidData = { paidDate: date, paymentAccountId: accountId, paymentAccountName: account?.data.name || account?.data.code || "Account", paymentMethod: account ? paymentAccountType(account) ?? "" : "" };
     for (const record of targets) {
       try {
-        await recordPayrollPayment(record.id, date, accountId);
-        setSavedRecords((previous) => previous.map((item) => (item.id === record.id ? { ...item, data: { ...item.data, ...paidData } } : item)));
+        await recordPayrollPayment(record.id, date, accountId, amount);
+        const payable = Number(record.data.payableSalary || 0);
+        const paidSoFar = Number(record.data.paidAmount || 0) + (amount ? Number(amount) : payable - Number(record.data.paidAmount || 0));
+        const status = paidSoFar >= payable - 0.005 ? "Paid" : "Partially Paid";
+        setSavedRecords((previous) => previous.map((item) => (item.id === record.id ? { ...item, data: { ...item.data, ...paidData, status, paidAmount: paidSoFar.toFixed(2) } } : item)));
         paid += 1;
       } catch (error) {
         toast.error(`${record.data.employeeName || "Salary"}: ${errorMessage(error)}`);
@@ -288,7 +293,7 @@ export default function PayrollWorkspace({ records, accounts, employees = [], as
   }
 
   async function undoPayments(records: BookkeepingRecord[]) {
-    const paid = records.filter((record) => record.data.status === "Paid");
+    const paid = records.filter((record) => record.data.status === "Paid" || record.data.status === "Partially Paid");
     if (!paid.length) {
       toast.info("None of the selected salaries are marked paid.");
       return;
@@ -298,7 +303,7 @@ export default function PayrollWorkspace({ records, accounts, employees = [], as
     for (const record of paid) {
       try {
         await undoPayrollPayment(record.id);
-        setSavedRecords((previous) => previous.map((item) => (item.id === record.id ? { ...item, data: { ...item.data, status: "Unpaid", paidDate: "" } } : item)));
+        setSavedRecords((previous) => previous.map((item) => (item.id === record.id ? { ...item, data: { ...item.data, status: "Unpaid", paidAmount: "0", paidDate: "" } } : item)));
       } catch (error) {
         toast.error(`${record.data.employeeName || "Salary"}: ${errorMessage(error)}`);
       }
@@ -493,15 +498,16 @@ export default function PayrollWorkspace({ records, accounts, employees = [], as
                       <div className="flex items-center justify-end gap-2">
                         {record.data.status === "Paid"
                           ? <span className="inline-flex rounded-full bg-accent px-2 py-0.5 text-[11px] font-medium text-accent-foreground" title={record.data.paidDate ? `Paid on ${record.data.paidDate}` : undefined}>Paid</span>
-                          : <span className="inline-flex rounded-full bg-secondary px-2 py-0.5 text-[11px] font-medium text-secondary-foreground">Unpaid</span>}
+                          : record.data.status === "Partially Paid"
+                            ? <span className="inline-flex rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-medium text-blue-700 dark:bg-blue-950 dark:text-blue-300">Partially Paid</span>
+                            : <span className="inline-flex rounded-full bg-secondary px-2 py-0.5 text-[11px] font-medium text-secondary-foreground">Unpaid</span>}
                         <DropdownMenu>
                           <DropdownMenuTrigger render={<Button type="button" variant="ghost" size="icon-sm" aria-label={`More actions for ${record.data.employeeName || "this salary"}`}><Ellipsis size={16} /></Button>} />
                           <DropdownMenuContent align="end" className="min-w-52">
                             <DropdownMenuItem onClick={() => openEditEntry(record)}><Pencil size={14} />Edit</DropdownMenuItem>
                             <DropdownMenuItem onClick={() => openCopiedEntry(record)}><Copy size={14} />Copy to next month</DropdownMenuItem>
-                            {record.data.status === "Paid"
-                              ? <DropdownMenuItem disabled={isPaying} onClick={() => void undoPayments([record])}><Undo2 size={14} />Undo payment</DropdownMenuItem>
-                              : <DropdownMenuItem disabled={isPaying} onClick={() => setPaymentTargets([record])}><CircleDollarSign size={14} />Record payment</DropdownMenuItem>}
+                            {record.data.status !== "Paid" ? <DropdownMenuItem disabled={isPaying} onClick={() => setPaymentTargets([record])}><CircleDollarSign size={14} />Record payment</DropdownMenuItem> : null}
+                            {record.data.status === "Paid" || record.data.status === "Partially Paid" ? <DropdownMenuItem disabled={isPaying} onClick={() => void undoPayments([record])}><Undo2 size={14} />Undo payment</DropdownMenuItem> : null}
                             <DropdownMenuSeparator />
                             <DropdownMenuItem onClick={() => window.open(`/app/payroll/${record.id}/print`, "_blank", "noopener")}><ArrowDownToLine size={14} />Download salary slip</DropdownMenuItem>
                             <DropdownMenuItem disabled={isSending === record.id} onClick={() => void handleSendSlip(record)}><Mail size={14} />Email salary slip</DropdownMenuItem>
@@ -537,7 +543,8 @@ export default function PayrollWorkspace({ records, accounts, employees = [], as
         submitLabel="Record payment"
         paymentAccounts={paymentAccounts}
         pending={isPaying}
-        onSubmit={(date, accountId) => void payTargets(date, accountId)}
+        amountDue={paymentTargets?.length === 1 ? Math.max(0, Number(paymentTargets[0].data.payableSalary || 0) - Number(paymentTargets[0].data.paidAmount || 0)) : undefined}
+        onSubmit={(date, accountId, amount) => void payTargets(date, accountId, amount)}
       />
 
       {sheet ? (

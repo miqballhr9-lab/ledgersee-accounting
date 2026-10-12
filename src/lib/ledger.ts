@@ -184,7 +184,7 @@ export function buildLedger(records: BookkeepingRecord[], method: AccountingMeth
   const paymentsFor = new Map<string, DocPayment[]>();
   for (const record of records) {
     if (record.kind !== "payments") continue;
-    const target = record.data.invoiceId || record.data.billId;
+    const target = record.data.invoiceId || record.data.billId || record.data.expenseId || record.data.payrollId;
     if (!target) continue;
     const list = paymentsFor.get(target) ?? [];
     list.push({ date: record.data.paymentDate || record.createdAt.slice(0, 10), amount: num(record.data.amount), account: paymentAccountName(record.data, record.data.invoiceId ? "in" : "out"), id: record.id });
@@ -274,6 +274,20 @@ export function buildLedger(records: BookkeepingRecord[], method: AccountingMeth
         }
         continue;
       }
+      // Expenses paid in parts are booked like bills: owed when incurred, then each payment.
+      if (!isBill && (paymentsFor.has(record.id) || num(data.paidAmount) > 0)) {
+        const payments = docPayments(record, date);
+        if (method === "accrual") {
+          post({ ...base, txnId: `exp-${record.id}`, date }, [...debitLines, [salesTax, tax], [ap, -total]]);
+          for (const payment of payments) post({ ...base, type: "Expense payment", txnId: `ep-${payment.id}-${record.id}`, date: payment.date }, [[ap, payment.amount * rate], [payment.account, -payment.amount * rate]]);
+        } else if (total > 0) {
+          for (const payment of payments) {
+            const share = (payment.amount * rate) / total;
+            post({ ...base, type: "Expense payment", txnId: `ep-${payment.id}-${record.id}`, date: payment.date }, [...debitLines.map(([account, amount]) => [account, amount * share] as [string, number]), [salesTax, tax * share], [payment.account, -payment.amount * rate]]);
+          }
+        }
+        continue;
+      }
       if (!isBill) {
         const paid = data.status === "Paid" || Boolean(data.paymentAccountId) || (!data.status && Boolean(data.paymentAccount));
         if (method === "cash" && !paid) continue;
@@ -336,9 +350,24 @@ export function buildLedger(records: BookkeepingRecord[], method: AccountingMeth
       const gross = num(data.grossSalary);
       if (!gross) continue;
       const net = num(data.payableSalary);
+      const base = { number: data.reference ?? "", name: data.employeeName ?? "", customer: "", supplier: "", memo: data.month ? `Salary ${data.month}` : "Salary", sourceKind: "payroll", sourceId: record.id };
+      const month = /^\d{4}-\d{2}$/.test(data.month ?? "") ? `${data.month}-28` : "";
+      // Salaries paid in parts: owed for the month, then each payment.
+      if (paymentsFor.has(record.id) || num(data.paidAmount) > 0) {
+        const payments = docPayments(record, month || record.createdAt.slice(0, 10));
+        if (method === "accrual") {
+          post({ ...base, type: "Payroll", txnId: `pr-${record.id}`, date: month || record.createdAt.slice(0, 10) }, [[salaries, gross], [payrollLiabilities, -gross]]);
+          for (const payment of payments) post({ ...base, type: "Salary payment", txnId: `sp-${payment.id}-${record.id}`, date: payment.date }, [[payrollLiabilities, payment.amount], [payment.account, -payment.amount]]);
+        } else if (net > 0) {
+          for (const payment of payments) {
+            const share = payment.amount / net;
+            post({ ...base, type: "Salary payment", txnId: `sp-${payment.id}-${record.id}`, date: payment.date }, [[salaries, gross * share], [payrollLiabilities, -(gross - net) * share], [payment.account, -payment.amount]]);
+          }
+        }
+        continue;
+      }
       const paid = data.status === "Paid";
       if (method === "cash" && !paid) continue;
-      const month = /^\d{4}-\d{2}$/.test(data.month ?? "") ? `${data.month}-28` : "";
       const date = (paid ? data.paidDate : "") || month || record.createdAt.slice(0, 10);
       post(
         { txnId: `pr-${record.id}`, date, type: "Payroll", number: data.reference ?? "", name: data.employeeName ?? "", customer: "", supplier: "", memo: data.month ? `Salary ${data.month}` : "Salary", sourceKind: "payroll", sourceId: record.id },

@@ -166,7 +166,7 @@ export default function Dashboard({ records, setup, asOfDate }: DashboardProps) 
           {recentRecords.length ? (
             <div className="divide-y divide-border">
               {recentRecords.map((record) => {
-                const moduleSlug = record.kind === "payments" ? "invoices" : record.kind;
+                const moduleSlug = record.kind === "payments" ? (record.data.billId ? "bills" : record.data.expenseId ? "expenses" : record.data.payrollId ? "payroll" : "invoices") : record.kind;
                 const title = record.data.invoiceNumber || record.data.billNumber || record.data.name || record.data.description || record.data.reference || record.data.poNumber || record.data.orderNumber || record.data.estimateNumber || record.data.customer || "New record";
                 return (
                   <Link key={record.id} href={`/app/${moduleSlug}`} className="flex items-center gap-3 px-5 py-3.5 transition-colors hover:bg-muted/40">

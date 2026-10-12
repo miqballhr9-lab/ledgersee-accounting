@@ -302,10 +302,11 @@ export async function saveBookkeepingRecord(
     if (duplicate) throw new ActionError("That employee already has a payroll entry for this month.");
     // Editing a paid salary keeps its payment; Undo payment is how it becomes unpaid again.
     const existing = id ? payrollRows.find((row) => row.id === id) : undefined;
-    if (existing?.data.status === "Paid") {
+    if (existing?.data.status === "Paid" || existing?.data.status === "Partially Paid") {
       data = {
         ...data,
-        status: "Paid",
+        status: existing.data.status,
+        paidAmount: existing.data.paidAmount || "",
         paidDate: existing.data.paidDate || "",
         paymentAccountId: existing.data.paymentAccountId || "",
         paymentAccountName: existing.data.paymentAccountName || "",
@@ -341,8 +342,12 @@ export async function saveBookkeepingRecord(
     if (paymentMethod !== "Credit") {
       const amount = Number(data.amount);
       if (!Number.isFinite(amount) || amount <= 0) throw new ActionError("Enter an amount greater than zero for a paid transaction.");
-      data = { ...data, paidAmount: amount.toFixed(2), status: "Paid" };
+      // Part of the total can be received or paid now; the rest stays open.
+      const paidNow = paymentAmount(data.amountPaid, amount, kind === "invoices" ? "this invoice" : "this bill");
+      data = { ...data, paidAmount: paidNow.toFixed(2), status: paidNow >= amount - 0.005 ? "Paid" : "Partially Paid" };
     }
+    const { amountPaid: _amountPaid, ...withoutAmountPaid } = data;
+    data = withoutAmountPaid;
   }
   if (kind === "accounts") {
     const accountRows = await db
@@ -555,6 +560,23 @@ export async function saveBookkeepingRecord(
     .insert(bookkeepingRecord)
     .values({ userId: me.id, kind, data })
     .returning();
+  if (kind === "bills" && data.paymentMethod && data.paymentMethod !== "Credit" && Number(data.paidAmount) > 0) {
+    await db.insert(bookkeepingRecord).values({
+      userId: me.id,
+      kind: "payments",
+      data: {
+        billId: created.id,
+        billNumber: data.billNumber ?? "Bill",
+        vendor: data.vendor ?? "",
+        amount: data.paidAmount ?? "0",
+        paymentDate: data.billDate || new Date().toISOString().slice(0, 10),
+        method: data.paymentMethod,
+        paymentAccountId: data.paymentAccountId ?? "",
+        paymentAccountName: data.paymentAccountName ?? "",
+        direction: "out",
+      },
+    });
+  }
   if (kind === "invoices" && data.paymentMethod && data.paymentMethod !== "Credit") {
     await db.insert(bookkeepingRecord).values({
       userId: me.id,
@@ -563,7 +585,7 @@ export async function saveBookkeepingRecord(
         invoiceId: created.id,
         invoiceNumber: data.invoiceNumber ?? "Invoice",
         customer: data.customer ?? "",
-        amount: data.amount ?? "0",
+        amount: data.paidAmount ?? data.amount ?? "0",
         paymentDate: data.issueDate || new Date().toISOString().slice(0, 10),
         method: data.paymentMethod,
         paymentAccountId: data.paymentAccountId ?? "",
@@ -956,11 +978,9 @@ export async function deleteBookkeepingRecord(kind: string, id: string): Promise
 
       await transaction.delete(bookkeepingRecord)
         .where(and(eq(bookkeepingRecord.id, record.id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, kind)));
-      // A deleted bill takes its payments with it, so they don't linger in banking and reports.
-      if (kind === "bills") {
-        await transaction.delete(bookkeepingRecord)
-          .where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "payments"), sql`${bookkeepingRecord.data}->>'billId' = ${record.id}`));
-      }
+      // A deleted bill or expense takes its payments with it, so they don't linger in banking and reports.
+      await transaction.delete(bookkeepingRecord)
+        .where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "payments"), sql`${bookkeepingRecord.data}->>${kind === "bills" ? "billId" : "expenseId"} = ${record.id}`));
     });
     revalidatePath("/app", "layout");
     return;
@@ -1004,10 +1024,10 @@ export async function deleteBookkeepingRecord(kind: string, id: string): Promise
     .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, kind)))
     .returning({ id: bookkeepingRecord.id });
   if (!deleted) throw new ActionError("We couldn’t find that record. Refresh and try again.");
-  // A deleted invoice takes its payments with it, so they don't linger in banking and reports.
-  if (kind === "invoices") {
+  // A deleted invoice or salary takes its payments with it, so they don't linger in banking and reports.
+  if (kind === "invoices" || kind === "payroll") {
     await db.delete(bookkeepingRecord)
-      .where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "payments"), sql`${bookkeepingRecord.data}->>'invoiceId' = ${id}`));
+      .where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "payments"), sql`${bookkeepingRecord.data}->>${kind === "invoices" ? "invoiceId" : "payrollId"} = ${id}`));
   }
   revalidatePath("/app", "layout");
 }
@@ -1124,12 +1144,21 @@ async function findPaymentAccount(userId: string, accountId: string) {
   return { account, method, name: account.data.name || account.data.code || "Account" };
 }
 
+/** The amount being paid: the whole remaining balance when left blank, otherwise a positive amount no larger than it. */
+function paymentAmount(input: string | undefined, remaining: number, label: string) {
+  if (input === undefined || input.trim() === "") return Math.round(remaining * 100) / 100;
+  const value = Number(input);
+  if (!Number.isFinite(value) || value <= 0) throw new ActionError("Enter an amount greater than zero.");
+  if (value > remaining + 0.005) throw new ActionError(`That is more than the ${remaining.toFixed(2)} still to pay on ${label}.`);
+  return Math.round(value * 100) / 100;
+}
+
 function isPaymentDate(value: string) {
   return /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(`${value}T00:00:00Z`));
 }
 
-/** Pays a bill's remaining balance from a Cash, Bank or Credit card account and records where it came from. */
-export async function recordBillPayment(id: string, paymentDate: string, accountId: string): Promise<void> {
+/** Pays all or part of a bill's remaining balance from a Cash, Bank or Credit card account and records where it came from. */
+export async function recordBillPayment(id: string, paymentDate: string, accountId: string, amountInput?: string): Promise<void> {
   const me = await requireUser();
   assertCanWrite(me, "bills");
   if (!isPaymentDate(paymentDate)) throw new ActionError("Choose a payment date.");
@@ -1146,17 +1175,18 @@ export async function recordBillPayment(id: string, paymentDate: string, account
     const paid = Number(bill.data.paidAmount) || 0;
     const due = (Number(bill.data.amount) || 0) - paid - (Number(bill.data.creditApplied) || 0);
     if (due <= 0.005) throw new ActionError(`${bill.data.billNumber || "This bill"} is already paid.`);
+    const amount = paymentAmount(amountInput, due, bill.data.billNumber || "this bill");
     await transaction
       .update(bookkeepingRecord)
       .set({
-        data: { ...bill.data, paidAmount: (paid + due).toFixed(2), status: "Paid", paymentMethod: method, paymentAccountId: account.id, paymentAccountName: name, paymentDate },
+        data: { ...bill.data, paidAmount: (paid + amount).toFixed(2), status: amount >= due - 0.005 ? "Paid" : "Partially Paid", paymentMethod: method, paymentAccountId: account.id, paymentAccountName: name, paymentDate },
         updatedAt: new Date(),
       })
       .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id)));
     await transaction.insert(bookkeepingRecord).values({
       userId: me.id,
       kind: "payments",
-      data: { billId: id, billNumber: bill.data.billNumber ?? "Bill", vendor: bill.data.vendor ?? "", amount: due.toFixed(2), paymentDate, method, paymentAccountId: account.id, paymentAccountName: name, direction: "out" },
+      data: { billId: id, billNumber: bill.data.billNumber ?? "Bill", vendor: bill.data.vendor ?? "", amount: amount.toFixed(2), paymentDate, method, paymentAccountId: account.id, paymentAccountName: name, direction: "out" },
     });
   });
   revalidatePath("/app", "layout");
@@ -1189,8 +1219,8 @@ export async function undoBillPayments(id: string): Promise<void> {
   revalidatePath("/app", "layout");
 }
 
-/** Records which Cash, Bank or Credit card account paid an expense. */
-export async function recordExpensePayment(id: string, paymentDate: string, accountId: string): Promise<void> {
+/** Records all or part of an expense as paid from a Cash, Bank or Credit card account. */
+export async function recordExpensePayment(id: string, paymentDate: string, accountId: string, amountInput?: string): Promise<void> {
   const me = await requireUser();
   assertCanWrite(me, "expenses");
   if (!isPaymentDate(paymentDate)) throw new ActionError("Choose a payment date.");
@@ -1202,15 +1232,24 @@ export async function recordExpensePayment(id: string, paymentDate: string, acco
     .limit(1);
   if (!expense) throw new ActionError("We couldn’t find that expense. Refresh and try again.");
   if (expense.data.status === "Paid") throw new ActionError(`${expense.data.description || "This expense"} is already paid.`);
+  const total = Number(expense.data.amount) || 0;
+  const paid = Number(expense.data.paidAmount) || 0;
+  const amount = paymentAmount(amountInput, total - paid, expense.data.referenceNumber || "this expense");
+  const fullyPaid = paid + amount >= total - 0.005;
   await db
     .update(bookkeepingRecord)
-    .set({ data: { ...expense.data, status: "Paid", paymentAccount: `${method} · ${name}`, paymentAccountId: account.id, paymentDate }, updatedAt: new Date() })
+    .set({ data: { ...expense.data, status: fullyPaid ? "Paid" : "Partially Paid", paidAmount: (paid + amount).toFixed(2), paymentAccount: `${method} · ${name}`, paymentAccountId: account.id, paymentDate }, updatedAt: new Date() })
     .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id)));
+  await db.insert(bookkeepingRecord).values({
+    userId: me.id,
+    kind: "payments",
+    data: { expenseId: id, reference: expense.data.referenceNumber ?? "", vendor: expense.data.payee ?? "", amount: amount.toFixed(2), paymentDate, method, paymentAccountId: account.id, paymentAccountName: name, direction: "out" },
+  });
   revalidatePath("/app", "layout");
 }
 
-/** Records a salary as paid from a Cash, Bank or Credit card account. */
-export async function recordPayrollPayment(id: string, paymentDate: string, accountId: string): Promise<void> {
+/** Records all or part of a salary as paid from a Cash, Bank or Credit card account. */
+export async function recordPayrollPayment(id: string, paymentDate: string, accountId: string, amountInput?: string): Promise<void> {
   const me = await requireUser();
   assertCanWrite(me, "payroll");
   if (!isPaymentDate(paymentDate)) throw new ActionError("Choose a payment date.");
@@ -1222,12 +1261,21 @@ export async function recordPayrollPayment(id: string, paymentDate: string, acco
     .limit(1);
   if (!entry) throw new ActionError("We couldn’t find that payroll entry. Refresh and try again.");
   if (entry.data.status === "Paid") throw new ActionError(`${entry.data.employeeName || "This salary"} is already paid.`);
+  const payable = Number(entry.data.payableSalary) || 0;
+  const paid = Number(entry.data.paidAmount) || 0;
+  const amount = paymentAmount(amountInput, payable - paid, `${entry.data.employeeName || "this"}'s salary`);
+  const fullyPaid = paid + amount >= payable - 0.005;
   await db
     .update(bookkeepingRecord)
-    .set({ data: { ...entry.data, status: "Paid", paidDate: paymentDate, paymentAccountId: account.id, paymentAccountName: name, paymentMethod: method }, updatedAt: new Date() })
+    .set({ data: { ...entry.data, status: fullyPaid ? "Paid" : "Partially Paid", paidAmount: (paid + amount).toFixed(2), paidDate: paymentDate, paymentAccountId: account.id, paymentAccountName: name, paymentMethod: method }, updatedAt: new Date() })
     .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id)));
-  // The salary's loan deduction pays down the employee's HR loans.
-  await applyLoanRepayment(me.id, entry.data, 1);
+  await db.insert(bookkeepingRecord).values({
+    userId: me.id,
+    kind: "payments",
+    data: { payrollId: id, reference: entry.data.reference ?? "", employee: entry.data.employeeName ?? "", amount: amount.toFixed(2), paymentDate, method, paymentAccountId: account.id, paymentAccountName: name, direction: "out" },
+  });
+  // The salary's loan deduction pays down the employee's HR loans once the salary is fully paid.
+  if (fullyPaid) await applyLoanRepayment(me.id, entry.data, 1);
   revalidatePath("/app", "layout");
 }
 
@@ -1242,8 +1290,11 @@ export async function undoPayrollPayment(id: string): Promise<void> {
     .limit(1);
   if (!entry) throw new ActionError("We couldn’t find that payroll entry. Refresh and try again.");
   await db
+    .delete(bookkeepingRecord)
+    .where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "payments"), sql`${bookkeepingRecord.data}->>'payrollId' = ${id}`));
+  await db
     .update(bookkeepingRecord)
-    .set({ data: { ...entry.data, status: "Unpaid", paidDate: "" }, updatedAt: new Date() })
+    .set({ data: { ...entry.data, status: "Unpaid", paidAmount: "0", paidDate: "" }, updatedAt: new Date() })
     .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id)));
   if (entry.data.status === "Paid") await applyLoanRepayment(me.id, entry.data, -1);
   revalidatePath("/app", "layout");
@@ -1260,8 +1311,11 @@ export async function undoExpensePayment(id: string): Promise<void> {
     .limit(1);
   if (!expense) throw new ActionError("We couldn’t find that expense. Refresh and try again.");
   await db
+    .delete(bookkeepingRecord)
+    .where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "payments"), sql`${bookkeepingRecord.data}->>'expenseId' = ${id}`));
+  await db
     .update(bookkeepingRecord)
-    .set({ data: { ...expense.data, status: "Unpaid", paymentAccount: "", paymentAccountId: "", paymentDate: "" }, updatedAt: new Date() })
+    .set({ data: { ...expense.data, status: "Unpaid", paidAmount: "0", paymentAccount: "", paymentAccountId: "", paymentDate: "" }, updatedAt: new Date() })
     .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id)));
   revalidatePath("/app", "layout");
 }
