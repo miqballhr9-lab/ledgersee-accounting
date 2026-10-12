@@ -4,7 +4,8 @@ import { ArrowRightLeft, BadgeCheck, Ban, Check, CircleDollarSign, Copy, Ellipsi
 
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { StatusBadge } from "@/components/crm/crm-shared";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import type { ModuleDefinition } from "@/lib/bookkeeping-config";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
@@ -19,8 +20,10 @@ interface RecordTableProps {
   /** Header names that replace the usual ones for this list. */
   columnLabels?: Record<string, string>;
   onEdit: (record: BookkeepingRecord) => void;
-  /** When true, clicking anywhere on a row (outside its buttons and checkbox) opens it with onEdit. */
+  /** When true, clicking anywhere on a row (outside its buttons and checkbox) opens it with onOpen, or onEdit without one. */
   openOnRowClick?: boolean;
+  /** Opens the record's detail panel. */
+  onOpen?: (record: BookkeepingRecord) => void;
   onDelete: (record: BookkeepingRecord) => void;
   onAction: (kind: RecordActionKind, record: BookkeepingRecord) => void;
   /** When given, each row gets a checkbox for actions on several records at once. */
@@ -33,6 +36,8 @@ interface RecordTableProps {
 
 const columnLabels: Record<string, string> = {
   refundAccountName: "Refund to",
+  vendor: "Supplier",
+  cnic: "CNIC",
   paymentMode: "Payment method",
   name: "Name",
   company: "Company",
@@ -117,14 +122,7 @@ function displayValue(record: BookkeepingRecord, key: string) {
         </span>
       );
     }
-    const tone = value === "Paid" || value === "Accepted" || value === "Applied" || value === "Converted"
-      ? "bg-accent text-accent-foreground ring-border"
-      : value === "Overdue" || value === "Declined" || value === "Cancelled"
-        ? "bg-destructive/10 text-destructive ring-destructive/20"
-        : value === "Draft" || value === "Open" || value === "Partially Paid"
-          ? "bg-secondary text-secondary-foreground ring-border"
-          : "bg-muted text-muted-foreground ring-border";
-    return <span className={`inline-flex max-w-full truncate rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ring-inset ${tone}`}>{value}</span>;
+    return <StatusBadge value={value} />;
   }
   if (key === "matched" || key === "enabled" || key === "canApprove") {
     const active = value === "true";
@@ -147,81 +145,71 @@ function displayValue(record: BookkeepingRecord, key: string) {
   return <span className="block max-w-[220px] truncate" title={value}>{value}</span>;
 }
 
-function rowActions(
+export interface RecordMenuAction {
+  key: string;
+  label: string;
+  icon: typeof ArrowRightLeft;
+  run: () => void;
+  /** Shown as a button on the detail panel, not only in the menu. */
+  primary?: boolean;
+  destructive?: boolean;
+}
+
+/** Everything that can be done to one record, in the order the ⋯ menu and the detail panel show it. */
+export function recordActions(
   module: ModuleDefinition,
   record: BookkeepingRecord,
   onAction: RecordTableProps["onAction"],
   row: { onEdit: () => void; onDelete: () => void },
-) {
-  const actions: { kind: RecordActionKind; label: string; icon: typeof ArrowRightLeft }[] = [];
+): RecordMenuAction[] {
+  const actions: RecordMenuAction[] = [];
+  const add = (kind: RecordActionKind, label: string, icon: typeof ArrowRightLeft, primary = false) => actions.push({ key: kind, label, icon, primary, run: () => onAction(kind, record) });
   const purchaseStatus = record.data.status === "Sent" ? "RFQ Sent" : record.data.status || "Draft";
   const hasAccountingRecord = Boolean(record.data.convertedRecordId || record.data.convertedKind);
   const canCancelPurchaseOrder = module.kind === "purchase-orders" && ["Draft", "RFQ Sent", "Purchase Order"].includes(purchaseStatus) && !hasAccountingRecord;
   const canConvertPurchaseOrder = module.kind === "purchase-orders" && ["Purchase Order", "Received"].includes(purchaseStatus) && !hasAccountingRecord;
   if (module.kind === "purchase-orders") {
-    const status = record.data.status === "Sent" ? "RFQ Sent" : record.data.status || "Draft";
-    if (status === "Draft" || status === "RFQ Sent") actions.push({ kind: "confirm-order", label: "Confirm", icon: BadgeCheck });
-    else if (status === "Purchase Order") actions.push({ kind: "receive-order", label: "Receive", icon: PackageCheck });
-    else if (status === "Received" && canConvertPurchaseOrder) actions.push({ kind: "convert", label: "Create bill", icon: ArrowRightLeft });
+    if (purchaseStatus === "Draft" || purchaseStatus === "RFQ Sent") add("confirm-order", "Confirm order", BadgeCheck, true);
+    else if (purchaseStatus === "Purchase Order") add("receive-order", "Receive products", PackageCheck, true);
+    else if (purchaseStatus === "Received" && canConvertPurchaseOrder) add("convert", "Create bill", ArrowRightLeft, true);
+    if (canConvertPurchaseOrder && purchaseStatus === "Purchase Order") add("convert", "Create bill", ArrowRightLeft);
+    if (canConvertPurchaseOrder) add("convert-expense", "Record as expense", CircleDollarSign);
   }
-  if (module.kind === "invoices") {
-    if (!["Paid", "Cancelled"].includes(record.data.status ?? "")) actions.push({ kind: "payment", label: "Record payment", icon: CircleDollarSign });
-    actions.push({ kind: "send", label: "Send invoice", icon: Mail });
+  if (module.kind === "invoices" && !["Paid", "Cancelled"].includes(record.data.status ?? "")) add("payment", "Record payment", CircleDollarSign, true);
+  if (module.kind === "invoices") add("send", "Send invoice", Mail, true);
+  if (["estimates", "sales-orders", "credit-notes"].includes(module.kind)) add("send", `Send ${module.label.toLowerCase()}`, Mail, true);
+  if (module.kind === "bills") add("mark-paid", "Mark paid", Check, true);
+  if (module.kind === "credit-notes" && !["Applied", "Refunded"].includes(record.data.status ?? "")) add("apply-credit", "Apply credit", BadgeCheck, true);
+  if (module.kind === "recurring-invoices") add("generate", "Generate invoice", Play, true);
+  if (module.kind === "transactions") add("match", record.data.matched === "true" ? "Mark unmatched" : "Match transaction", Check, true);
+  actions.push({ key: "edit", label: "Edit", icon: Pencil, run: row.onEdit, primary: true });
+  if (["invoices", "estimates", "sales-orders", "credit-notes"].includes(module.kind)) {
+    add("duplicate", `Copy ${module.label.toLowerCase()}`, Copy);
+    add("share", "Copy share link", Link2);
+    add("print", "Print or save PDF", Printer);
+    if (module.kind === "invoices" && Number(record.data.paidAmount) > 0) add("undo-payment", "Undo payment", Undo2);
   }
-  if (["estimates", "sales-orders", "credit-notes"].includes(module.kind)) actions.push({ kind: "send", label: `Send ${module.label.toLowerCase()}`, icon: Mail });
-  if (module.kind === "bills") actions.push({ kind: "mark-paid", label: "Mark paid", icon: Check });
-  if (module.kind === "credit-notes" && !["Applied", "Refunded"].includes(record.data.status ?? "")) actions.push({ kind: "apply-credit", label: "Apply credit", icon: BadgeCheck });
-  if (module.kind === "recurring-invoices") actions.push({ kind: "generate", label: "Generate invoice", icon: Play });
-  if (module.kind === "transactions") actions.push({ kind: "match", label: record.data.matched === "true" ? "Mark unmatched" : "Match transaction", icon: Check });
+  if (canCancelPurchaseOrder) actions.push({ key: "cancel-order", label: "Cancel purchase order", icon: Ban, destructive: true, run: () => onAction("cancel-order", record) });
+  actions.push({ key: "delete", label: "Delete", icon: Trash2, destructive: true, run: row.onDelete });
+  return actions;
+}
 
+function RowMenu({ label, actions }: { label: string; actions: RecordMenuAction[] }) {
+  const regular = actions.filter((action) => !action.destructive);
+  const destructive = actions.filter((action) => action.destructive);
   return (
-    <>
-      {actions.map(({ kind, label, icon: Icon }) => (
-        <Button key={kind} type="button" variant="outline" size="sm" className="h-7 gap-1.5 px-2 text-[11px]" onClick={() => onAction(kind, record)}>
-          <Icon size={13} />{label}
-        </Button>
-      ))}
-      {module.kind === "purchase-orders" ? (
-        <DropdownMenu>
-          <DropdownMenuTrigger render={<Button type="button" variant="ghost" size="icon-sm" aria-label={`More actions for ${record.data.poNumber || "purchase order"}`}><Ellipsis size={15} /></Button>} />
-          <DropdownMenuContent align="end" className="min-w-44">
-            <DropdownMenuItem onClick={row.onEdit}><Pencil size={14} />Edit</DropdownMenuItem>
-            {canConvertPurchaseOrder ? (
-              <>
-                {purchaseStatus === "Purchase Order" ? <DropdownMenuItem onClick={() => onAction("convert", record)}><ArrowRightLeft size={14} />Create bill</DropdownMenuItem> : null}
-                <DropdownMenuItem onClick={() => onAction("convert-expense", record)}><CircleDollarSign size={14} />Record as expense</DropdownMenuItem>
-              </>
-            ) : null}
-            {canCancelPurchaseOrder ? <DropdownMenuItem className="text-destructive focus:text-destructive" onClick={() => onAction("cancel-order", record)}><Ban size={14} />Cancel purchase order</DropdownMenuItem> : null}
-            <DropdownMenuItem variant="destructive" onClick={row.onDelete}><Trash2 size={14} />Delete</DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      ) : module.kind === "supplier-credits" ? (
-        <DropdownMenu>
-          <DropdownMenuTrigger render={<Button type="button" variant="ghost" size="icon-sm" aria-label={`More actions for ${record.data.creditNumber || "credit note"}`}><Ellipsis size={15} /></Button>} />
-          <DropdownMenuContent align="end" className="min-w-40">
-            <DropdownMenuItem onClick={row.onEdit}><Pencil size={14} />Edit</DropdownMenuItem>
-            <DropdownMenuItem variant="destructive" onClick={row.onDelete}><Trash2 size={14} />Delete</DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      ) : ["invoices", "estimates", "sales-orders", "credit-notes"].includes(module.kind) ? (
-        <DropdownMenu>
-          <DropdownMenuTrigger render={<Button type="button" variant="outline" size="icon-sm" aria-label={`More ${module.label.toLowerCase()} actions`}><Ellipsis size={15} /></Button>} />
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem onClick={() => onAction("duplicate", record)}><Copy size={14} />Copy {module.label.toLowerCase()}</DropdownMenuItem>
-            <DropdownMenuItem onClick={() => onAction("share", record)}><Link2 size={14} />Copy share link</DropdownMenuItem>
-            <DropdownMenuItem onClick={() => onAction("print", record)}><Printer size={14} />Print or save PDF</DropdownMenuItem>
-            {module.kind === "invoices" && Number(record.data.paidAmount) > 0 ? (
-              <DropdownMenuItem onClick={() => onAction("undo-payment", record)}><Undo2 size={14} />Undo payment</DropdownMenuItem>
-            ) : null}
-          </DropdownMenuContent>
-        </DropdownMenu>
-      ) : null}
-    </>
+    <DropdownMenu>
+      <DropdownMenuTrigger render={<Button type="button" variant="ghost" size="icon-sm" aria-label={`More actions for ${label}`}><Ellipsis size={16} /></Button>} />
+      <DropdownMenuContent align="end" className="min-w-48">
+        {regular.map((action) => <DropdownMenuItem key={`${action.key}-${action.label}`} onClick={action.run}><action.icon size={14} />{action.label}</DropdownMenuItem>)}
+        {regular.length && destructive.length ? <DropdownMenuSeparator /> : null}
+        {destructive.map((action) => <DropdownMenuItem key={action.key} variant="destructive" onClick={action.run}><action.icon size={14} />{action.label}</DropdownMenuItem>)}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
-export default function RecordTable({ module, records, columns = module.columns, columnLabels: headerLabels, onEdit, openOnRowClick = false, onDelete, onAction, selection }: RecordTableProps) {
+export default function RecordTable({ module, records, columns = module.columns, columnLabels: headerLabels, onEdit, openOnRowClick = false, onOpen, onDelete, onAction, selection }: RecordTableProps) {
   const allSelected = Boolean(selection) && records.length > 0 && records.every((record) => selection?.selectedIds.has(record.id));
   const someSelected = Boolean(selection) && records.some((record) => selection?.selectedIds.has(record.id));
   if (records.length === 0) {
@@ -250,8 +238,8 @@ export default function RecordTable({ module, records, columns = module.columns,
                 />
               </TableHead>
             ) : null}
-            {columns.map((key) => <TableHead key={key} className="whitespace-nowrap text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">{headerLabels?.[key] ?? columnLabels[key] ?? key}</TableHead>)}
-            <TableHead className="w-[170px] text-right text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">Actions</TableHead>
+            {columns.map((key) => <TableHead key={key} className="whitespace-nowrap px-4 text-xs font-medium text-muted-foreground">{headerLabels?.[key] ?? columnLabels[key] ?? key}</TableHead>)}
+            <TableHead className="w-12"><span className="sr-only">Actions</span></TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -263,7 +251,7 @@ export default function RecordTable({ module, records, columns = module.columns,
                 data-state={selection?.selectedIds.has(record.id) ? "selected" : undefined}
                 onClick={openOnRowClick ? (event) => {
                   if ((event.target as HTMLElement).closest("button, a, input, [role=checkbox], [role=menuitem]")) return;
-                  onEdit(record);
+                  (onOpen ?? onEdit)(record);
                 } : undefined}
               >
                 {selection ? (
@@ -275,17 +263,13 @@ export default function RecordTable({ module, records, columns = module.columns,
                     />
                   </TableCell>
                 ) : null}
-                {columns.map((key) => (
-                  <TableCell key={key} className={`max-w-[240px] py-3 text-[13px] ${key === "address" ? "whitespace-normal" : "whitespace-nowrap"}`}>
-                    {key === module.titleKey ? <span className="font-medium text-foreground">{displayValue(record, key)}</span> : displayValue(record, key)}
+                {columns.map((key, index) => (
+                  <TableCell key={key} className={`max-w-[240px] px-4 py-3 text-sm ${key === "address" ? "whitespace-normal" : "whitespace-nowrap"}`}>
+                    {key === module.titleKey || index === 0 ? <span className="font-medium text-primary">{displayValue(record, key)}</span> : displayValue(record, key)}
                   </TableCell>
                 ))}
-                <TableCell className="whitespace-nowrap text-right">
-                  <div className="flex items-center justify-end gap-1.5">
-                    {rowActions(module, record, onAction, { onEdit: () => onEdit(record), onDelete: () => onDelete(record) })}
-                    {!["purchase-orders", "supplier-credits"].includes(module.kind) ? <Button type="button" variant="ghost" size="icon-sm" aria-label={`Edit ${module.label.toLowerCase()}`} onClick={() => onEdit(record)}><Pencil size={14} /></Button> : null}
-                    {!["purchase-orders", "supplier-credits"].includes(module.kind) ? <Button type="button" variant="ghost" size="icon-sm" aria-label={`Delete ${module.label.toLowerCase()}`} className="text-muted-foreground hover:text-destructive" onClick={() => onDelete(record)}><Trash2 size={14} /></Button> : null}
-                  </div>
+                <TableCell className="w-12 px-2 text-right">
+                  <RowMenu label={record.data[module.titleKey] || module.label.toLowerCase()} actions={recordActions(module, record, onAction, { onEdit: () => onEdit(record), onDelete: () => onDelete(record) })} />
                 </TableCell>
               </TableRow>
             );

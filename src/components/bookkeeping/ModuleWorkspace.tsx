@@ -33,7 +33,7 @@ import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMe
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { type ModuleDefinition } from "@/lib/bookkeeping-config";
+import { navigationGroups, type ModuleDefinition } from "@/lib/bookkeeping-config";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
 import { formatCustomerAddress } from "@/lib/customer-utils";
 import { paymentAccountLabel, paymentAccountType } from "@/lib/payment-accounts";
@@ -44,7 +44,8 @@ import RecordEditor from "@/components/bookkeeping/RecordEditor";
 import NoAccountsNotice from "@/components/bookkeeping/NoAccountsNotice";
 import PaymentDialog from "@/components/bookkeeping/PaymentDialog";
 import { useNewRecordParam } from "@/hooks/use-new-record-param";
-import RecordTable, { type RecordActionKind } from "@/components/bookkeeping/RecordTable";
+import RecordTable, { recordActions, type RecordActionKind } from "@/components/bookkeeping/RecordTable";
+import RecordDetailPanel from "@/components/bookkeeping/RecordDetailPanel";
 
 interface ModuleWorkspaceProps {
   module: ModuleDefinition;
@@ -335,7 +336,86 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
   const visibleColumns = listPreferences?.columns ?? module.columns;
   const listColumnLabels = customization ? Object.fromEntries(customization.options.map((option) => [option.key, option.label])) : undefined;
   const canExport = module.kind !== "settings";
-  const currency = records.find((record) => record.data.currency)?.data.currency || "USD";
+  const currency = records.find((record) => record.data.currency)?.data.currency || defaultCurrency || "USD";
+  const [detailId, setDetailId] = useState<string | null>(null);
+  const detailRecord = detailId ? records.find((record) => record.id === detailId) ?? null : null;
+  const groupLabel = navigationGroups.find((group) => group.items.some((item) => item.slug === module.slug))?.label ?? "Books";
+  const summaryCards = useMemo(() => {
+    const money = (value: number) => formatCurrency(value, currency);
+    const total = (list: BookkeepingRecord[]) => list.reduce((sum, record) => sum + Number(record.data.amount || 0), 0);
+    const balanceOf = (record: BookkeepingRecord) => Math.max(0, Number(record.data.amount || 0) - Number(record.data.paidAmount || 0) - Number(record.data.creditApplied || 0));
+    const thisMonth = new Date().toISOString().slice(0, 7);
+    const withStatus = (...statuses: string[]) => records.filter((record) => statuses.includes(record.data.status ?? ""));
+    const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+    type Card = { label: string; value: string; note?: string; tone?: "bad" };
+    if (module.kind === "invoices" || module.kind === "bills") {
+      const open = records.filter((record) => !["Paid", "Cancelled", "Draft"].includes(record.data.status ?? "") && balanceOf(record) > 0);
+      const overdue = records.filter((record) => record.data.status === "Overdue" || (record.data.dueDate && record.data.dueDate < new Date().toISOString().slice(0, 10) && open.includes(record)));
+      const paidThisMonth = records.filter((record) => record.data.status === "Paid" && (record.data.paidDate || record.data.issueDate || record.data.billDate || "").startsWith(thisMonth));
+      return [
+        { label: module.kind === "invoices" ? "Open balance" : "Outstanding", value: money(open.reduce((sum, record) => sum + balanceOf(record), 0)), note: count(open.length, "unpaid", "unpaid") },
+        { label: "Overdue", value: money(overdue.reduce((sum, record) => sum + balanceOf(record), 0)), note: count(overdue.length, module.label.toLowerCase(), module.plural.toLowerCase()), tone: overdue.length ? "bad" : undefined },
+        { label: "Paid this month", value: money(paidThisMonth.reduce((sum, record) => sum + Number(record.data.paidAmount || record.data.amount || 0), 0)), note: count(paidThisMonth.length, module.label.toLowerCase(), module.plural.toLowerCase()) },
+        { label: "Drafts", value: String(withStatus("Draft").length), note: "Not sent yet" },
+      ] satisfies Card[];
+    }
+    if (module.kind === "estimates") {
+      const open = withStatus("Draft", "Sent");
+      return [
+        { label: "Open quotes", value: money(total(open)), note: count(open.length, "estimate", "estimates") },
+        { label: "Accepted", value: money(total(withStatus("Accepted"))), note: count(withStatus("Accepted").length, "estimate", "estimates") },
+        { label: "Converted", value: String(withStatus("Converted").length), note: "Turned into invoices or orders" },
+        { label: "Declined", value: String(withStatus("Declined").length), tone: withStatus("Declined").length ? "bad" : undefined },
+      ] satisfies Card[];
+    }
+    if (module.kind === "sales-orders" || module.kind === "purchase-orders") {
+      const open = records.filter((record) => !["Fulfilled", "Converted", "Cancelled", "Received", "Billed"].includes(record.data.status ?? "") && !record.data.convertedKind);
+      return [
+        { label: "Open orders", value: money(total(open)), note: count(open.length, "order", "orders") },
+        { label: "This month", value: money(total(records.filter((record) => (record.data.date ?? "").startsWith(thisMonth)))) },
+        { label: module.kind === "sales-orders" ? "Converted" : "Billed", value: String(records.filter((record) => record.data.status === "Converted" || record.data.convertedKind).length) },
+        { label: "All orders", value: String(records.length) },
+      ] satisfies Card[];
+    }
+    if (module.kind === "credit-notes" || module.kind === "supplier-credits") {
+      const open = records.filter((record) => !["Applied", "Refunded"].includes(record.data.status ?? ""));
+      return [
+        { label: "Not yet applied", value: money(total(open)), note: count(open.length, "credit note", "credit notes") },
+        { label: "Applied", value: money(total(withStatus("Applied"))) },
+        { label: "Refunded", value: money(total(withStatus("Refunded"))) },
+        { label: "All credit notes", value: String(records.length) },
+      ] satisfies Card[];
+    }
+    if (module.kind === "customers") {
+      const withEmail = records.filter((record) => record.data.email).length;
+      return [
+        { label: "Customers", value: String(records.length) },
+        { label: "Businesses", value: String(records.filter((record) => record.data.customerType === "Business").length) },
+        { label: "With email", value: String(withEmail), note: "Can be emailed invoices" },
+        { label: "Opening balances", value: money(records.reduce((sum, record) => sum + Number(record.data.openingBalance || 0), 0)) },
+      ] satisfies Card[];
+    }
+    if (module.kind === "recurring-invoices") {
+      const active = withStatus("Active");
+      return [
+        { label: "Active schedules", value: String(active.length) },
+        { label: "Billed each cycle", value: money(total(active)) },
+        { label: "Due now", value: String(active.filter((record) => record.data.nextDate && record.data.nextDate <= new Date().toISOString().slice(0, 10)).length) },
+        { label: "Paused", value: String(withStatus("Paused").length) },
+      ] satisfies Card[];
+    }
+    if (module.kind === "transactions") {
+      const deposits = records.filter((record) => record.data.type === "Deposit");
+      const withdrawals = records.filter((record) => record.data.type === "Withdrawal");
+      return [
+        { label: "Money in", value: money(total(deposits)), note: count(deposits.length, "deposit", "deposits") },
+        { label: "Money out", value: money(total(withdrawals)), note: count(withdrawals.length, "withdrawal", "withdrawals") },
+        { label: "To match", value: String(records.filter((record) => record.data.matched !== "true").length), tone: records.some((record) => record.data.matched !== "true") ? "bad" : undefined },
+        { label: "Matched", value: String(records.filter((record) => record.data.matched === "true").length) },
+      ] satisfies Card[];
+    }
+    return [] as Card[];
+  }, [module.kind, module.label, module.plural, records, currency]);
 
   useEffect(() => setPage(1), [search, filter]);
 
@@ -747,7 +827,7 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
     <div className="mx-auto w-full max-w-[1440px] px-4 py-6 sm:px-7 sm:py-8">
       <section className="flex flex-wrap items-end justify-between gap-4">
         <div className="min-w-0">
-          <p className="text-xs font-medium uppercase tracking-[0.12em] text-primary">Books / {module.plural}</p>
+          <p className="text-xs font-medium uppercase tracking-[0.12em] text-primary">{groupLabel} / {module.plural}</p>
           <h1 className="mt-1 text-[26px] font-semibold tracking-tight sm:text-3xl">{module.plural}</h1>
           <p className="mt-1.5 text-sm text-muted-foreground">{module.description}</p>
         </div>
@@ -758,16 +838,13 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
         </div>
       </section>
 
-      {module.kind === "invoices" || module.kind === "bills" ? (
-        <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-3">
-          {[
-            { label: module.kind === "invoices" ? "Open balance" : "Outstanding", value: records.filter((record) => !["Paid", "Cancelled"].includes(record.data.status ?? "")).reduce((sum, record) => sum + Math.max(0, Number(record.data.amount || 0) - Number(record.data.paidAmount || 0) - Number(record.data.creditApplied || 0)), 0) },
-              { label: "Paid", value: records.filter((record) => record.data.status === "Paid").reduce((sum, record) => sum + Number(record.data.paidAmount || record.data.amount || 0), 0) },
-            { label: "Documents", value: records.length, count: true },
-          ].map((item) => (
-            <div key={item.label} className="rounded-lg border border-border bg-card px-4 py-3.5">
-              <p className="text-xs font-medium text-muted-foreground">{item.label}</p>
-              <p className="mt-1 text-xl font-semibold tracking-tight tabular-nums">{item.count ? item.value : formatCurrency(item.value, currency)}</p>
+      {summaryCards.length ? (
+        <div className="mt-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
+          {summaryCards.map((card) => (
+            <div key={card.label} className="rounded-lg border border-border bg-card px-4 py-3.5">
+              <p className="text-xs text-muted-foreground">{card.label}</p>
+              <p className={`mt-1.5 text-xl font-semibold tracking-tight tabular-nums ${card.tone === "bad" ? "text-destructive" : ""}`}>{card.value}</p>
+              {card.note ? <p className="mt-0.5 text-xs text-muted-foreground">{card.note}</p> : null}
             </div>
           ))}
         </div>
@@ -776,13 +853,8 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
 
       {actionMessage ? <p role="status" className="mt-4 rounded-md border border-border bg-card px-3 py-2 text-sm text-muted-foreground">{actionMessage}</p> : null}
 
-      <section className="mt-6 overflow-hidden rounded-lg border border-border bg-card">
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3.5 sm:px-5">
-          <div>
-            <p className="text-sm font-semibold">All {module.plural.toLowerCase()}</p>
-            <p className="mt-0.5 text-xs text-muted-foreground">{filteredRecords.length} {filteredRecords.length === 1 ? "record" : "records"}</p>
-          </div>
-          <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
+      <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex w-full flex-wrap items-center gap-2">
             <div className="relative min-w-0 basis-full sm:basis-auto sm:w-60 sm:flex-none">
               <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
               <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={`Search ${module.plural.toLowerCase()}`} className="pl-9" aria-label={`Search ${module.plural}`} />
@@ -897,15 +969,17 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
               </div>
             ) : null}
           </div>
-        </div>
+      </div>
 
+      <section className="mt-3 overflow-hidden rounded-lg border border-border bg-card">
         <RecordTable
           module={module}
           records={tableRecords}
           columns={visibleColumns}
           columnLabels={listColumnLabels}
           onEdit={openEditRecord}
-          openOnRowClick={module.kind === "journals"}
+          openOnRowClick={module.kind !== "settings"}
+          onOpen={module.kind === "journals" ? undefined : (record) => setDetailId(record.id)}
           onDelete={(record) => void handleDelete(record)}
           onAction={(kind, record) => void handleAction(kind, record)}
           selection={supportsBulkActions ? {
@@ -920,7 +994,7 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
         />
 
         <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border px-4 py-3 sm:px-5">
-          <p className="text-xs text-muted-foreground">Showing {filteredRecords.length ? (page - 1) * pageSize + 1 : 0}–{Math.min(page * pageSize, filteredRecords.length)} of {filteredRecords.length}</p>
+          <p className="text-xs text-muted-foreground">Showing {filteredRecords.length ? (page - 1) * pageSize + 1 : 0}–{Math.min(page * pageSize, filteredRecords.length)} of {filteredRecords.length} {filteredRecords.length === 1 ? module.label.toLowerCase() : module.plural.toLowerCase()}{selectedRecords.length ? ` · ${selectedRecords.length} selected` : ""}</p>
           <div className="flex items-center gap-2">
             <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage((current) => Math.max(1, current - 1))}>Previous</Button>
             <span className="min-w-14 text-center text-xs tabular-nums text-muted-foreground">{page} / {pageCount}</span>
@@ -928,6 +1002,17 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
           </div>
         </div>
       </section>
+
+      <RecordDetailPanel
+        module={module}
+        record={detailRecord}
+        currency={currency}
+        onClose={() => setDetailId(null)}
+        actions={detailRecord ? recordActions(module, detailRecord, (kind, record) => void handleAction(kind, record), {
+          onEdit: () => { setDetailId(null); openEditRecord(detailRecord); },
+          onDelete: () => { setDetailId(null); void handleDelete(detailRecord); },
+        }) : []}
+      />
 
       {module.kind === "journals" ? (
         <JournalEntryEditor

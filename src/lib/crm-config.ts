@@ -382,10 +382,10 @@ export function relatedHref(type: string, id: string) {
 /** Badge colour for a status or stage, so the same word always looks the same. */
 export function statusTone(value: string | undefined): "good" | "bad" | "warn" | "info" | "neutral" {
   if (!value) return "neutral";
-  if (["Closed Won", "Completed", "Converted", "Published", "Complete", "Closed", "Active", "Pre-Qualified", "Contacted", "Approved", "Present", "Hired", "Paid", "Repaid", "Done", "Open"].includes(value)) return "good";
-  if (["Closed Lost", "Closed Lost to Competition", "Junk Lead", "Lost Lead", "Not Qualified", "Cancelled", "No answer", "Escalated", "Inactive", "Rejected", "Absent", "Withdrawn"].includes(value)) return "bad";
-  if (["Negotiation/Review", "Proposal/Price Quote", "In Progress", "Waiting for input", "On Hold", "Scheduled", "Planning", "Reviewed", "Attempted to Contact", "Contact in Future", "Pending", "Late", "Half day", "Interview", "Offer", "Submitted", "Requested", "On hold"].includes(value)) return "warn";
-  if (["New", "Not Started", "Not Contacted", "Qualification", "Draft", "Screening", "On leave", "Holiday", "Applied"].includes(value)) return "info";
+  if (["Closed Won", "Completed", "Converted", "Published", "Complete", "Closed", "Active", "Pre-Qualified", "Contacted", "Approved", "Present", "Hired", "Paid", "Repaid", "Done", "Open", "Accepted", "Applied", "Refunded", "Received", "Fulfilled", "Enabled"].includes(value)) return "good";
+  if (["Closed Lost", "Closed Lost to Competition", "Junk Lead", "Lost Lead", "Not Qualified", "Cancelled", "No answer", "Escalated", "Inactive", "Rejected", "Absent", "Withdrawn", "Overdue", "Declined", "Void"].includes(value)) return "bad";
+  if (["Negotiation/Review", "Proposal/Price Quote", "In Progress", "Waiting for input", "On Hold", "Scheduled", "Planning", "Reviewed", "Attempted to Contact", "Contact in Future", "Pending", "Late", "Half day", "Interview", "Offer", "Submitted", "Requested", "On hold", "Sent", "RFQ Sent", "Unpaid"].includes(value)) return "warn";
+  if (["New", "Not Started", "Not Contacted", "Qualification", "Draft", "Screening", "On leave", "Holiday", "Partially Paid", "Purchase Order", "Confirmed"].includes(value)) return "info";
   return "neutral";
 }
 
