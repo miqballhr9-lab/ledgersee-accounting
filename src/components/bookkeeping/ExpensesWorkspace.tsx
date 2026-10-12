@@ -425,7 +425,7 @@ export default function ExpensesWorkspace({ expenses: initialExpenses, bills: in
                   />
                 </TableHead>
                 {["Date", "Type", "No. / Description", "Payee", "Category", "Payment account", "Amount", "Status", ""].map((heading) => (
-                  <TableHead key={heading || "actions"} className="whitespace-nowrap text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">{heading}</TableHead>
+                  <TableHead key={heading || "actions"} className="whitespace-nowrap text-xs font-medium text-muted-foreground">{heading}</TableHead>
                 ))}
               </TableRow>
             </TableHeader>

@@ -380,7 +380,7 @@ export default function ReportsWorkspace({ records, asOfDate }: ReportsWorkspace
             {report.rows.length ? (
               <div className="w-full overflow-x-auto">
                 <Table>
-                  <TableHeader><TableRow className="bg-muted/40 hover:bg-muted/40">{report.columns.map((column) => <TableHead key={column} className={`whitespace-nowrap text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground ${column === report.columns[0] ? "" : "text-right"}`}>{column}</TableHead>)}</TableRow></TableHeader>
+                  <TableHeader><TableRow className="bg-muted/40 hover:bg-muted/40">{report.columns.map((column) => <TableHead key={column} className={`whitespace-nowrap text-xs font-medium text-muted-foreground ${column === report.columns[0] ? "" : "text-right"}`}>{column}</TableHead>)}</TableRow></TableHeader>
                   <TableBody>
                     {report.rows.map((row, rowIndex) => (
                       <TableRow key={`${String(row[report.columns[0]])}-${rowIndex}`}>

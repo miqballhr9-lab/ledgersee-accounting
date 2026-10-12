@@ -9,12 +9,15 @@ import { deleteBookkeepingRecord, recordBillPayment, undoBillPayments } from "@/
 import PaymentDialog from "@/components/bookkeeping/PaymentDialog";
 import { paymentAccountType } from "@/lib/payment-accounts";
 import RecordEditor from "@/components/bookkeeping/RecordEditor";
+import RecordDetailPanel from "@/components/bookkeeping/RecordDetailPanel";
+import type { RecordMenuAction } from "@/components/bookkeeping/RecordTable";
+import { StatusBadge } from "@/components/crm/crm-shared";
 import BulkActionsMenu from "@/components/bookkeeping/BulkActionsMenu";
 import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
 import { useNewRecordParam } from "@/hooks/use-new-record-param";
 import { Button } from "@/components/ui/button";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -63,13 +66,6 @@ function csvValue(value: string) {
   return `"${value.replaceAll('"', '""')}"`;
 }
 
-function statusClass(status: BillStatus) {
-  if (status === "Paid") return "bg-primary/10 text-primary";
-  if (status === "Overdue") return "bg-destructive/10 text-destructive";
-  if (status === "Cancelled") return "bg-muted text-muted-foreground";
-  return "bg-secondary text-secondary-foreground";
-}
-
 export default function BillsWorkspace({ records: initialRecords, vendors, accounts, currency, asOfDate }: BillsWorkspaceProps) {
   const router = useRouter();
   const [records, setRecords] = useState(initialRecords);
@@ -78,6 +74,7 @@ export default function BillsWorkspace({ records: initialRecords, vendors, accou
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingRecord, setEditingRecord] = useState<BookkeepingRecord | null>(null);
+  const [detailId, setDetailId] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState("");
   const [pendingAction, setPendingAction] = useState(false);
   const [defaults, setDefaults] = useState<Record<string, string>>({});
@@ -227,6 +224,14 @@ export default function BillsWorkspace({ records: initialRecords, vendors, accou
     }
   }
 
+  const detailRecord = records.find((record) => record.id === detailId) ?? null;
+  const detailActions: RecordMenuAction[] = detailRecord ? [
+    ...(["Paid", "Cancelled"].includes(billStatus(detailRecord, asOfDate)) ? [] : [{ key: "pay", label: "Record payment", icon: CircleDollarSign, primary: true, run: () => { setDetailId(null); handleMarkPaid(detailRecord); } }]),
+    { key: "edit", label: "Edit", icon: Pencil, primary: true, run: () => { setDetailId(null); openEditBill(detailRecord); } },
+    ...(Number(detailRecord.data.paidAmount) > 0 ? [{ key: "undo-payment", label: "Undo payment", icon: Undo2, run: () => { setDetailId(null); void handleUndoPayment(detailRecord); } }] : []),
+    { key: "delete", label: "Delete", icon: Trash2, destructive: true, run: () => { setDetailId(null); void handleDelete(detailRecord); } },
+  ] : [];
+
   function exportCsv() {
     const headers = ["Bill number", "Vendor", "Bill date", "Due date", "Category", "Amount", "Paid", "Balance due", "Status"];
     const rows = filteredRecords.map((record) => [
@@ -330,7 +335,7 @@ export default function BillsWorkspace({ records: initialRecords, vendors, accou
                   />
                 </TableHead>
                 {["Vendor", "Bill no.", "Bill date", "Due date", "Category", "Total", "Balance due", "Payment account", "Status", ""].map((heading) => (
-                  <TableHead key={heading || "actions"} className="whitespace-nowrap text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">{heading}</TableHead>
+                  <TableHead key={heading || "actions"} className="whitespace-nowrap px-4 text-xs font-medium text-muted-foreground">{heading || <span className="sr-only">Actions</span>}</TableHead>
                 ))}
               </TableRow>
             </TableHeader>
@@ -339,9 +344,9 @@ export default function BillsWorkspace({ records: initialRecords, vendors, accou
                 const status = billStatus(record, asOfDate);
                 const canMarkPaid = !["Paid", "Cancelled"].includes(status);
                 return (
-                  <TableRow key={record.id} className="group" data-state={selectedIds.has(record.id) ? "selected" : undefined}>
+                  <TableRow key={record.id} className="group cursor-pointer" onClick={(event) => { if (!(event.target as HTMLElement).closest("button, a, input, [role=checkbox], [role=menu]")) setDetailId(record.id); }} data-state={selectedIds.has(record.id) ? "selected" : undefined}>
                     <TableCell className="w-10"><Checkbox aria-label={`Select ${record.data.billNumber || "bill"}`} checked={selectedIds.has(record.id)} onCheckedChange={(checked) => toggleSelected(record.id, checked === true)} /></TableCell>
-                    <TableCell className="max-w-[220px] truncate text-[13px] font-medium" title={record.data.vendor || ""}>{record.data.vendor || "—"}</TableCell>
+                    <TableCell className="max-w-[220px] truncate px-4 text-[13px] font-medium text-primary" title={record.data.vendor || ""}>{record.data.vendor || "—"}</TableCell>
                     <TableCell className="whitespace-nowrap text-[13px] text-muted-foreground">{record.data.billNumber || "—"}</TableCell>
                     <TableCell className="whitespace-nowrap text-[13px]">{formatDate(record.data.billDate || "")}</TableCell>
                     <TableCell className={`whitespace-nowrap text-[13px] ${status === "Overdue" ? "font-medium text-destructive" : ""}`}>{formatDate(record.data.dueDate || "")}</TableCell>
@@ -349,19 +354,18 @@ export default function BillsWorkspace({ records: initialRecords, vendors, accou
                     <TableCell className="whitespace-nowrap text-right text-[13px] tabular-nums">{formatMoney(Number(record.data.amount || 0), currency)}</TableCell>
                     <TableCell className="whitespace-nowrap text-right text-[13px] font-medium tabular-nums">{formatMoney(amountDue(record), currency)}</TableCell>
                     <TableCell className="max-w-[200px] truncate text-[13px] text-muted-foreground" title={record.data.paymentAccountName || ""}>{record.data.paymentAccountName ? `${record.data.paymentMethod} · ${record.data.paymentAccountName}` : "—"}</TableCell>
-                    <TableCell className="whitespace-nowrap"><span className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium ${statusClass(status)}`}>{status}</span></TableCell>
+                    <TableCell className="whitespace-nowrap"><StatusBadge value={status} /></TableCell>
                     <TableCell className="whitespace-nowrap text-right">
-                      <div className="flex items-center justify-end gap-1">
-                        {canMarkPaid ? <Button variant="outline" size="sm" className="h-7 gap-1.5 px-2 text-[11px]" disabled={pendingAction || bulkPending} onClick={() => handleMarkPaid(record)}><CircleDollarSign size={13} />Record payment</Button> : null}
-                        <DropdownMenu>
-                          <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" aria-label={`More actions for ${record.data.billNumber || "bill"}`}><MoreHorizontal size={15} /></Button>} />
-                          <DropdownMenuContent align="end">
-                            <DropdownMenuItem onClick={() => openEditBill(record)}><Pencil size={14} />Edit bill</DropdownMenuItem>
-                            {Number(record.data.paidAmount) > 0 ? <DropdownMenuItem disabled={bulkPending} onClick={() => void handleUndoPayment(record)}><Undo2 size={14} />Undo payment</DropdownMenuItem> : null}
-                            <DropdownMenuItem disabled={pendingAction} onClick={() => void handleDelete(record)}><Trash2 size={14} />Delete bill</DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      </div>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" aria-label={`More actions for ${record.data.billNumber || "bill"}`}><MoreHorizontal size={15} /></Button>} />
+                        <DropdownMenuContent align="end" className="min-w-44">
+                          {canMarkPaid ? <DropdownMenuItem disabled={pendingAction || bulkPending} onClick={() => handleMarkPaid(record)}><CircleDollarSign size={14} />Record payment</DropdownMenuItem> : null}
+                          <DropdownMenuItem onClick={() => openEditBill(record)}><Pencil size={14} />Edit bill</DropdownMenuItem>
+                          {Number(record.data.paidAmount) > 0 ? <DropdownMenuItem disabled={bulkPending} onClick={() => void handleUndoPayment(record)}><Undo2 size={14} />Undo payment</DropdownMenuItem> : null}
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem variant="destructive" disabled={pendingAction} onClick={() => void handleDelete(record)}><Trash2 size={14} />Delete bill</DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </TableCell>
                   </TableRow>
                 );
@@ -394,6 +398,15 @@ export default function BillsWorkspace({ records: initialRecords, vendors, accou
         pending={bulkPending}
         onSubmit={(date, accountId) => void processBills(paymentTargets ?? [], "pay", { date, accountId })}
       />
+      {editorModule ? (
+        <RecordDetailPanel
+          module={editorModule as ModuleDefinition}
+          record={detailRecord ? { ...detailRecord, data: { ...detailRecord.data, status: billStatus(detailRecord, asOfDate) } } : null}
+          currency={currency}
+          actions={detailActions}
+          onClose={() => setDetailId(null)}
+        />
+      ) : null}
       {editorModule ? (
         <RecordEditor
           key={`bills-${editingRecord?.id ?? "new"}`}

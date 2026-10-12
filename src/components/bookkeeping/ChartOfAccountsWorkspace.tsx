@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { LockKeyhole, Pencil, Plus, Search, Trash2, WalletCards } from "lucide-react";
+import { LockKeyhole, MoreHorizontal, Pencil, Plus, Search, Trash2, WalletCards } from "lucide-react";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { readableError } from "@/lib/action-error";
 
 import { deleteBookkeepingRecord } from "@/app/actions";
@@ -172,21 +173,21 @@ export default function ChartOfAccountsWorkspace({ accounts: initialAccounts, cu
           <Table>
             <TableHeader>
               <TableRow className="bg-muted/35 hover:bg-muted/35">
-                <TableHead className="w-32 px-5 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Account no.</TableHead>
-                <TableHead className="min-w-52 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Name</TableHead>
-                <TableHead className="min-w-48 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Type / detail type</TableHead>
-                <TableHead className="text-right text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Opening balance</TableHead>
-                <TableHead className="w-28 text-right text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Status</TableHead>
-                <TableHead className="w-24 px-5 text-right" aria-label="Account actions" />
+                <TableHead className="w-32 px-5 text-xs font-medium text-muted-foreground">Account no.</TableHead>
+                <TableHead className="min-w-52 text-xs font-medium text-muted-foreground">Name</TableHead>
+                <TableHead className="min-w-48 text-xs font-medium text-muted-foreground">Type / detail type</TableHead>
+                <TableHead className="text-right text-xs font-medium text-muted-foreground">Opening balance</TableHead>
+                <TableHead className="w-28 text-right text-xs font-medium text-muted-foreground">Status</TableHead>
+                <TableHead className="w-14 px-5 text-right" aria-label="Account actions" />
               </TableRow>
             </TableHeader>
             <TableBody>
               {sortedAccounts.map((account) => (
-                <TableRow key={account.id} className="group">
+                <TableRow key={account.id} className="group cursor-pointer" onClick={(event) => { if (!(event.target as HTMLElement).closest("button, a, [role=menu]")) openEditAccount(account); }}>
                   <TableCell className="px-5 font-mono text-xs tabular-nums text-muted-foreground">{account.data.code || "—"}</TableCell>
                   <TableCell>
                     <button type="button" className="max-w-full text-left" onClick={() => openEditAccount(account)}>
-                      <span className="block max-w-[320px] truncate text-sm font-medium text-foreground">{account.data.name || "Untitled account"}</span>
+                      <span className="block max-w-[320px] truncate text-sm font-medium text-primary">{account.data.name || "Untitled account"}</span>
                       {account.data.subAccount === "true" ? <span className="mt-0.5 block max-w-[320px] truncate text-xs text-muted-foreground">Sub-account{account.data.parentAccount && parentNames.has(account.data.parentAccount) ? ` of ${parentNames.get(account.data.parentAccount)}` : ""}</span> : null}
                     </button>
                   </TableCell>
@@ -201,13 +202,17 @@ export default function ChartOfAccountsWorkspace({ accounts: initialAccounts, cu
                     {account.data.openingBalanceDate ? <span className="mt-0.5 block text-xs font-normal text-muted-foreground">As of {account.data.openingBalanceDate}</span> : null}
                   </TableCell>
                   <TableCell className="text-right">
-                    {account.data.locked === "true" ? <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground"><LockKeyhole size={13} />Locked</span> : <span className="text-xs text-muted-foreground">Active</span>}
+                    {account.data.locked === "true" ? <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground"><LockKeyhole size={11} />Locked</span> : <span className="inline-flex rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">Active</span>}
                   </TableCell>
                   <TableCell className="px-5 text-right">
-                    <span className="inline-flex items-center justify-end gap-1">
-                      <Button type="button" variant="ghost" size="icon-sm" aria-label={`Edit ${account.data.name || "account"}`} onClick={() => openEditAccount(account)}><Pencil size={14} /></Button>
-                      <Button type="button" variant="ghost" size="icon-sm" aria-label={`Delete ${account.data.name || "account"}`} title={account.data.locked === "true" ? "Unlock this account before deleting it" : "Delete account"} disabled={account.data.locked === "true"} className="text-muted-foreground hover:text-destructive" onClick={() => { setDeleteError(""); setDeletingAccount(account); }}><Trash2 size={14} /></Button>
-                    </span>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger render={<Button type="button" variant="ghost" size="icon-sm" aria-label={`More actions for ${account.data.name || "account"}`}><MoreHorizontal size={15} /></Button>} />
+                      <DropdownMenuContent align="end" className="min-w-40">
+                        <DropdownMenuItem onClick={() => openEditAccount(account)}><Pencil size={14} />Edit account</DropdownMenuItem>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem variant="destructive" disabled={account.data.locked === "true"} title={account.data.locked === "true" ? "Unlock this account before deleting it" : undefined} onClick={() => { setDeleteError(""); setDeletingAccount(account); }}><Trash2 size={14} />{account.data.locked === "true" ? "Locked: can’t delete" : "Delete account"}</DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   </TableCell>
                 </TableRow>
               ))}
