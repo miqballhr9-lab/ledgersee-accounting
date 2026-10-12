@@ -21,6 +21,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { isInventoryItem } from "@/lib/inventory";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
@@ -62,6 +63,22 @@ interface ExpenseEntryLine {
   category: string;
   description: string;
   amount: string;
+}
+
+/** An "Item details" line on a bill, expense or supplier credit: what was bought, how many, at what cost. */
+interface PurchaseItemLine {
+  id: string;
+  itemId: string;
+  name: string;
+  description: string;
+  quantity: string;
+  rate: string;
+}
+
+function readPurchaseItemLines(record: BookkeepingRecord | null): PurchaseItemLine[] {
+  return parseInvoiceLines(record?.data.lineItems ?? "")
+    .filter((line) => line.itemId)
+    .map((line, index) => ({ id: `saved-item-${index}`, itemId: line.itemId, name: line.name, description: line.description, quantity: line.quantity, rate: line.rate }));
 }
 
 const structuredLineKinds = new Set(["invoices", "estimates", "sales-orders", "credit-notes", "recurring-invoices", "purchase-orders"]);
@@ -122,7 +139,12 @@ function serializeInvoiceLines(lines: InvoiceLine[]): string {
 }
 
 function readExpenseEditorLines(record: BookkeepingRecord | null): ExpenseEntryLine[] {
-  const savedLines = record ? expenseLinesFromData(record.data) : [];
+  // Item lines are edited under Item details; the rest are categories.
+  const parsed = parseInvoiceLines(record?.data.lineItems ?? "");
+  const savedLines = parsed.some((line) => line.itemId)
+    ? parsed.filter((line) => !line.itemId).map((line) => ({ category: line.name, description: line.description, amount: (Number(line.quantity) || 0) * (Number(line.rate) || 0) }))
+    : record ? expenseLinesFromData(record.data) : [];
+  if (!savedLines.length && parsed.some((line) => line.itemId)) return [];
   return savedLines.length
     ? savedLines.map((line, index) => ({
         id: `saved-expense-${index}`,
@@ -133,16 +155,22 @@ function readExpenseEditorLines(record: BookkeepingRecord | null): ExpenseEntryL
     : [{ id: "new-expense-line", category: "", description: "", amount: "" }];
 }
 
-function serializeExpenseEditorLines(lines: ExpenseEntryLine[]): string {
-  return JSON.stringify(lines
-    .filter((line) => line.category.trim() || line.description.trim() || line.amount.trim())
-    .map((line) => ({
-      itemId: "",
-      name: line.category.trim(),
-      description: line.description.trim(),
-      quantity: "1",
-      rate: line.amount.trim(),
-    })));
+function serializeExpenseEditorLines(lines: ExpenseEntryLine[], itemLines: PurchaseItemLine[] = []): string {
+  return JSON.stringify([
+    ...lines
+      // With item lines, a category line left without an amount (e.g. the supplier's default category) is ignored.
+      .filter((line) => (itemLines.some((item) => item.itemId) ? line.amount.trim() || line.description.trim() : line.category.trim() || line.description.trim() || line.amount.trim()))
+      .map((line) => ({
+        itemId: "",
+        name: line.category.trim(),
+        description: line.description.trim(),
+        quantity: "1",
+        rate: line.amount.trim(),
+      })),
+    ...itemLines
+      .filter((line) => line.itemId)
+      .map((line) => ({ itemId: line.itemId, name: line.name.trim(), description: line.description.trim(), quantity: line.quantity.trim() || "1", rate: line.rate.trim() })),
+  ]);
 }
 
 function catalogItemLabel(item: BookkeepingRecord, currency: string): string {
@@ -186,6 +214,7 @@ export default function RecordEditor({ module, record, customers, vendors, items
 
   const [invoiceLines, setInvoiceLines] = useState<InvoiceLine[]>(() => readInvoiceLines(record?.data.lineItems ?? "", items));
   const [expenseLines, setExpenseLines] = useState<ExpenseEntryLine[]>(() => readExpenseEditorLines(record));
+  const [purchaseItems, setPurchaseItems] = useState<PurchaseItemLine[]>(() => readPurchaseItemLines(record));
   const availableItems = items.filter((item) => item.data.name?.trim());
   const paymentAccounts = accounts.filter((account) => paymentAccountType(account));
   const [savedRecordId, setSavedRecordId] = useState<string | null>(record?.id ?? null);
@@ -307,7 +336,7 @@ export default function RecordEditor({ module, record, customers, vendors, items
     const intent = submitter instanceof HTMLButtonElement ? submitter.value : "save-and-close";
     const shouldSend = shareableDocumentKinds.has(module.kind) && intent === "save-and-send";
     const serializedDocumentLines = serializeInvoiceLines(invoiceLines);
-    const serializedExpenseLines = serializeExpenseEditorLines(expenseLines);
+    const serializedExpenseLines = serializeExpenseEditorLines(expenseLines, purchaseItems);
     if (structuredLineKinds.has(module.kind)) {
       const enteredLines = invoiceLines.filter((line) => line.itemId || line.name.trim() || line.description.trim() || line.quantity.trim() || line.rate.trim());
       if (!enteredLines.length) {
@@ -327,9 +356,17 @@ export default function RecordEditor({ module, record, customers, vendors, items
       }
     }
     if (categoryLineKinds.has(module.kind)) {
-      const enteredLines = expenseLines.filter((line) => line.category.trim() || line.description.trim() || line.amount.trim());
+      const hasItemLines = purchaseItems.some((line) => line.itemId);
+      const enteredLines = expenseLines.filter((line) => (hasItemLines ? line.amount.trim() || line.description.trim() : line.category.trim() || line.description.trim() || line.amount.trim()));
       const invalidLine = enteredLines.findIndex((line) => !line.category.trim() || !Number.isFinite(Number(line.amount)) || Number(line.amount) <= 0);
-      if (!enteredLines.length || invalidLine !== -1) {
+      const enteredItems = purchaseItems.filter((line) => line.itemId || line.quantity.trim() || line.rate.trim());
+      const invalidItem = enteredItems.findIndex((line) => !line.itemId || !(Number(line.quantity) > 0) || !(Number(line.rate) > 0));
+      if (invalidItem !== -1) {
+        closePreparedMessage();
+        setError(`Check item line ${invalidItem + 1}: choose a product or service and enter a quantity and a rate greater than zero.`);
+        return;
+      }
+      if ((!enteredLines.length && !enteredItems.length) || invalidLine !== -1) {
         closePreparedMessage();
         setError(invalidLine !== -1 ? `Check line ${invalidLine + 1}: choose a category and enter an amount greater than zero.` : "Add at least one expense line with a category and amount.");
         return;
@@ -453,7 +490,8 @@ export default function RecordEditor({ module, record, customers, vendors, items
   const taxAmount = subtotal * (Math.max(0, Number(values.taxRate) || 0) / 100);
   const discount = Math.max(0, Number(values.discount) || 0);
   const invoiceTotal = Math.max(0, subtotal + taxAmount - discount);
-  const expenseTotal = expenseLines.reduce((sum, line) => sum + (Number(line.amount) || 0), 0);
+  const expenseTotal = expenseLines.reduce((sum, line) => sum + (Number(line.amount) || 0), 0)
+    + purchaseItems.reduce((sum, line) => sum + (line.itemId ? (Number(line.quantity) || 0) * (Number(line.rate) || 0) : 0), 0);
   const expenseTaxAmount = expenseTotal * (Math.max(0, Number(values.taxRate) || 0) / 100);
   const expenseGrandTotal = Math.max(0, expenseTotal + expenseTaxAmount - discount);
   const linesCurrency = values.currency || defaultCurrency || "USD";
@@ -574,6 +612,7 @@ export default function RecordEditor({ module, record, customers, vendors, items
                                   return (
                                     <SelectItem value={item.id} key={item.id}>
                                       {catalogItemLabel(item, values.currency || "USD")}
+                                      {isInventoryItem(item) && item.data.qtyOnHand !== undefined ? <span className="ml-1 text-xs text-muted-foreground">· {Number(item.data.qtyOnHand).toLocaleString()} on hand</span> : null}
                                     </SelectItem>
                                   );
                                 })}
@@ -586,6 +625,13 @@ export default function RecordEditor({ module, record, customers, vendors, items
                               onChange={(event) => setInvoiceLines((current) => current.map((currentLine) => currentLine.id === line.id ? { ...currentLine, description: event.target.value } : currentLine))}
                               placeholder="Optional details for this item or service"
                             />
+                            {(() => {
+                              // Like QuickBooks, selling more than is on hand is allowed but flagged.
+                              const picked = availableItems.find((item) => item.id === line.itemId);
+                              if (!["invoices", "sales-orders"].includes(module.kind) || !picked || !isInventoryItem(picked) || picked.data.qtyOnHand === undefined) return null;
+                              const onHand = Number(picked.data.qtyOnHand) || 0;
+                              return Number(line.quantity) > onHand ? <p className="text-xs text-amber-700 dark:text-amber-400">Only {onHand.toLocaleString()} on hand. You can still save; stock will show below zero until you receive more.</p> : null;
+                            })()}
                           </div>
                           <div className="min-w-0 space-y-1.5">
                             <Label htmlFor={`invoice-quantity-${line.id}`} className="text-xs text-muted-foreground">Quantity</Label>
@@ -821,6 +867,62 @@ export default function RecordEditor({ module, record, customers, vendors, items
                         </Button>
                       </div>
                       {!expenseCategories.length ? <NoAccountsNotice message="You need Expense accounts in your Chart of accounts to categorize spending." /> : null}
+                    </div>
+                  ) : null}
+
+                  {categoryLineKinds.has(module.kind) && field.key === "lineItems" ? (
+                    <div className="space-y-3 rounded-lg border border-dashed border-border p-3" role="group" aria-label="Item details">
+                      <div>
+                        <p className="text-sm font-medium">Item details</p>
+                        <p className="text-xs text-muted-foreground">Products bought for stock go here: inventory items add to quantity on hand at this cost.</p>
+                      </div>
+                      {purchaseItems.map((line, index) => {
+                        const picked = availableItems.find((item) => item.id === line.itemId);
+                        return (
+                          <div key={line.id} className="grid min-w-0 grid-cols-1 items-end gap-3 rounded-lg border border-border bg-card p-3 sm:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)_5.5rem_6.5rem_6.5rem_2.75rem]">
+                            <div className="min-w-0 space-y-1.5">
+                              <Label htmlFor={`purchase-item-${line.id}`} className="text-xs text-muted-foreground">Product/Service</Label>
+                              <Select
+                                value={line.itemId || null}
+                                onValueChange={(nextValue) => {
+                                  const item = availableItems.find((option) => option.id === nextValue);
+                                  setPurchaseItems((current) => current.map((entry) => entry.id === line.id ? { ...entry, itemId: item?.id ?? "", name: item?.data.name?.trim() ?? "", rate: entry.rate || item?.data.cost || "", description: entry.description || item?.data.description || "" } : entry));
+                                }}
+                              >
+                                <SelectTrigger id={`purchase-item-${line.id}`} className="w-full"><SelectValue placeholder={availableItems.length ? "Choose product" : "Add items first"}>{picked?.data.name ?? (line.name || undefined)}</SelectValue></SelectTrigger>
+                                <SelectContent>
+                                  {availableItems.map((item) => (
+                                    <SelectItem key={item.id} value={item.id}>
+                                      {item.data.name}{isInventoryItem(item) ? <span className="ml-1 text-xs text-muted-foreground">· Inventory{item.data.qtyOnHand !== undefined ? ` · ${Number(item.data.qtyOnHand).toLocaleString()} on hand` : ""}</span> : <span className="ml-1 text-xs text-muted-foreground">· {item.data.itemType || "Service"}</span>}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            <div className="min-w-0 space-y-1.5">
+                              <Label htmlFor={`purchase-description-${line.id}`} className="text-xs text-muted-foreground">Description</Label>
+                              <Input id={`purchase-description-${line.id}`} value={line.description} onChange={(event) => setPurchaseItems((current) => current.map((entry) => entry.id === line.id ? { ...entry, description: event.target.value } : entry))} />
+                            </div>
+                            <div className="min-w-0 space-y-1.5">
+                              <Label htmlFor={`purchase-qty-${line.id}`} className="text-xs text-muted-foreground">Qty</Label>
+                              <Input id={`purchase-qty-${line.id}`} type="number" min="0.001" step="any" inputMode="decimal" value={line.quantity} onChange={(event) => setPurchaseItems((current) => current.map((entry) => entry.id === line.id ? { ...entry, quantity: event.target.value } : entry))} placeholder="1" />
+                            </div>
+                            <div className="min-w-0 space-y-1.5">
+                              <Label htmlFor={`purchase-rate-${line.id}`} className="text-xs text-muted-foreground">Rate</Label>
+                              <Input id={`purchase-rate-${line.id}`} type="number" min="0.01" step="any" inputMode="decimal" value={line.rate} onChange={(event) => setPurchaseItems((current) => current.map((entry) => entry.id === line.id ? { ...entry, rate: event.target.value } : entry))} placeholder="0.00" />
+                            </div>
+                            <div className="min-w-0 space-y-1.5">
+                              <span className="text-xs text-muted-foreground">Amount</span>
+                              <p className="flex h-9 items-center justify-end rounded-md bg-muted/50 px-2 text-sm tabular-nums">{currencyAmount((Number(line.quantity) || 0) * (Number(line.rate) || 0), linesCurrency)}</p>
+                            </div>
+                            <Button type="button" variant="ghost" size="icon" aria-label={`Remove item line ${index + 1}`} onClick={() => setPurchaseItems((current) => current.filter((entry) => entry.id !== line.id))} className="size-11 justify-self-end text-muted-foreground hover:text-destructive"><Trash2 size={16} strokeWidth={1.75} /></Button>
+                          </div>
+                        );
+                      })}
+                      <Button type="button" variant="outline" size="sm" disabled={!availableItems.length} onClick={() => setPurchaseItems((current) => [...current, { id: `new-item-${Date.now()}-${current.length}`, itemId: "", name: "", description: "", quantity: "1", rate: "" }])}>
+                        <Plus size={15} />Add item line
+                      </Button>
+                      {!availableItems.length ? <p className="text-xs text-muted-foreground">Add products in Items & services to buy them here.</p> : null}
                     </div>
                   ) : null}
 

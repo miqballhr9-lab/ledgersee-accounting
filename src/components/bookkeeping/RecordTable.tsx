@@ -50,6 +50,8 @@ const columnLabels: Record<string, string> = {
   rate: "Rate",
   unit: "Unit",
   stock: "Stock",
+  qtyOnHand: "Qty on hand",
+  cost: "Cost",
   invoiceNumber: "Invoice",
   customer: "Customer",
   issueDate: "Issued",
@@ -128,7 +130,15 @@ function displayValue(record: BookkeepingRecord, key: string) {
     const active = value === "true";
     return <span className={`inline-flex items-center gap-1.5 text-xs ${active ? "text-primary" : "text-muted-foreground"}`}><span className={`size-1.5 rounded-full ${active ? "bg-primary" : "bg-muted-foreground/40"}`} />{active ? key === "matched" ? "Matched" : "On" : key === "matched" ? "To match" : "Off"}</span>;
   }
-  if (["amount", "balance", "paidAmount", "openingBalance", "rate", "baseSalary"].includes(key)) {
+  if (key === "itemType") return <span>{value === "Product" ? "Inventory" : value || "—"}</span>;
+  if (key === "qtyOnHand") {
+    if (record.data.itemType !== "Inventory" && record.data.itemType !== "Product") return <span className="text-muted-foreground">—</span>;
+    const onHand = Number(value || 0);
+    const reorder = Number(record.data.reorderPoint || 0);
+    const tone = onHand <= 0 ? "text-destructive" : reorder > 0 && onHand <= reorder ? "text-amber-600 dark:text-amber-400" : "";
+    return <span className={`tabular-nums ${tone}`}>{onHand.toLocaleString(undefined, { maximumFractionDigits: 3 })}{onHand <= 0 ? " · Out of stock" : reorder > 0 && onHand <= reorder ? " · Low" : ""}</span>;
+  }
+  if (["amount", "balance", "paidAmount", "openingBalance", "rate", "baseSalary", "cost"].includes(key)) {
     const number = Number(value);
     if (Number.isFinite(number)) {
       const currency = record.data.currency || "USD";

@@ -1,5 +1,6 @@
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
 import { expenseLinesFromData } from "@/lib/expense-utils";
+import { buildInventory, isInventoryItem, pricedLines } from "@/lib/inventory";
 
 /**
  * Turns the saved records (invoices, bills, expenses, payments, journals,
@@ -165,6 +166,26 @@ export function buildLedger(records: BookkeepingRecord[], method: AccountingMeth
     for (const [account, amount] of kept) postings.push({ ...base, account, amount });
   };
 
+  // Inventory: stock bought goes to the inventory asset, and its cost moves to cost of goods sold when sold (FIFO).
+  const inventoryItems = new Set(records.filter((record) => record.kind === "items" && isInventoryItem(record)).map((record) => record.id));
+  const inventoryAsset = () => find((account) => account.category === "Asset" && /inventory/i.test(`${account.name} ${account.detailType}`)) ?? ensure("Inventory Asset", "Asset", "Current assets");
+  const cogs = () => find((account) => account.accountType === "Cost of sales" && /cost of goods/i.test(account.name)) ?? find((account) => account.accountType === "Cost of sales") ?? ensure("Cost of goods sold", "Expense", "Cost of sales");
+  const shrinkage = () => find((account) => /shrinkage/i.test(account.name)) ?? ensure("Inventory Shrinkage", "Expense", "Cost of sales");
+  const receivedNotBilled = () => find((account) => /received not billed/i.test(account.name)) ?? ensure("Inventory received not billed", "Liability", "Current liabilities");
+  const purchaseOrders = new Map(records.filter((record) => record.kind === "purchase-orders").map((record) => [record.id, record]));
+  if (inventoryItems.size) {
+    let sequence = 0;
+    for (const summary of buildInventory(records).values()) {
+      for (const event of summary.events) {
+        if (event.role === "bill" || event.role === "purchase-return" || Math.abs(event.value) < 0.005) continue;
+        sequence += 1;
+        const base = { txnId: `inv-${event.role}-${sequence}`, date: event.date, type: event.role === "sale" ? "Invoice (cost of sale)" : event.role === "return" ? "Credit note (stock returned)" : event.type, number: event.number, name: event.name, customer: event.role === "sale" || event.role === "return" ? event.name : "", supplier: "", memo: `${summary.item.data.name ?? "Item"} × ${Math.abs(event.quantity)}`, sourceKind: event.sourceKind, sourceId: event.sourceId };
+        const offset = event.role === "opening" ? openingEquity : event.role === "po-receipt" ? receivedNotBilled() : event.role === "adjust-in" || event.role === "adjust-out" ? shrinkage() : cogs();
+        post(base, [[inventoryAsset(), event.value], [offset, -event.value]]);
+      }
+    }
+  }
+
   // Opening balances, offset to opening balance equity.
   for (const record of records) {
     if (record.kind !== "accounts") continue;
@@ -250,9 +271,25 @@ export function buildLedger(records: BookkeepingRecord[], method: AccountingMeth
       // A supplier credit without lines of its own reverses the category of the bill it applies to.
       const appliedBill = isCredit && !lines.some((line) => line.category) && data.billNumber ? records.find((item) => item.kind === "bills" && item.data.billNumber === data.billNumber) : undefined;
       const fallbackCategory = data.category || (appliedBill ? expenseLinesFromData(appliedBill.data)[0]?.category : "") || "";
-      const debitLines: Array<[string, number]> = lines.length && lineTotal
+      let debitLines: Array<[string, number]> = lines.length && lineTotal
         ? lines.map((line) => [expenseAccount(line.category || fallbackCategory), line.amount * scale])
         : [[expenseAccount(fallbackCategory), total - tax]];
+      // Inventory items on the document are stock, not an expense. Items from a received purchase
+      // order clear "received not billed" instead, since the receipt already added them.
+      const itemLines = pricedLines(data, data.purchaseLineItems || data.lineItems || "").filter((line) => inventoryItems.has(line.itemId) && line.qty);
+      // Non-inventory products and services bought go to cost of goods sold, as in QuickBooks.
+      if (!itemLines.length && !data.purchaseLineItems && pricedLines(data).some((line) => line.itemId && line.qty)) {
+        debitLines = pricedLines(data).filter((line) => line.qty).map((line) => [line.itemId ? cogs() : expenseAccount(line.name || fallbackCategory), line.qty * line.unit] as [string, number]);
+      }
+      if (itemLines.length && inventoryItems.size) {
+        const order = data.sourcePurchaseOrderId ? purchaseOrders.get(data.sourcePurchaseOrderId) : undefined;
+        const stockAccount = order && (order.data.receivedAt || order.data.status === "Received") ? receivedNotBilled() : inventoryAsset();
+        const stockValue = itemLines.reduce((sum, line) => sum + line.qty * line.unit, 0);
+        const others = data.purchaseLineItems
+          ? [[debitLines[0]?.[0] ?? expenseAccount(fallbackCategory), total - tax - stockValue] as [string, number]]
+          : pricedLines(data).filter((line) => !inventoryItems.has(line.itemId) && line.qty).map((line) => [line.itemId ? cogs() : expenseAccount(line.name || fallbackCategory), line.qty * line.unit] as [string, number]);
+        debitLines = [[stockAccount, stockValue], ...others.filter(([, amount]) => Math.abs(amount) > 0.004)];
+      }
       const party = (isBill || isCredit ? data.vendor : data.payee) ?? "";
       const base = {
         type: isBill ? "Bill" : isCredit ? "Supplier credit" : "Expense",

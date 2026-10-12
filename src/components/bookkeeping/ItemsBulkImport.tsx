@@ -42,9 +42,9 @@ function createTemplateWorkbook(XLSX: typeof import("xlsx")) {
   itemSheet["!cols"] = [{ wch: 28 }, { wch: 18 }, { wch: 15 }, { wch: 14 }, { wch: 16 }, { wch: 18 }, { wch: 16 }, { wch: 18 }];
   const instructionsSheet = XLSX.utils.aoa_to_sheet([
     ["Items & services import"],
-    ["Add one Product or Service per row on the Items sheet."],
-    ["Name and Rate are required. Leave Type blank to import the row as a Product."],
-    ["Type must be Product or Service. Rates, tax, unit cost, and reorder point must be zero or greater."],
+    ["Add one Inventory, Non-inventory or Service item per row on the Items sheet."],
+    ["Name and Rate are required. Leave Type blank to import the row as an Inventory item."],
+    ["Type must be Inventory, Non-inventory or Service. Rates, tax, unit cost, and reorder point must be zero or greater."],
     ["SKUs must be unique in this sheet and cannot already exist in your catalog."],
     [`Import up to ${MAX_ITEM_IMPORT_ROWS} rows per workbook. Keep the Items sheet column headers unchanged.`],
   ]);
@@ -107,11 +107,11 @@ export default function ItemsBulkImport({ onImported }: ItemsBulkImportProps) {
           return column === undefined ? "" : cellText(cells[column]);
         };
         const rawType = readField("itemType");
-        const itemType = rawType ? rawType.toLocaleLowerCase() : "Product";
+        const itemType = rawType ? rawType.toLocaleLowerCase() : "inventory";
         const data: ItemImportData = {
           name: readField("name"),
           sku: readField("sku"),
-          itemType: itemType === "product" ? "Product" : itemType === "service" ? "Service" : rawType,
+          itemType: itemType === "product" || itemType === "inventory" ? "Inventory" : itemType === "non-inventory" || itemType === "noninventory" ? "Non-inventory" : itemType === "service" ? "Service" : rawType,
           rate: readField("rate"),
           unit: readField("unit"),
           taxRate: readField("taxRate"),
@@ -123,7 +123,7 @@ export default function ItemsBulkImport({ onImported }: ItemsBulkImportProps) {
           if (data[key].length > 250) rowErrors.push(`Row ${rowNumber}: ${key} must be 250 characters or fewer.`);
         }
         if (!data.name) rowErrors.push(`Row ${rowNumber}: add a name.`);
-        if (data.itemType !== "Product" && data.itemType !== "Service") rowErrors.push(`Row ${rowNumber}: Type must be Product or Service.`);
+        if (!["Inventory", "Non-inventory", "Service"].includes(data.itemType)) rowErrors.push(`Row ${rowNumber}: Type must be Inventory, Non-inventory or Service.`);
         for (const [key, label] of [["rate", "rate"], ["taxRate", "tax rate"], ["cost", "unit cost"], ["reorderPoint", "reorder point"]] as const) {
           const value = data[key];
           if (!value && key !== "rate") continue;

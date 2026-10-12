@@ -34,6 +34,8 @@ interface BillsWorkspaceProps {
   asOfDate: string;
   /** Default terms for new bills, from Settings. */
   billTerms?: string;
+  /** Products and services for the bill's Item details. */
+  items?: BookkeepingRecord[];
 }
 
 type BillStatus = "Open" | "Partially Paid" | "Overdue" | "Paid" | "Cancelled";
@@ -69,7 +71,7 @@ function csvValue(value: string) {
   return `"${value.replaceAll('"', '""')}"`;
 }
 
-export default function BillsWorkspace({ records: initialRecords, vendors, accounts, currency, asOfDate, billTerms = "30 days" }: BillsWorkspaceProps) {
+export default function BillsWorkspace({ records: initialRecords, vendors, accounts, currency, asOfDate, billTerms = "30 days", items = [] }: BillsWorkspaceProps) {
   const router = useRouter();
   const [records, setRecords] = useState(initialRecords);
   const [search, setSearch] = useState("");
@@ -417,7 +419,7 @@ export default function BillsWorkspace({ records: initialRecords, vendors, accou
           record={editingRecord}
           customers={[]}
           vendors={vendors}
-          items={[]}
+          items={items}
           accounts={accounts}
           defaults={defaults}
           open={editorOpen}

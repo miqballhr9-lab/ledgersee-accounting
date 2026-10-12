@@ -4,7 +4,7 @@ import { useMemo, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { ArrowDownToLine, ArrowUpFromLine, Boxes, ClipboardCheck, History, Package, Search } from "lucide-react";
+import { AlertTriangle, ArrowDownToLine, ArrowUpFromLine, Boxes, ClipboardCheck, History, MoreHorizontal, Package, PackageX, Search } from "lucide-react";
 import { readableError } from "@/lib/action-error";
 
 import { createInventoryMovement } from "@/app/actions";
@@ -17,15 +17,28 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import type { InventoryEvent } from "@/lib/inventory";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
 type MovementType = "Receipt" | "Delivery" | "Adjustment";
 
+export interface InventoryStock {
+  onHand: number;
+  value: number;
+  averageCost: number;
+}
+
 interface InventoryWorkspaceProps {
+  /** Inventory items, with stock set to the quantity on hand worked out from documents. */
   products: BookkeepingRecord[];
-  movements: BookkeepingRecord[];
+  stock: Record<string, InventoryStock>;
+  /** Every stock movement: invoices, credit notes, bills, receipts and adjustments, newest first. */
+  activity: (InventoryEvent & { itemName: string; unit: string })[];
   currency: string;
 }
+
+const sourceSlug: Record<string, string> = { invoices: "invoices", "credit-notes": "credit-notes", bills: "bills", expenses: "expenses", "supplier-credits": "supplier-credits", "purchase-orders": "purchase-orders", items: "items" };
 
 const movementActions: { type: MovementType; label: string; icon: typeof ArrowDownToLine; variant: "default" | "outline" }[] = [
   { type: "Receipt", label: "Receive stock", icon: ArrowDownToLine, variant: "default" },
@@ -47,14 +60,15 @@ function formatDate(value: string) {
   return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(date);
 }
 
-export default function InventoryWorkspace({ products: productRecords, movements, currency }: InventoryWorkspaceProps) {
+export default function InventoryWorkspace({ products: productRecords, stock: stockById, activity, currency }: InventoryWorkspaceProps) {
   const router = useRouter();
   const products = useMemo(
-    () => productRecords.filter((record) => record.data.itemType === "Product").sort((left, right) => (left.data.name || "").localeCompare(right.data.name || "")),
+    () => [...productRecords].sort((left, right) => (left.data.name || "").localeCompare(right.data.name || "")),
     [productRecords],
   );
   const [activeView, setActiveView] = useState<"products" | "movements">("products");
-  const [stockFilter, setStockFilter] = useState<"all" | "low">("all");
+  const [stockFilter, setStockFilter] = useState<"all" | "low" | "out">("all");
+  const [unitCost, setUnitCost] = useState("");
   const [search, setSearch] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [movementType, setMovementType] = useState<MovementType>("Receipt");
@@ -67,26 +81,22 @@ export default function InventoryWorkspace({ products: productRecords, movements
   const [isSaving, setIsSaving] = useState(false);
 
   const stockDetails = useMemo(() => products.map((product) => {
-    const stock = Number(product.data.stock || 0);
+    const summary = stockById[product.id] ?? { onHand: 0, value: 0, averageCost: Number(product.data.cost || 0) || 0 };
     const reorderPoint = Number(product.data.reorderPoint || 0);
-    const cost = Number(product.data.cost || 0);
-    return {
-      product,
-      stock: Number.isFinite(stock) ? stock : 0,
-      reorderPoint: Number.isFinite(reorderPoint) ? reorderPoint : 0,
-      value: Number.isFinite(cost) ? Math.max(0, stock) * Math.max(0, cost) : 0,
-    };
-  }), [products]);
-  const lowStockCount = stockDetails.filter((row) => row.reorderPoint > 0 && row.stock <= row.reorderPoint).length;
+    return { product, stock: summary.onHand, reorderPoint: Number.isFinite(reorderPoint) ? reorderPoint : 0, value: summary.value, averageCost: summary.averageCost };
+  }), [products, stockById]);
+  const isOut = (row: { stock: number }) => row.stock <= 0;
+  const isLow = (row: { stock: number; reorderPoint: number }) => row.stock > 0 && row.reorderPoint > 0 && row.stock <= row.reorderPoint;
+  const lowStockCount = stockDetails.filter(isLow).length;
+  const outOfStockCount = stockDetails.filter(isOut).length;
   const totalUnits = stockDetails.reduce((total, row) => total + row.stock, 0);
   const totalValue = stockDetails.reduce((total, row) => total + row.value, 0);
-  const visibleProducts = stockDetails.filter(({ product, stock, reorderPoint }) => {
-    const matchesSearch = `${product.data.name || ""} ${product.data.sku || ""}`.toLowerCase().includes(search.trim().toLowerCase());
-    const matchesStock = stockFilter === "all" || (reorderPoint > 0 && stock <= reorderPoint);
+  const visibleProducts = stockDetails.filter((row) => {
+    const matchesSearch = `${row.product.data.name || ""} ${row.product.data.sku || ""}`.toLowerCase().includes(search.trim().toLowerCase());
+    const matchesStock = stockFilter === "all" || (stockFilter === "low" ? isLow(row) : isOut(row));
     return matchesSearch && matchesStock;
   });
   const selectedProduct = products.find((product) => product.id === selectedItemId);
-  const sortedMovements = [...movements].sort((left, right) => `${right.data.date || right.createdAt}`.localeCompare(`${left.data.date || left.createdAt}`));
 
   function openMovement(type: MovementType, itemId = "") {
     setMovementType(type);
@@ -95,6 +105,7 @@ export default function InventoryWorkspace({ products: productRecords, movements
     setMovementDate(new Date().toISOString().slice(0, 10));
     setReference("");
     setNotes("");
+    setUnitCost("");
     setFormError("");
     setDialogOpen(true);
   }
@@ -111,6 +122,7 @@ export default function InventoryWorkspace({ products: productRecords, movements
         date: movementDate,
         reference,
         notes,
+        unitCost: movementType === "Receipt" ? unitCost : undefined,
       });
       setDialogOpen(false);
       toast.success(movementType === "Receipt" ? "Stock received." : movementType === "Delivery" ? "Delivery recorded." : "Stock count saved.");
@@ -128,7 +140,7 @@ export default function InventoryWorkspace({ products: productRecords, movements
         <div className="min-w-0">
           <p className="text-xs font-medium uppercase tracking-[0.12em] text-primary">Inventory / Stock control</p>
           <h1 className="mt-1 text-[26px] font-semibold tracking-tight sm:text-3xl">Inventory</h1>
-          <p className="mt-1.5 text-sm text-muted-foreground">Keep product quantities, receipts, deliveries, and counts in sync.</p>
+          <p className="mt-1.5 text-sm text-muted-foreground">Stock goes down when you invoice and up when you enter bills or receive purchase orders. Cost of goods sold is worked out first-in, first-out.</p>
         </div>
         <div className="flex flex-wrap gap-2 xl:shrink-0 xl:flex-nowrap xl:justify-end">
           <InventoryBulkCount products={products} />
@@ -141,38 +153,28 @@ export default function InventoryWorkspace({ products: productRecords, movements
         </div>
       </header>
 
-      <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
-        <Card>
-          <CardContent className="flex items-center gap-3 p-4">
-            <span className="grid size-10 place-items-center rounded-md bg-accent text-accent-foreground"><Package size={18} /></span>
-            <div><p className="text-xs text-muted-foreground">Products tracked</p><p className="mt-1 text-xl font-semibold tabular-nums">{products.length}</p></div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="flex items-center gap-3 p-4">
-            <span className="grid size-10 place-items-center rounded-md bg-accent text-accent-foreground"><Boxes size={18} /></span>
-            <div><p className="text-xs text-muted-foreground">Units on hand</p><p className="mt-1 text-xl font-semibold tabular-nums">{formatQuantity(totalUnits)}</p></div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="flex items-center gap-3 p-4">
-            <span className="grid size-10 place-items-center rounded-md bg-muted text-muted-foreground"><ClipboardCheck size={18} /></span>
-            <div><p className="text-xs text-muted-foreground">At or below reorder point</p><p className="mt-1 text-xl font-semibold tabular-nums">{lowStockCount}</p></div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="flex items-center gap-3 p-4">
-            <span className="grid size-10 place-items-center rounded-md bg-accent text-accent-foreground"><History size={18} /></span>
-            <div><p className="text-xs text-muted-foreground">Stock value at unit cost</p><p className="mt-1 text-xl font-semibold tabular-nums">{formatMoney(totalValue, currency)}</p></div>
-          </CardContent>
-        </Card>
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+        {([
+          { label: "Inventory items", value: String(products.length), icon: Package, tone: "bg-accent text-accent-foreground", filter: "all" as const },
+          { label: "Units on hand", value: formatQuantity(totalUnits), icon: Boxes, tone: "bg-accent text-accent-foreground", filter: null },
+          { label: "Low stock", value: String(lowStockCount), icon: AlertTriangle, tone: "bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300", filter: "low" as const },
+          { label: "Out of stock", value: String(outOfStockCount), icon: PackageX, tone: "bg-destructive/10 text-destructive", filter: "out" as const },
+          { label: "Inventory value (FIFO)", value: formatMoney(totalValue, currency), icon: History, tone: "bg-accent text-accent-foreground", filter: null },
+        ]).map((tile) => (
+          <Card key={tile.label} className={tile.filter ? `cursor-pointer transition-colors hover:border-primary/40 ${stockFilter === tile.filter && activeView === "products" ? "border-primary/60" : ""}` : ""} onClick={tile.filter ? () => { setActiveView("products"); setStockFilter(tile.filter!); } : undefined}>
+            <CardContent className="flex items-center gap-3 p-4">
+              <span className={`grid size-10 shrink-0 place-items-center rounded-md ${tile.tone}`}><tile.icon size={18} /></span>
+              <div className="min-w-0"><p className="truncate text-xs text-muted-foreground">{tile.label}</p><p className="mt-1 truncate text-xl font-semibold tabular-nums">{tile.value}</p></div>
+            </CardContent>
+          </Card>
+        ))}
       </div>
 
       <section className="overflow-hidden rounded-lg border border-border bg-card">
         <div className="flex flex-col gap-3 border-b border-border p-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-1">
             <Button type="button" variant={activeView === "products" ? "secondary" : "ghost"} aria-pressed={activeView === "products"} onClick={() => setActiveView("products")}>Products</Button>
-            <Button type="button" variant={activeView === "movements" ? "secondary" : "ghost"} aria-pressed={activeView === "movements"} onClick={() => setActiveView("movements")}>Movement history <span className="ml-1 tabular-nums">{movements.length}</span></Button>
+            <Button type="button" variant={activeView === "movements" ? "secondary" : "ghost"} aria-pressed={activeView === "movements"} onClick={() => setActiveView("movements")}>Stock activity <span className="ml-1 tabular-nums">{activity.length}</span></Button>
           </div>
           {activeView === "products" ? (
             <div className="flex flex-wrap items-center gap-2">
@@ -180,8 +182,9 @@ export default function InventoryWorkspace({ products: productRecords, movements
                 <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
                 <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search products or SKU" className="pl-9" aria-label="Search inventory products" />
               </div>
-              <Button type="button" variant={stockFilter === "all" ? "outline" : "secondary"} aria-pressed={stockFilter === "all"} onClick={() => setStockFilter("all")}>All products</Button>
-              <Button type="button" variant={stockFilter === "low" ? "outline" : "secondary"} aria-pressed={stockFilter === "low"} onClick={() => setStockFilter("low")}>Needs reorder</Button>
+              {([["all", "All"], ["low", "Low stock"], ["out", "Out of stock"]] as const).map(([value, label]) => (
+                <Button key={value} type="button" variant={stockFilter === value ? "secondary" : "outline"} aria-pressed={stockFilter === value} onClick={() => setStockFilter(value)}>{label}</Button>
+              ))}
             </div>
           ) : null}
         </div>
@@ -191,56 +194,68 @@ export default function InventoryWorkspace({ products: productRecords, movements
             <div className="overflow-x-auto">
               <Table>
                 <TableHeader><TableRow>
-                  <TableHead>Product</TableHead><TableHead>SKU</TableHead><TableHead>On hand</TableHead><TableHead>Reorder point</TableHead><TableHead>Unit cost</TableHead><TableHead>Stock value</TableHead><TableHead className="text-right">Action</TableHead>
+                  <TableHead>Product</TableHead><TableHead>SKU</TableHead><TableHead className="text-right">Qty on hand</TableHead><TableHead className="text-right">Reorder point</TableHead><TableHead className="text-right">Avg cost</TableHead><TableHead className="text-right">Asset value</TableHead><TableHead>Status</TableHead><TableHead><span className="sr-only">Actions</span></TableHead>
                 </TableRow></TableHeader>
                 <TableBody>
-                  {visibleProducts.length ? visibleProducts.map(({ product, stock, reorderPoint, value }) => {
-                    const needsReorder = reorderPoint > 0 && stock <= reorderPoint;
+                  {visibleProducts.length ? visibleProducts.map((row) => {
+                    const { product, stock, reorderPoint, value, averageCost } = row;
                     return (
                       <TableRow key={product.id}>
-                        <TableCell className="min-w-48 font-medium">{product.data.name || "Unnamed product"}<div className="mt-1 text-xs font-normal text-muted-foreground">{product.data.unit || "Unit not set"}</div></TableCell>
+                        <TableCell className="min-w-48 font-medium"><Link href={`/app/items?open=${product.id}`} className="text-primary hover:underline">{product.data.name || "Unnamed product"}</Link><div className="mt-1 text-xs font-normal text-muted-foreground">{product.data.unit || "Unit not set"}</div></TableCell>
                         <TableCell className="text-muted-foreground">{product.data.sku || "—"}</TableCell>
-                        <TableCell className="font-medium tabular-nums">{formatQuantity(stock, product.data.unit)}</TableCell>
-                        <TableCell className="tabular-nums">{reorderPoint > 0 ? formatQuantity(reorderPoint, product.data.unit) : "Not set"}</TableCell>
-                        <TableCell className="tabular-nums">{formatMoney(Number(product.data.cost || 0) || 0, currency)}</TableCell>
-                        <TableCell className="tabular-nums">{formatMoney(value, currency)}</TableCell>
+                        <TableCell className="text-right font-medium tabular-nums">{formatQuantity(stock, product.data.unit)}</TableCell>
+                        <TableCell className="text-right tabular-nums">{reorderPoint > 0 ? formatQuantity(reorderPoint) : "—"}</TableCell>
+                        <TableCell className="text-right tabular-nums">{formatMoney(averageCost, currency)}</TableCell>
+                        <TableCell className="text-right tabular-nums">{formatMoney(value, currency)}</TableCell>
+                        <TableCell>{isOut(row) ? <Badge variant="destructive">Out of stock</Badge> : isLow(row) ? <Badge className="bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300">Low stock</Badge> : <Badge variant="secondary">In stock</Badge>}</TableCell>
                         <TableCell className="text-right">
-                          {needsReorder ? <Badge variant="destructive" className="mr-2">Reorder</Badge> : null}
-                          <Button type="button" variant="outline" size="sm" onClick={() => openMovement("Adjustment", product.id)}>Count</Button>
+                          <DropdownMenu>
+                            <DropdownMenuTrigger render={<Button type="button" variant="ghost" size="icon-sm" aria-label={`Actions for ${product.data.name || "item"}`}><MoreHorizontal size={15} /></Button>} />
+                            <DropdownMenuContent align="end" className="min-w-48">
+                              <DropdownMenuItem onClick={() => openMovement("Adjustment", product.id)}><ClipboardCheck size={14} />Adjust quantity</DropdownMenuItem>
+                              <DropdownMenuItem onClick={() => openMovement("Receipt", product.id)}><ArrowDownToLine size={14} />Receive stock</DropdownMenuItem>
+                              <DropdownMenuItem onClick={() => openMovement("Delivery", product.id)}><ArrowUpFromLine size={14} />Record delivery</DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem onClick={() => router.push("/app/purchase-orders?new=1")}><Package size={14} />Reorder (new purchase order)</DropdownMenuItem>
+                              <DropdownMenuItem onClick={() => router.push("/app/reports/inventory-valuation-detail")}><History size={14} />Run valuation report</DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
                         </TableCell>
                       </TableRow>
                     );
-                  }) : <TableRow><TableCell colSpan={7} className="py-10 text-center text-sm text-muted-foreground">No products match this view.</TableCell></TableRow>}
+                  }) : <TableRow><TableCell colSpan={8} className="py-10 text-center text-sm text-muted-foreground">No products match this view.</TableCell></TableRow>}
                 </TableBody>
               </Table>
             </div>
           ) : (
             <div className="px-6 py-14 text-center">
               <div className="mx-auto grid size-12 place-items-center rounded-lg bg-accent text-accent-foreground"><Package size={22} /></div>
-              <h2 className="mt-4 font-semibold">Add products to start tracking stock</h2>
-              <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">Products from Items & services appear here. You can then receive stock, record deliveries, and set reorder points.</p>
+              <h2 className="mt-4 font-semibold">Add inventory items to start tracking stock</h2>
+              <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">Items with the type Inventory appear here, with their initial quantity. Invoices then take stock out and bills bring it in.</p>
               <Button nativeButton={false} render={<Link href="/app/items" />} className="mt-5">Open Items & services</Button>
             </div>
           )
         ) : (
-          movements.length ? (
+          activity.length ? (
             <div className="overflow-x-auto">
               <Table>
                 <TableHeader><TableRow>
-                  <TableHead>Date</TableHead><TableHead>Product</TableHead><TableHead>Movement</TableHead><TableHead>Quantity</TableHead><TableHead>Stock change</TableHead><TableHead>Balance after</TableHead><TableHead>Reference</TableHead>
+                  <TableHead>Date</TableHead><TableHead>Product</TableHead><TableHead>Transaction</TableHead><TableHead>Name</TableHead><TableHead className="text-right">Qty</TableHead><TableHead className="text-right">Cost</TableHead><TableHead className="text-right">Qty on hand</TableHead><TableHead className="text-right">Asset value</TableHead>
                 </TableRow></TableHeader>
                 <TableBody>
-                  {sortedMovements.map((movement) => {
-                    const change = Number(movement.data.change || 0);
+                  {activity.map((event, index) => {
+                    const slug = sourceSlug[event.sourceKind];
+                    const id = event.sourceId.split("#")[0];
                     return (
-                      <TableRow key={movement.id}>
-                        <TableCell className="whitespace-nowrap">{formatDate(movement.data.date || movement.createdAt.slice(0, 10))}</TableCell>
-                        <TableCell className="min-w-44 font-medium">{movement.data.itemName || "Product"}<div className="mt-1 text-xs font-normal text-muted-foreground">{movement.data.sku || "No SKU"}</div></TableCell>
-                        <TableCell><Badge variant={movement.data.movementType === "Receipt" ? "secondary" : "outline"}>{movement.data.movementType || "Movement"}</Badge></TableCell>
-                        <TableCell className="tabular-nums">{formatQuantity(Number(movement.data.quantity || 0), movement.data.unit)}</TableCell>
-                        <TableCell className={`font-medium tabular-nums ${change > 0 ? "text-primary" : change < 0 ? "text-destructive" : "text-muted-foreground"}`}>{change > 0 ? "+" : ""}{formatQuantity(change, movement.data.unit)}</TableCell>
-                        <TableCell className="tabular-nums">{formatQuantity(Number(movement.data.resultingStock || 0), movement.data.unit)}</TableCell>
-                        <TableCell className="text-muted-foreground">{movement.data.reference || movement.data.notes || "—"}</TableCell>
+                      <TableRow key={`${event.sourceId}-${index}`} className={slug ? "cursor-pointer" : undefined} onClick={slug ? () => router.push(`/app/${slug}?open=${id}`) : undefined}>
+                        <TableCell className="whitespace-nowrap">{formatDate(event.date)}</TableCell>
+                        <TableCell className="min-w-40 font-medium">{event.itemName}</TableCell>
+                        <TableCell><span className="text-primary">{event.type}</span>{event.number ? <span className="text-muted-foreground"> · {event.number}</span> : null}</TableCell>
+                        <TableCell className="max-w-48 truncate text-muted-foreground">{event.name || "—"}</TableCell>
+                        <TableCell className={`text-right font-medium tabular-nums ${event.quantity > 0 ? "text-primary" : "text-destructive"}`}>{event.quantity > 0 ? "+" : ""}{formatQuantity(event.quantity, event.unit)}</TableCell>
+                        <TableCell className="text-right tabular-nums">{formatMoney(Math.abs(event.value), currency)}</TableCell>
+                        <TableCell className="text-right tabular-nums">{formatQuantity(event.onHand)}</TableCell>
+                        <TableCell className="text-right tabular-nums">{formatMoney(event.assetValue, currency)}</TableCell>
                       </TableRow>
                     );
                   })}
@@ -250,8 +265,8 @@ export default function InventoryWorkspace({ products: productRecords, movements
           ) : (
             <div className="px-6 py-14 text-center">
               <div className="mx-auto grid size-12 place-items-center rounded-lg bg-muted text-muted-foreground"><History size={22} /></div>
-              <h2 className="mt-4 font-semibold">No stock movements yet</h2>
-              <p className="mt-1 text-sm text-muted-foreground">Receipts, deliveries, and physical counts will appear here.</p>
+              <h2 className="mt-4 font-semibold">No stock activity yet</h2>
+              <p className="mt-1 text-sm text-muted-foreground">Invoices, bills, received purchase orders and adjustments will appear here.</p>
             </div>
           )
         )}
@@ -260,8 +275,8 @@ export default function InventoryWorkspace({ products: productRecords, movements
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-xl">
           <DialogHeader>
-            <DialogTitle>{movementType === "Receipt" ? "Receive stock" : movementType === "Delivery" ? "Record delivery" : "Count stock"}</DialogTitle>
-            <DialogDescription>{movementType === "Receipt" ? "Add delivered units to the product’s on-hand quantity." : movementType === "Delivery" ? "Record units leaving stock. The quantity cannot exceed what is on hand." : "Enter the physical count. The difference will be recorded in movement history."}</DialogDescription>
+            <DialogTitle>{movementType === "Receipt" ? "Receive stock" : movementType === "Delivery" ? "Record delivery" : "Inventory quantity adjustment"}</DialogTitle>
+            <DialogDescription>{movementType === "Receipt" ? "For stock that arrived without a bill or purchase order. Bought stock is better entered as a bill with the item on it." : movementType === "Delivery" ? "For stock that left without an invoice (samples, own use). Invoices take stock out on their own." : "Enter the quantity you counted. The difference is booked to Inventory Shrinkage."}</DialogDescription>
           </DialogHeader>
           <form className="space-y-4" onSubmit={(event) => void handleSubmit(event)}>
             <div className="space-y-2">
@@ -272,13 +287,19 @@ export default function InventoryWorkspace({ products: productRecords, movements
                   {products.map((product) => <SelectItem key={product.id} value={product.id}>{product.data.name || "Unnamed product"}{product.data.sku ? ` · ${product.data.sku}` : ""}</SelectItem>)}
                 </SelectContent>
               </Select>
-              {selectedProduct ? <p className="text-xs text-muted-foreground">Current on-hand: {formatQuantity(Number(selectedProduct.data.stock || 0), selectedProduct.data.unit)}</p> : null}
+              {selectedProduct ? <p className="text-xs text-muted-foreground">Quantity on hand: {formatQuantity(stockById[selectedProduct.id]?.onHand ?? 0, selectedProduct.data.unit)}</p> : null}
             </div>
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-2">
                 <Label htmlFor="inventory-quantity">{movementType === "Adjustment" ? "Counted quantity" : "Quantity"}</Label>
                 <Input id="inventory-quantity" type="number" min="0" step="any" required value={quantity} onChange={(event) => setQuantity(event.target.value)} placeholder="0" />
               </div>
+              {movementType === "Receipt" ? (
+                <div className="space-y-2">
+                  <Label htmlFor="inventory-cost">Cost per unit</Label>
+                  <Input id="inventory-cost" type="number" min="0" step="any" value={unitCost} onChange={(event) => setUnitCost(event.target.value)} placeholder={selectedProduct?.data.cost ? `Purchase cost ${selectedProduct.data.cost}` : "Item’s purchase cost"} />
+                </div>
+              ) : null}
               <div className="space-y-2">
                 <Label htmlFor="inventory-date">Date</Label>
                 <Input id="inventory-date" type="date" required value={movementDate} onChange={(event) => setMovementDate(event.target.value)} />

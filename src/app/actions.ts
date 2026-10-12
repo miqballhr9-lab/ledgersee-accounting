@@ -13,6 +13,7 @@ import { applyLoanRepayment } from "@/lib/hr-rules";
 import { sendEmailOrThrow } from "@/lib/email";
 import { createUploadUrl } from "@/lib/storage";
 import { dueDateForTerms, parseInvoiceLines } from "@/lib/invoice-utils";
+import { buildInventory, inventoryKinds, isInventoryItem } from "@/lib/inventory";
 import { siteUrl } from "@/lib/site";
 import { isRecordKind, type BookkeepingRecord, type RecordKind } from "@/lib/bookkeeping-types";
 import { paymentAccountType } from "@/lib/payment-accounts";
@@ -270,6 +271,21 @@ export async function saveBookkeepingRecord(
   if (kind === "team-members") throw new ActionError("Add and change team members from Users & roles.");
   let data = amountFromLineItems(sanitizePayload(input), kind);
   if (kind === "purchase-orders" && !id) data = { ...data, status: "Draft" };
+  if (kind === "items") {
+    if (data.itemType === "Product") data.itemType = "Inventory";
+    if (!["Inventory", "Non-inventory", "Service"].includes(data.itemType || "Inventory")) throw new ActionError("Choose Inventory, Non-inventory or Service.");
+    data.itemType = data.itemType || "Inventory";
+    if (data.openingQty && (!Number.isFinite(Number(data.openingQty)) || Number(data.openingQty) < 0)) throw new ActionError("Enter an initial quantity of zero or more.");
+    if (id) {
+      // Stock moved by receipts, deliveries and counts is kept on the item; editing its details keeps it.
+      const [existing] = await db.select().from(bookkeepingRecord)
+        .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "items"))).limit(1);
+      if (existing?.data.stock !== undefined) data = { ...data, stock: existing.data.stock };
+    } else if (data.itemType === "Inventory" && !data.openingQty) {
+      data = { ...data, openingQty: "0" };
+    }
+    if (data.itemType !== "Inventory") data = { ...data, openingQty: "", openingDate: "" };
+  }
   if (kind === "payroll") {
     data = normalizePayrollData(data, await salaryTaxRule(me.id));
     if (data.paymentAccountId) {
@@ -638,9 +654,9 @@ export async function importBookkeepingItems(input: ItemImportRow[]): Promise<Bo
       if (data[key].length > 250) throw new ActionError(`${key} is too long on spreadsheet row ${entry.rowNumber}.`);
     }
 
-    data.itemType = data.itemType || "Product";
+    data.itemType = !data.itemType || data.itemType === "Product" ? "Inventory" : data.itemType;
     if (!data.name) throw new ActionError(`Add a name on spreadsheet row ${entry.rowNumber}.`);
-    if (!["Product", "Service"].includes(data.itemType)) throw new ActionError(`Choose Product or Service on spreadsheet row ${entry.rowNumber}.`);
+    if (!["Inventory", "Non-inventory", "Service"].includes(data.itemType)) throw new ActionError(`Choose Inventory, Non-inventory or Service on spreadsheet row ${entry.rowNumber}.`);
     for (const key of numericFields) {
       const value = data[key];
       if (!value && key !== "rate") continue;
@@ -1153,6 +1169,13 @@ function paymentAmount(input: string | undefined, remaining: number, label: stri
   return Math.round(value * 100) / 100;
 }
 
+/** Quantity on hand for every inventory item, worked out from the documents that move stock. */
+async function stockOnHand(userId: string) {
+  const rows = await db.select().from(bookkeepingRecord).where(and(eq(bookkeepingRecord.userId, userId), inArray(bookkeepingRecord.kind, [...inventoryKinds])));
+  const summaries = buildInventory(rows.map(serializeRow));
+  return new Map([...summaries].map(([id, summary]) => [id, summary.onHand]));
+}
+
 function isPaymentDate(value: string) {
   return /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(`${value}T00:00:00Z`));
 }
@@ -1571,9 +1594,12 @@ export async function createInventoryMovement(input: {
   date: string;
   reference?: string;
   notes?: string;
+  /** Cost per unit for stock received without a bill; the item's purchase cost when blank. */
+  unitCost?: string;
 }): Promise<BookkeepingRecord> {
   const me = await requireUser();
   assertCanWrite(me, "inventory-movements");
+  const onHandByItem = await stockOnHand(me.id);
   const itemId = input.itemId.trim();
   const quantity = Number(input.quantity);
   const date = input.date.trim();
@@ -1597,9 +1623,10 @@ export async function createInventoryMovement(input: {
       .for("update")
       .limit(1);
 
-    if (!item || item.data.itemType !== "Product") throw new ActionError("Choose a saved product from Items & services.");
-    const previousStock = Number(item.data.stock || 0);
-    if (!Number.isFinite(previousStock) || previousStock < 0) throw new ActionError("This product has an invalid stock balance. Correct its count before continuing.");
+    if (!item || !isInventoryItem(item)) throw new ActionError("Choose a saved inventory item from Items & services.");
+    const previousStock = onHandByItem.get(item.id) ?? 0;
+    const unitCost = input.unitCost?.trim() ? Number(input.unitCost) : NaN;
+    if (input.unitCost?.trim() && (!Number.isFinite(unitCost) || unitCost < 0)) throw new ActionError("Enter a unit cost of zero or more.");
 
     const change = input.movementType === "Receipt"
       ? quantity
@@ -1613,7 +1640,7 @@ export async function createInventoryMovement(input: {
     const updatedAt = new Date();
     await transaction
       .update(bookkeepingRecord)
-      .set({ data: { ...item.data, stock: String(nextStock) }, updatedAt })
+      .set({ data: { ...item.data, stock: String(Number(item.data.stock || 0) + change) }, updatedAt })
       .where(and(eq(bookkeepingRecord.id, item.id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "items")));
 
     const [savedMovement] = await transaction
@@ -1634,6 +1661,7 @@ export async function createInventoryMovement(input: {
           date,
           reference,
           notes,
+          ...(Number.isFinite(unitCost) ? { unitCost: String(unitCost) } : {}),
         },
         updatedAt,
       })
@@ -1742,11 +1770,13 @@ export async function advancePurchaseOrder(
           .where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "items"), inArray(bookkeepingRecord.id, itemIds)))
           .for("update");
         if (linkedItems.length !== itemIds.length) throw new ActionError("A linked item is no longer available. Update the purchase order before receiving it.");
+        const orderLines = parseInvoiceLines(lockedOrder.data.lineItems || "");
         for (const item of linkedItems) {
-          if (item.data.itemType !== "Product") continue;
+          if (!isInventoryItem(item)) continue;
           const previousStock = Number(item.data.stock || 0);
           const receivedQuantity = quantities.get(item.id) || 0;
           const nextStock = previousStock + receivedQuantity;
+          const orderRate = orderLines.find((line) => line.itemId === item.id)?.rate ?? "";
           if (!Number.isFinite(nextStock)) throw new ActionError(`Check the stock quantity for ${item.data.name || "this item"}.`);
           await transaction.update(bookkeepingRecord)
             .set({ data: { ...item.data, stock: String(nextStock) }, updatedAt })
@@ -1767,6 +1797,8 @@ export async function advancePurchaseOrder(
               date: updatedAt.toISOString().slice(0, 10),
               reference: lockedOrder.data.poNumber || "Purchase order",
               notes: "Received from purchase order",
+              purchaseOrderId: lockedOrder.id,
+              unitCost: orderRate,
             },
             updatedAt,
           });
@@ -2336,6 +2368,7 @@ export async function saveBulkInventoryCount(input: {
 }): Promise<{ checkedCount: number; adjustedCount: number }> {
   const me = await requireUser();
   assertCanWrite(me, "inventory-movements");
+  const onHandByItem = await stockOnHand(me.id);
   const rows: InventoryCountRow[] = [];
   const seenItemIds = new Set<string>();
 
@@ -2372,7 +2405,7 @@ export async function saveBulkInventoryCount(input: {
       .orderBy(bookkeepingRecord.id)
       .for("update");
 
-    if (items.length !== rows.length || items.some((item) => item.data.itemType !== "Product")) {
+    if (items.length !== rows.length || items.some((item) => !isInventoryItem(item))) {
       throw new ActionError("The spreadsheet includes a product that is no longer in your inventory. Download a fresh template and try again.");
     }
 
@@ -2383,16 +2416,13 @@ export async function saveBulkInventoryCount(input: {
     for (const item of items) {
       const countedStock = countedById.get(item.id);
       if (countedStock === undefined) throw new ActionError("The count sheet has changed. Download a fresh template and try again.");
-      const previousStock = Number(item.data.stock || 0);
-      if (!Number.isFinite(previousStock) || previousStock < 0) {
-        throw new ActionError(`${item.data.name || "A product"} has an invalid current stock balance. Fix its count before importing.`);
-      }
+      const previousStock = onHandByItem.get(item.id) ?? 0;
       const change = countedStock - previousStock;
-      if (change === 0) continue;
+      if (Math.abs(change) < 1e-9) continue;
 
       await transaction
         .update(bookkeepingRecord)
-        .set({ data: { ...item.data, stock: String(countedStock) }, updatedAt })
+        .set({ data: { ...item.data, stock: String(Number(item.data.stock || 0) + change) }, updatedAt })
         .where(and(eq(bookkeepingRecord.id, item.id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "items")));
 
       movements.push({

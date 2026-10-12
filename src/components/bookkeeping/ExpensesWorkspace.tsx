@@ -34,6 +34,8 @@ interface ExpensesWorkspaceProps {
   accounts: BookkeepingRecord[];
   currency: string;
   asOfDate: string;
+  /** Products and services for Item details. */
+  items?: BookkeepingRecord[];
 }
 
 type DatePreset = "last30" | "last90" | "last12" | "thisYear" | "all" | "custom";
@@ -99,7 +101,7 @@ function createDefaults(kind: "bills" | "expenses", records: BookkeepingRecord[]
   return values;
 }
 
-export default function ExpensesWorkspace({ expenses: initialExpenses, bills: initialBills, vendors, accounts, currency, asOfDate }: ExpensesWorkspaceProps) {
+export default function ExpensesWorkspace({ expenses: initialExpenses, bills: initialBills, vendors, accounts, currency, asOfDate, items = [] }: ExpensesWorkspaceProps) {
   const router = useRouter();
   const [records, setRecords] = useState([...initialBills, ...initialExpenses]);
   const [search, setSearch] = useState("");
@@ -595,7 +597,7 @@ export default function ExpensesWorkspace({ expenses: initialExpenses, bills: in
           record={editingRecord}
           customers={[]}
           vendors={vendors}
-          items={[]}
+          items={items}
           accounts={accounts}
           defaultCurrency={currency}
           defaults={editorDefaults}

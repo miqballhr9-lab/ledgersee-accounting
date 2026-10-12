@@ -4,6 +4,7 @@ import { parseInvoiceLines } from "@/lib/invoice-utils";
 import { accountOf, type Ledger } from "@/lib/ledger";
 import { formatLongDate, periodLabel, type ReportColumn, type ReportLine, type ReportOptions, type ReportResult, type ZoomSpec } from "@/lib/reports";
 import { taxLines } from "@/lib/tax-return";
+import { buildInventory, itemTypeLabel } from "@/lib/inventory";
 
 /**
  * List and detail reports (who owes you, what you owe, sales, purchases and
@@ -474,6 +475,44 @@ export function buildListReport(key: string, records: BookkeepingRecord[], ledge
       const result = grouped(columns, groups, { grandTotal: false });
       result.forEach((line) => { if (line.kind !== "account") line.values[5] = null; });
       return periodResult(columns, result, options, "No taxed transactions in this period.");
+    }
+
+    case "inventory-valuation-summary": {
+      const columns = [text("sku", "SKU"), amount("qty", "Qty"), amount("value", "Asset value"), amount("avg", "Calc. avg")];
+      const summaries = [...buildInventory(records, asOf).values()].sort((a, b) => (a.item.data.name ?? "").localeCompare(b.item.data.name ?? ""));
+      const lines: ReportLine[] = summaries.map((summary) => ({ id: summary.item.id, label: summary.item.data.name || "Item", kind: "account" as const, depth: 0, values: [summary.item.data.sku ?? "", summary.onHand, summary.value, summary.onHand > 0 ? summary.value / summary.onHand : null], source: src(summary.item) }));
+      if (lines.length) lines.push({ id: "total", label: "TOTAL", kind: "grand", depth: 0, values: ["", summaries.reduce((sum, item) => sum + item.onHand, 0), summaries.reduce((sum, item) => sum + item.value, 0), null] });
+      return asOfResult(columns, lines, asOf, "No inventory items yet. Set an item's type to Inventory to track it.");
+    }
+
+    case "inventory-valuation-detail": {
+      const columns = [text("date", "Date"), text("type", "Transaction type"), text("no", "No."), text("name", "Name"), amount("qty", "Qty"), amount("rate", "Rate"), amount("cost", "FIFO cost"), amount("onHand", "Qty on hand"), amount("balance", "Asset value")];
+      const summaries = [...buildInventory(records, options.to).values()].sort((a, b) => (a.item.data.name ?? "").localeCompare(b.item.data.name ?? ""));
+      const groups = summaries.map((summary) => ({
+        label: summary.item.data.name || "Item",
+        rows: summary.events.filter((event) => event.date >= options.from).map((event) => ({
+          values: [event.date, event.type, event.number, event.name, event.quantity, event.unitCost, event.value, event.onHand, event.assetValue],
+          source: { kind: event.sourceKind, id: event.sourceId.split("#")[0] },
+        })),
+      }));
+      const lines = grouped(columns, groups, { grandTotal: false });
+      lines.forEach((line) => { if (line.kind === "total") { line.values[5] = null; line.values[7] = null; line.values[8] = null; } });
+      return periodResult(columns, lines, options, "No stock movements in this period.");
+    }
+
+    case "stock-take-worksheet": {
+      const columns = [text("sku", "SKU"), text("description", "Description"), amount("qty", "Qty on hand"), amount("reorder", "Reorder point"), text("count", "Physical count")];
+      const summaries = [...buildInventory(records, asOf).values()].sort((a, b) => (a.item.data.name ?? "").localeCompare(b.item.data.name ?? ""));
+      const lines: ReportLine[] = summaries.map((summary) => ({ id: summary.item.id, label: summary.item.data.name || "Item", kind: "account" as const, depth: 0, values: [summary.item.data.sku ?? "", summary.item.data.unit ?? "", summary.onHand, num(summary.item.data.reorderPoint) || null, "__________"], source: src(summary.item) }));
+      return asOfResult(columns, lines, asOf, "No inventory items yet.");
+    }
+
+    case "product-service-list": {
+      const stock = buildInventory(records, asOf);
+      const columns = [text("type", "Type"), text("sku", "SKU"), text("unit", "Unit"), amount("price", "Sales price"), amount("cost", "Purchase cost"), amount("qty", "Qty on hand"), amount("reorder", "Reorder point")];
+      const items = records.filter((record) => record.kind === "items").sort((a, b) => (a.data.name ?? "").localeCompare(b.data.name ?? ""));
+      const lines: ReportLine[] = items.map((item) => ({ id: item.id, label: item.data.name || "Item", kind: "account" as const, depth: 0, values: [itemTypeLabel(item.data.itemType), item.data.sku ?? "", item.data.unit ?? "", num(item.data.rate), num(item.data.cost) || null, stock.has(item.id) ? stock.get(item.id)!.onHand : null, num(item.data.reorderPoint) || null], source: src(item) }));
+      return asOfResult(columns, lines, asOf, "No products or services yet.");
     }
 
     default:

@@ -40,7 +40,7 @@ interface NumberFormat {
 const sourceSlug: Record<string, string> = {
   invoices: "invoices", bills: "bills", expenses: "expenses", "credit-notes": "credit-notes", "supplier-credits": "supplier-credits",
   journals: "journals", transactions: "transactions", accounts: "accounts", payroll: "payroll",
-  customers: "customers", vendors: "vendors", estimates: "estimates", "sales-orders": "sales-orders", "purchase-orders": "purchase-orders",
+  customers: "customers", vendors: "vendors", estimates: "estimates", "sales-orders": "sales-orders", "purchase-orders": "purchase-orders", items: "items",
 };
 
 const asOfEngines = new Set(["bs", "trial-balance", "ar-ageing", "ap-ageing"]);
@@ -48,6 +48,7 @@ const asOfEngines = new Set(["bs", "trial-balance", "ar-ageing", "ap-ageing"]);
 const asOfReports = new Set([
   "accounts-receivable-ageing-detail", "accounts-payable-ageing-detail", "collections-report", "customer-balance-summary", "customer-balance-detail",
   "supplier-balance-summary", "supplier-balance-detail", "open-invoices", "unpaid-bills", "open-purchase-order-list", "customer-contact-list", "supplier-contact-list",
+  "inventory-valuation-summary", "stock-take-worksheet", "product-service-list",
 ]);
 const isAsOfReport = (report: ReportDefinition) => asOfEngines.has(report.engine ?? "") || asOfReports.has(report.key);
 
