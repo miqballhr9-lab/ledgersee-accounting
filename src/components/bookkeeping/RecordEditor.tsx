@@ -140,7 +140,8 @@ function getInitialValues(module: ModuleDefinition, record: BookkeepingRecord | 
     values.name = record?.data.displayName || record?.data.name || record?.data.company || values.name;
   }
   if (module.kind === "invoices") {
-    values.paymentTerms = record?.data.paymentTerms || "30 days";
+    values.docType = record?.data.docType ?? defaults.docType ?? "";
+    values.paymentTerms = record?.data.paymentTerms || defaults.paymentTerms || "30 days";
     values.dueDate = dueDateForTerms(values.issueDate, values.paymentTerms) || values.dueDate;
     const customer = customers.find((option) => option.id === values.customerId)
       ?? customers.find((option) => option.data.name?.trim().toLowerCase() === values.customer?.trim().toLowerCase());
@@ -150,7 +151,7 @@ function getInitialValues(module: ModuleDefinition, record: BookkeepingRecord | 
     }
   }
   if (module.kind === "invoices" || module.kind === "bills") {
-    values.paymentMethod = record?.data.paymentAccountId || record?.data.paymentMethod || "Credit";
+    values.paymentMethod = record?.data.paymentAccountId || record?.data.paymentMethod || (values.docType === "Sales receipt" ? "" : "Credit");
   }
   return values;
 }
@@ -419,6 +420,10 @@ export default function RecordEditor({ module, record, customers, vendors, items
         return;
       }
     }
+    if (isSalesReceipt && !record && (!values.paymentMethod || values.paymentMethod === "Credit")) {
+      setError("Choose the account this sales receipt was deposited to.");
+      return;
+    }
     const missingCustomer = module.fields.find((field) => field.key === "customer" && field.required && !values.customer?.trim());
     if (missingCustomer) {
       closePreparedMessage();
@@ -528,7 +533,7 @@ export default function RecordEditor({ module, record, customers, vendors, items
         }
       }
       // The full-page form keeps its save buttons at the bottom right, so its messages show at the top.
-      toast.success(shouldSend ? `${module.label} saved and emailed to the customer.` : `${module.label} ${record ? "updated" : "saved"}.`, isTransactionForm ? { position: "top-center" } : undefined);
+      toast.success(shouldSend ? `${documentLabel} saved and emailed to the customer.` : `${documentLabel} ${record ? "updated" : "saved"}.`, isTransactionForm ? { position: "top-center" } : undefined);
       if (intent === "save-and-new" || intent === "save-and-copy") {
         await onSaveComplete(saved, intent);
       } else if (intent === "save") {
@@ -554,6 +559,8 @@ export default function RecordEditor({ module, record, customers, vendors, items
   const linesCurrency = values.currency || defaultCurrency || "USD";
   const hasStructuredLines = structuredLineKinds.has(module.kind);
   const isTransactionForm = hasStructuredLines || categoryLineKinds.has(module.kind);
+  const isSalesReceipt = module.kind === "invoices" && values.docType === "Sales receipt";
+  const documentLabel = isSalesReceipt ? "Sales receipt" : module.label;
   const customerOptions = customers.filter((customer) => customer.data.name?.trim());
   const expenseAccounts = accounts.filter((account) =>
     account.data.locked !== "true" && accountCategoryForType(account.data.accountType ?? "") === "Expense",
@@ -650,7 +657,7 @@ export default function RecordEditor({ module, record, customers, vendors, items
         {field.key === "customer" ? (
           <>
             <Select
-              value={selectedCustomer?.id}
+              value={selectedCustomer?.id ?? null}
               itemToStringLabel={(customerId) => {
                 const customer = customerOptions.find((option) => option.id === customerId);
                 if (!customer) return "";
@@ -694,7 +701,7 @@ export default function RecordEditor({ module, record, customers, vendors, items
         {field.key === "vendor" ? (
           <>
             <Select
-              value={vendorOptions.find((vendor) => vendor.data.name === value)?.id}
+              value={vendorOptions.find((vendor) => vendor.data.name === value)?.id ?? null}
               onValueChange={(vendorId) => {
                 const vendor = vendorOptions.find((option) => option.id === vendorId);
                 if (vendor?.data.name) {
@@ -745,12 +752,12 @@ export default function RecordEditor({ module, record, customers, vendors, items
 
         {field.type === "select" && field.key === "paymentMethod" && (module.kind === "invoices" || module.kind === "bills") ? (
           <>
-            <Select value={value || "Credit"} onValueChange={(nextValue) => changeValue(field.key, nextValue ?? "Credit")}>
+            <Select value={value || (isSalesReceipt ? null : "Credit")} onValueChange={(nextValue) => changeValue(field.key, nextValue ?? "Credit")}>
               <SelectTrigger id={`field-${field.key}`} className="w-full" disabled={Boolean(record)}>
                 <SelectValue placeholder="Choose a payment account" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="Credit">Credit · unpaid</SelectItem>
+                {isSalesReceipt ? null : <SelectItem value="Credit">Credit · unpaid</SelectItem>}
                 {paymentAccounts.map((account) => <SelectItem key={account.id} value={account.id}>{paymentAccountLabel(account)}</SelectItem>)}
                 {record && !record.data.paymentAccountId && value !== "Credit" ? (
                   <SelectItem value={value}>{value} · previously saved</SelectItem>
@@ -758,7 +765,7 @@ export default function RecordEditor({ module, record, customers, vendors, items
               </SelectContent>
             </Select>
             {!paymentAccounts.length && !record ? <NoAccountsNotice message="To record this as paid, add a Cash, Bank or Credit card account. Otherwise it stays unpaid on credit." /> : null}
-            {!record && value && value !== "Credit" ? (
+            {!record && !isSalesReceipt && value && value !== "Credit" ? (
               <div className="mt-3 space-y-1.5">
                 <Label htmlFor="field-amountPaid">{module.kind === "invoices" ? "Amount received" : "Amount paid"}</Label>
                 <Input id="field-amountPaid" type="number" min="0.01" step="0.01" inputMode="decimal" value={values.amountPaid ?? ""} placeholder="Full amount" onChange={(event) => changeValue("amountPaid", event.target.value)} />
@@ -782,7 +789,7 @@ export default function RecordEditor({ module, record, customers, vendors, items
         ) : null}
 
         {field.type === "select" && field.key !== "defaultExpenseAccount" && !(module.kind === "items" && itemAccountKeys.has(field.key)) && !(module.kind === "employees" && field.key === "paymentAccountId") && !(field.key === "paymentMethod" && (module.kind === "invoices" || module.kind === "bills")) ? (
-          <Select value={value || undefined} onValueChange={(nextValue) => changeValue(field.key, nextValue ?? "")}>
+          <Select value={value || null} onValueChange={(nextValue) => changeValue(field.key, nextValue ?? "")}>
             <SelectTrigger id={`field-${field.key}`} className="w-full">
               <SelectValue placeholder="Choose an option" />
             </SelectTrigger>
@@ -889,7 +896,7 @@ export default function RecordEditor({ module, record, customers, vendors, items
     const documentTax = hasStructuredLines ? taxAmount : expenseTaxAmount;
     const paidBefore = Number(record?.data.paidAmount) || 0;
     const paidNow = !record && values.paymentMethod && values.paymentMethod !== "Credit" ? (Number(values.amountPaid) || documentTotal) : 0;
-    const tracksBalance = module.kind === "invoices" || module.kind === "bills";
+    const tracksBalance = (module.kind === "invoices" && !isSalesReceipt) || module.kind === "bills";
     const paid = Math.min(documentTotal, paidBefore + paidNow);
     const headline = tracksBalance
       ? { label: "Balance due", amount: Math.max(0, documentTotal - paid) }
@@ -1109,7 +1116,7 @@ export default function RecordEditor({ module, record, customers, vendors, items
           <header className="flex items-center justify-between gap-3 border-b border-border bg-card px-4 py-3 sm:px-6">
             <div className="min-w-0">
               <DialogTitle className="truncate text-xl font-semibold">
-                {record ? module.label : `New ${module.label.toLowerCase()}`}{titleValue ? <span className="ml-2 font-normal text-muted-foreground">no. {titleValue}</span> : null}
+                {record ? documentLabel : `New ${documentLabel.toLowerCase()}`}{titleValue ? <span className="ml-2 font-normal text-muted-foreground">no. {titleValue}</span> : null}
               </DialogTitle>
               <DialogDescription className="sr-only">{module.description}</DialogDescription>
             </div>

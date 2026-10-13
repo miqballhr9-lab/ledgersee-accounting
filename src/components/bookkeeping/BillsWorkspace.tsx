@@ -7,6 +7,7 @@ import { readableError } from "@/lib/action-error";
 
 import { deleteBookkeepingRecord, recordBillPayment, undoBillPayments } from "@/app/actions";
 import PaymentDialog from "@/components/bookkeeping/PaymentDialog";
+import PayBillsDialog from "@/components/bookkeeping/PayBillsDialog";
 import { paymentAccountType } from "@/lib/payment-accounts";
 import RecordEditor from "@/components/bookkeeping/RecordEditor";
 import RecordDetailPanel from "@/components/bookkeeping/RecordDetailPanel";
@@ -78,6 +79,7 @@ export default function BillsWorkspace({ records: initialRecords, vendors, accou
   const [statusFilter, setStatusFilter] = useState("all");
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [editorOpen, setEditorOpen] = useState(false);
+  const [payBillsOpen, setPayBillsOpen] = useState(false);
   const [editingRecord, setEditingRecord] = useState<BookkeepingRecord | null>(null);
   const [detailId, setDetailId] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState("");
@@ -269,6 +271,7 @@ export default function BillsWorkspace({ records: initialRecords, vendors, accou
         </div>
         <div className="flex shrink-0 items-center gap-2">
           <Button variant="outline" className="gap-2" onClick={exportCsv}><ArrowDownToLine size={15} />Export CSV</Button>
+          <Button variant="outline" className="gap-2" onClick={() => setPayBillsOpen(true)}><CircleDollarSign size={15} />Pay bills</Button>
           <Button className="gap-2" onClick={() => openNewBill()}><Plus size={16} />New bill</Button>
         </div>
       </section>
@@ -413,6 +416,7 @@ export default function BillsWorkspace({ records: initialRecords, vendors, accou
           onClose={() => setDetailId(null)}
         />
       ) : null}
+      {payBillsOpen ? <PayBillsDialog open onOpenChange={setPayBillsOpen} bills={records} accounts={accounts} currency={currency} asOfDate={asOfDate} onDone={() => router.refresh()} /> : null}
       {editorModule ? (
         <RecordEditor
           key={`bills-${editingRecord?.id ?? "new"}`}

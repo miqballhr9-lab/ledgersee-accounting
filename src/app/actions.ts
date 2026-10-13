@@ -362,6 +362,12 @@ export async function saveBookkeepingRecord(
     }
   }
   if (kind === "invoices") {
+    // A sales receipt is a sale paid in full on the spot, deposited straight to an account.
+    if (data.docType && data.docType !== "Sales receipt") data = { ...data, docType: "" };
+    if (data.docType === "Sales receipt") {
+      if (!id && (!data.paymentMethod || data.paymentMethod === "Credit")) throw new ActionError("Choose the account this sales receipt was deposited to.");
+      data = { ...data, paymentTerms: "Due on receipt", amountPaid: "" };
+    }
     const paymentTerms = data.paymentTerms || "30 days";
     if (!["Due on receipt", "15 days", "30 days", "60 days"].includes(paymentTerms)) throw new ActionError("Choose one of the available payment terms.");
     const calculatedDueDate = dueDateForTerms(data.issueDate ?? "", paymentTerms);
@@ -1084,6 +1090,7 @@ export async function recordInvoicePayment(
   amountInput: string,
   paymentDate: string,
   accountId: string,
+  reference = "",
 ): Promise<void> {
   const me = await requireUser();
   assertCanWrite(me, "invoices");
@@ -1137,6 +1144,7 @@ export async function recordInvoicePayment(
       method,
       paymentAccountId: paymentAccount.id,
       paymentAccountName: paymentAccount.data.name || paymentAccount.data.code || "Account",
+      ...(typeof reference === "string" && reference.trim() ? { referenceNumber: reference.trim().slice(0, 120) } : {}),
     },
   });
   revalidatePath("/app", "layout");
@@ -1212,7 +1220,7 @@ function isPaymentDate(value: string) {
 }
 
 /** Pays all or part of a bill's remaining balance from a Cash, Bank or Credit card account and records where it came from. */
-export async function recordBillPayment(id: string, paymentDate: string, accountId: string, amountInput?: string): Promise<void> {
+export async function recordBillPayment(id: string, paymentDate: string, accountId: string, amountInput?: string, reference = ""): Promise<void> {
   const me = await requireUser();
   assertCanWrite(me, "bills");
   if (!isPaymentDate(paymentDate)) throw new ActionError("Choose a payment date.");
@@ -1240,7 +1248,7 @@ export async function recordBillPayment(id: string, paymentDate: string, account
     await transaction.insert(bookkeepingRecord).values({
       userId: me.id,
       kind: "payments",
-      data: { billId: id, billNumber: bill.data.billNumber ?? "Bill", vendor: bill.data.vendor ?? "", amount: amount.toFixed(2), paymentDate, method, paymentAccountId: account.id, paymentAccountName: name, direction: "out" },
+      data: { billId: id, billNumber: bill.data.billNumber ?? "Bill", vendor: bill.data.vendor ?? "", amount: amount.toFixed(2), paymentDate, method, paymentAccountId: account.id, paymentAccountName: name, direction: "out", ...(typeof reference === "string" && reference.trim() ? { referenceNumber: reference.trim().slice(0, 120) } : {}) },
     });
   });
   revalidatePath("/app", "layout");
@@ -1271,6 +1279,38 @@ export async function undoBillPayments(id: string): Promise<void> {
       .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id)));
   });
   revalidatePath("/app", "layout");
+}
+
+interface PaymentAllocation {
+  id: string;
+  amount: string;
+}
+
+function readAllocations(input: unknown, noun: string): PaymentAllocation[] {
+  if (!Array.isArray(input)) throw new ActionError(`Choose the ${noun} to pay.`);
+  const allocations = input.flatMap((entry): PaymentAllocation[] => {
+    if (!entry || typeof entry !== "object") return [];
+    const { id, amount } = entry as Record<string, unknown>;
+    return typeof id === "string" && typeof amount === "string" && Number(amount) > 0 ? [{ id, amount }] : [];
+  });
+  if (!allocations.length) throw new ActionError(`Enter a payment against at least one ${noun.replace(/s$/, "")}.`);
+  if (allocations.length > 100) throw new ActionError(`Pay up to 100 ${noun} at a time.`);
+  if (new Set(allocations.map((entry) => entry.id)).size !== allocations.length) throw new ActionError(`Each ${noun.replace(/s$/, "")} can be listed once.`);
+  return allocations;
+}
+
+/** Receive payment, as in QuickBooks: one customer payment applied across their open invoices. */
+export async function receiveCustomerPayment(paymentDate: string, accountId: string, reference: string, allocationsInput: unknown): Promise<void> {
+  if (!isPaymentDate(paymentDate)) throw new ActionError("Choose a payment date.");
+  const allocations = readAllocations(allocationsInput, "invoices");
+  for (const allocation of allocations) await recordInvoicePayment(allocation.id, allocation.amount, paymentDate, accountId, reference);
+}
+
+/** Pay bills, as in QuickBooks: several supplier bills paid from one account on one date. */
+export async function payBills(paymentDate: string, accountId: string, reference: string, allocationsInput: unknown): Promise<void> {
+  if (!isPaymentDate(paymentDate)) throw new ActionError("Choose a payment date.");
+  const allocations = readAllocations(allocationsInput, "bills");
+  for (const allocation of allocations) await recordBillPayment(allocation.id, paymentDate, accountId, allocation.amount, reference);
 }
 
 /** Records all or part of an expense as paid from a Cash, Bank or Credit card account. */

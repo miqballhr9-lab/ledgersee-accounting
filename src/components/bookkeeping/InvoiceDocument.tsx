@@ -35,7 +35,9 @@ export default function InvoiceDocument({ invoice, companyName, documentKind = "
   // VAT and GST countries call a taxed invoice a "tax invoice".
   const isTaxInvoice = documentKind === "invoices" && Boolean(pack) && pack?.code !== "US" && Number(invoice.taxAmount) > 0;
   const currency = invoice.currency || "USD";
-  const details = documentDetails[documentKind];
+  // A sales receipt is saved as a paid invoice and prints under its own title.
+  const isReceipt = documentKind === "invoices" && invoice.docType === "Sales receipt";
+  const details = isReceipt ? { ...documentDetails.invoices, label: "Sales receipt", dateLabel: "Date", totalLabel: "Total" } : documentDetails[documentKind];
   const lines = parseInvoiceLines(invoice.lineItems ?? "");
   const subtotal = Number(invoice.subtotal) || 0;
   const taxAmount = Number(invoice.taxAmount) || 0;
@@ -60,7 +62,7 @@ export default function InvoiceDocument({ invoice, companyName, documentKind = "
         </div>
         <dl className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm">
           <div><dt className="text-xs text-muted-foreground">{details.dateLabel}</dt><dd className="mt-1 font-medium">{invoice[details.dateKey] || "—"}</dd></div>
-          {documentKind === "invoices" ? <div><dt className="text-xs text-muted-foreground">Due date</dt><dd className="mt-1 font-medium">{invoice.dueDate || "—"}</dd></div> : null}
+          {documentKind === "invoices" && !isReceipt ? <div><dt className="text-xs text-muted-foreground">Due date</dt><dd className="mt-1 font-medium">{invoice.dueDate || "—"}</dd></div> : null}
           {documentKind === "estimates" ? <div><dt className="text-xs text-muted-foreground">Expiry date</dt><dd className="mt-1 font-medium">{invoice.expiryDate || "—"}</dd></div> : null}
           {documentKind === "sales-orders" ? <div><dt className="text-xs text-muted-foreground">Delivery date</dt><dd className="mt-1 font-medium">{invoice.deliveryDate || "—"}</dd></div> : null}
           {documentKind === "invoices" ? <div><dt className="text-xs text-muted-foreground">Payment terms</dt><dd className="mt-1 font-medium">{invoice.paymentTerms || "—"}</dd></div> : null}

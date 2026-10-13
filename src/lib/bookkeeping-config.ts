@@ -473,6 +473,7 @@ export const navigationGroups: NavigationGroup[] = [
   {
     label: "Sales",
     items: [
+      { slug: "sales", label: "All sales", icon: "ReceiptText" },
       { slug: "customers", label: "Customers", icon: "Users" },
       { slug: "items", label: "Items & services", icon: "Package" },
       { slug: "invoices", label: "Invoices", icon: "FileText" },
@@ -552,6 +553,22 @@ export const navigationGroups: NavigationGroup[] = [
     ],
   },
 ];
+
+/** A sales receipt, as in QuickBooks: an invoice paid in full on the spot and deposited to an account. */
+export function salesReceiptModule(): ModuleDefinition | undefined {
+  const invoices = moduleBySlug("invoices");
+  if (!invoices) return undefined;
+  const labels: Record<string, string> = { invoiceNumber: "Sales receipt no.", issueDate: "Sales receipt date", paymentMethod: "Deposit to", notes: "Message on sales receipt" };
+  return {
+    ...invoices,
+    label: "Sales receipt",
+    plural: "Sales receipts",
+    description: "Record a sale paid in full at the time of sale.",
+    fields: invoices.fields
+      .filter((field) => !["paymentTerms", "dueDate", "status", "shippingAddress"].includes(field.key))
+      .map((field) => (labels[field.key] ? { ...field, label: labels[field.key], ...(field.key === "paymentMethod" ? { required: true, help: "The Cash, Bank or Credit card account the money went into." } : {}) } : field)),
+  };
+}
 
 export function moduleBySlug(slug: string): ModuleDefinition | undefined {
   return modules.find((module) => module.slug === slug);

@@ -8,6 +8,7 @@ import { readableError } from "@/lib/action-error";
 
 import { deleteBookkeepingRecord, recordBillPayment, recordExpensePayment, undoBillPayments, undoExpensePayment } from "@/app/actions";
 import PaymentDialog from "@/components/bookkeeping/PaymentDialog";
+import PayBillsDialog from "@/components/bookkeeping/PayBillsDialog";
 import RecordEditor from "@/components/bookkeeping/RecordEditor";
 import RecordDetailPanel from "@/components/bookkeeping/RecordDetailPanel";
 import type { RecordMenuAction } from "@/components/bookkeeping/RecordTable";
@@ -115,6 +116,7 @@ export default function ExpensesWorkspace({ expenses: initialExpenses, bills: in
   const [draftStatus, setDraftStatus] = useState("all");
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [editorModule, setEditorModule] = useState<ModuleDefinition | null>(null);
+  const [payBillsOpen, setPayBillsOpen] = useState(false);
   const [editingRecord, setEditingRecord] = useState<BookkeepingRecord | null>(null);
   const [editorDefaults, setEditorDefaults] = useState<Record<string, string>>({});
   const [page, setPage] = useState(1);
@@ -377,6 +379,7 @@ export default function ExpensesWorkspace({ expenses: initialExpenses, bills: in
             <DropdownMenuContent align="end" className="min-w-52">
               <DropdownMenuItem onClick={() => openNewTransaction("bills")}>Bill</DropdownMenuItem>
               <DropdownMenuItem onClick={() => openNewTransaction("expenses")}>Expense</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setPayBillsOpen(true)}>Pay bills</DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
@@ -590,6 +593,7 @@ export default function ExpensesWorkspace({ expenses: initialExpenses, bills: in
         />
       ) : null}
 
+      {payBillsOpen ? <PayBillsDialog open onOpenChange={setPayBillsOpen} bills={records.filter((record) => record.kind === "bills")} accounts={accounts} currency={currency} asOfDate={asOfDate} onDone={() => router.refresh()} /> : null}
       {editorModule ? (
         <RecordEditor
           key={`${editorModule.kind}-${editingRecord?.id ?? "new"}`}

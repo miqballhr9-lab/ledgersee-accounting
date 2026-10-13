@@ -43,7 +43,7 @@ export default function ReportsHome() {
         <div className="min-w-0">
           <p className="text-xs font-medium uppercase tracking-[0.12em] text-primary">Accounts / Reports</p>
           <h1 className="mt-1 text-[26px] font-semibold tracking-tight sm:text-3xl">Reports</h1>
-          <p className="mt-1.5 max-w-2xl text-sm text-muted-foreground">{total} reports, grouped as in QuickBooks. Star the ones you open often.</p>
+          <p className="mt-1.5 max-w-2xl text-sm text-muted-foreground">{total} reports, grouped by topic. Star the ones you open often.</p>
         </div>
         <div className="relative w-full sm:w-80">
           <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
