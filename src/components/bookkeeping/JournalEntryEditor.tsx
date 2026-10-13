@@ -459,13 +459,16 @@ export default function JournalEntryEditor({ accounts, record, defaults, currenc
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-[min(1400px,calc(100vw-3rem))]">
-        <DialogHeader className="pr-8">
-          <DialogTitle className="text-lg">{record ? "Edit journal" : "New journal"}</DialogTitle>
-          <DialogDescription>Post balanced double-entry journals with a debit and a credit.</DialogDescription>
+      <DialogContent showCloseButton={false} className="top-0 left-0 flex h-dvh max-h-dvh w-screen max-w-none translate-x-0 translate-y-0 flex-col gap-0 rounded-none bg-background p-0 ring-0 sm:max-w-none data-open:zoom-in-100 data-closed:zoom-out-100">
+        <DialogHeader className="flex-row items-center justify-between gap-3 border-b border-border bg-card px-4 py-3 sm:px-6">
+          <div className="min-w-0">
+            <DialogTitle className="truncate text-xl font-semibold">Journal entry{reference ? <span className="ml-2 font-normal text-muted-foreground">no. {reference}</span> : null}</DialogTitle>
+            <DialogDescription className="sr-only">Post balanced double-entry journals with a debit and a credit.</DialogDescription>
+          </div>
+          <Button type="button" variant="ghost" size="icon" aria-label="Close" onClick={() => onOpenChange(false)}><X size={20} /></Button>
         </DialogHeader>
 
-        <form ref={formRef} id="journal-entry-form" onSubmit={submit} className="space-y-5">
+        <form ref={formRef} id="journal-entry-form" onSubmit={submit} className="mx-auto min-h-0 w-full max-w-[1440px] flex-1 space-y-5 overflow-y-auto p-4 sm:p-6">
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2">
               <Label htmlFor="journal-date">Journal date <span className="text-destructive">*</span></Label>
@@ -655,13 +658,13 @@ export default function JournalEntryEditor({ accounts, record, defaults, currenc
           {error ? <p role="alert" className="rounded-md border border-destructive/20 bg-destructive/5 px-3 py-2.5 text-sm text-destructive">{error}</p> : null}
         </form>
 
-        <div className="sticky -bottom-4 -mx-4 -mb-4 flex items-center justify-between gap-2 border-t border-border bg-card px-4 py-3">
-          <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={pending}>Cancel</Button>
+        <div className="flex flex-wrap items-center justify-between gap-2 bg-sidebar px-4 py-3 text-sidebar-foreground sm:px-6">
+          <Button type="button" variant="ghost" className="text-sidebar-foreground hover:bg-white/10 hover:text-white" onClick={() => onOpenChange(false)} disabled={pending}>Cancel</Button>
           <div className="flex items-center gap-2">
             <>
-                <Button type="button" variant="ghost" onClick={reverseJournal} disabled={pending || !record} title={record ? "Start a new journal with debits and credits swapped" : "Save the journal first to reverse it"}>Reverse</Button>
+                <Button type="button" variant="ghost" className="text-sidebar-foreground hover:bg-white/10 hover:text-white" onClick={reverseJournal} disabled={pending || !record} title={record ? "Start a new journal with debits and credits swapped" : "Save the journal first to reverse it"}>Reverse</Button>
                 <DropdownMenu>
-                  <DropdownMenuTrigger render={<Button type="button" variant="ghost" className="gap-1" disabled={pending || !record} title={record ? undefined : "Save the journal first to copy, delete or review it"}>More<ChevronDown size={14} /></Button>} />
+                  <DropdownMenuTrigger render={<Button type="button" variant="ghost" className="gap-1 text-sidebar-foreground hover:bg-white/10 hover:text-white" disabled={pending || !record} title={record ? undefined : "Save the journal first to copy, delete or review it"}>More<ChevronDown size={14} /></Button>} />
                   <DropdownMenuContent align="end" side="top" className="min-w-48">
                     <DropdownMenuItem onClick={copyJournal}><Copy size={14} />Copy</DropdownMenuItem>
                     <DropdownMenuItem variant="destructive" onClick={() => void deleteJournal()}><Trash2 size={14} />Delete</DropdownMenuItem>
@@ -670,7 +673,7 @@ export default function JournalEntryEditor({ accounts, record, defaults, currenc
                   </DropdownMenuContent>
                 </DropdownMenu>
             </>
-            <Button type="submit" form="journal-entry-form" variant="outline" disabled={pending || uploading || !accountOptions.length}>{pending ? "Saving…" : "Save"}</Button>
+            <Button type="submit" form="journal-entry-form" variant="outline" className="border-white/30 bg-transparent text-sidebar-foreground hover:bg-white/10 hover:text-white" disabled={pending || uploading || !accountOptions.length}>{pending ? "Saving…" : "Save"}</Button>
             <div className="flex">
               <Button type="submit" form="journal-entry-form" data-intent="save-and-new" className="rounded-r-none" disabled={pending || uploading || !accountOptions.length}>Save and new</Button>
               <DropdownMenu>
