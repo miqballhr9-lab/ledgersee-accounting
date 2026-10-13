@@ -2,7 +2,14 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { ChevronDown, ChevronRight, Search, Star } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { ChevronDown, ChevronRight, Search, Star, Trash2 } from "lucide-react";
+import { toast } from "sonner";
+
+import { deleteBookkeepingRecord } from "@/app/actions";
+import { Button } from "@/components/ui/button";
+import { readableError } from "@/lib/action-error";
+import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
 
 import { Input } from "@/components/ui/input";
 import { reportCategories, type ReportDefinition } from "@/lib/report-catalog";
@@ -11,7 +18,21 @@ import { useFavouriteReports } from "@/components/reports/use-favourite-reports"
 const tabs = ["Standard", "Custom reports", "Management reports"] as const;
 
 /** The reports list, laid out like QuickBooks Online: favourites, then categories that open and close. */
-export default function ReportsHome() {
+export default function ReportsHome({ customReports = [] }: { customReports?: BookkeepingRecord[] }) {
+  const router = useRouter();
+  const [removing, setRemoving] = useState<string | null>(null);
+  async function removeCustom(report: BookkeepingRecord) {
+    if (!window.confirm(`Delete the custom report “${report.data.name}”?`)) return;
+    setRemoving(report.id);
+    try {
+      await deleteBookkeepingRecord("custom-reports", report.id);
+      router.refresh();
+    } catch (error) {
+      toast.error(error instanceof Error ? readableError(error) : "We couldn’t delete this report.");
+    } finally {
+      setRemoving(null);
+    }
+  }
   const [tab, setTab] = useState<(typeof tabs)[number]>("Standard");
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState<Set<string>>(() => new Set(["favourites", "business-overview"]));
@@ -59,14 +80,45 @@ export default function ReportsHome() {
         ))}
       </div>
 
-      {tab !== "Standard" ? (
-        <section className="rounded-lg border border-border bg-card px-6 py-12 text-center">
-          <p className="text-sm font-medium">{tab === "Custom reports" ? "No custom reports yet" : "Management reports are coming soon"}</p>
-          <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">
-            {tab === "Custom reports"
-              ? "Saving a customised report (filters, columns and period) is coming in the next update. Until then, bookmark a report's link after you run it."
-              : "A management report packs several reports with a cover page into one PDF. It is coming in a later update."}
-          </p>
+      {tab === "Custom reports" ? (
+        <section className="overflow-hidden rounded-lg border border-border bg-card">
+          {customReports.length ? (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border bg-muted/40 text-left text-xs text-muted-foreground">
+                  <th className="px-5 py-2.5 font-medium">Name</th>
+                  <th className="px-3 py-2.5 font-medium">Based on</th>
+                  <th className="px-3 py-2.5 font-medium">Saved</th>
+                  <th className="px-5 py-2.5 text-right font-medium">Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {customReports.map((report) => (
+                  <tr key={report.id} className="border-b border-border/70">
+                    <td className="px-5 py-2.5"><Link href={`/app/reports/${report.data.reportKey}?${report.data.query ? `${report.data.query}&` : ""}cname=${encodeURIComponent(report.data.name)}`} className="text-primary hover:underline">{report.data.name}</Link></td>
+                    <td className="px-3 py-2.5 text-muted-foreground">{report.data.reportLabel || report.data.reportKey}</td>
+                    <td className="px-3 py-2.5 text-muted-foreground">{report.createdAt.slice(0, 10)}</td>
+                    <td className="px-5 py-2.5 text-right"><Button type="button" variant="ghost" size="sm" className="text-destructive" disabled={removing === report.id} onClick={() => void removeCustom(report)}><Trash2 size={14} />Delete</Button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <div className="px-6 py-12 text-center">
+              <p className="text-sm font-medium">No custom reports yet</p>
+              <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">Run any report, change its period, columns or filters, then choose “Save customisation”. It will be listed here.</p>
+            </div>
+          )}
+        </section>
+      ) : tab === "Management reports" ? (
+        <section className="overflow-hidden rounded-lg border border-border bg-card">
+          <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-4">
+            <div>
+              <Link href="/app/reports/management-report" className="font-medium text-primary hover:underline">Company overview</Link>
+              <p className="mt-0.5 text-sm text-muted-foreground">Cover page, contents, Profit and Loss, Balance Sheet and Statement of Cash Flows in one printable report.</p>
+            </div>
+            <Button type="button" variant="outline" nativeButton={false} render={<Link href="/app/reports/management-report" />}>View</Button>
+          </div>
         </section>
       ) : (
         <div className="space-y-3">

@@ -32,7 +32,7 @@ export interface ZoomSpec {
 export interface ReportColumn {
   key: string;
   label: string;
-  kind: "amount" | "change" | "pct" | "text";
+  kind: "amount" | "change" | "pct" | "text" | "count";
 }
 
 export interface ReportLine {

@@ -52,7 +52,7 @@ export function areaForKind(kind: string): Area | "settings" {
     customers: "sales", items: "sales", invoices: "sales", estimates: "sales", "sales-orders": "sales", "credit-notes": "sales", "recurring-invoices": "sales", payments: "sales",
     vendors: "purchases", bills: "purchases", expenses: "purchases", "purchase-orders": "purchases", "supplier-credits": "purchases",
     "inventory-movements": "inventory",
-    "bank-accounts": "accounting", transactions: "accounting", "bank-rules": "accounting", accounts: "accounting", journals: "accounting", taxes: "accounting", reconciliations: "accounting", "recurring-transactions": "accounting",
+    "bank-accounts": "accounting", transactions: "accounting", "bank-rules": "accounting", accounts: "accounting", journals: "accounting", taxes: "accounting", reconciliations: "accounting", "recurring-transactions": "accounting", "custom-reports": "accounting",
     budgets: "budgets",
     payroll: "payroll", employees: "payroll",
   };

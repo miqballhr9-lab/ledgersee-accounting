@@ -21,6 +21,8 @@ type Col = ReportColumn;
 const text = (key: string, label: string): Col => ({ key, label, kind: "text" });
 const amount = (key: string, label: string): Col => ({ key, label, kind: "amount" });
 const pct = (key: string, label: string): Col => ({ key, label, kind: "pct" });
+/** Counts and days: summed like amounts, shown without currency formatting. */
+const count = (key: string, label: string): Col => ({ key, label, kind: "count" });
 
 const openStatuses = (status: string | undefined) => !["Draft", "Cancelled", "Void"].includes(status ?? "");
 
@@ -44,7 +46,7 @@ function daysLate(due: string, asOf: string) {
  */
 function grouped(columns: Col[], groups: Array<{ label: string; rows: Row[]; zooms?: (ZoomSpec | null)[] }>, options: { grandTotal?: boolean; groupTotals?: boolean; runningBalance?: number; flat?: boolean } = {}): ReportLine[] {
   const lines: ReportLine[] = [];
-  const sumColumns = columns.map((column) => column.kind === "amount" && column.key !== "balance");
+  const sumColumns = columns.map((column) => (column.kind === "amount" || column.kind === "count") && column.key !== "balance");
   const grand = columns.map(() => 0);
   groups.forEach((group, groupIndex) => {
     if (!group.rows.length) return;
@@ -229,6 +231,56 @@ function purchaseLines(records: BookkeepingRecord[], options: ReportOptions): Pu
     }
   }
   return lines.sort((a, b) => a.date.localeCompare(b.date));
+}
+
+/** Salary entries whose month falls in the period. */
+function payrollInPeriod(records: BookkeepingRecord[], options: ReportOptions) {
+  return records.filter((record) => record.kind === "payroll" && record.data.month && `${record.data.month}-01` <= options.to && `${record.data.month}-31` >= options.from);
+}
+
+function monthLabel(month: string) {
+  const [year, value] = month.split("-").map(Number);
+  return year && value ? new Date(Date.UTC(year, value - 1, 1)).toLocaleDateString(undefined, { month: "long", year: "numeric", timeZone: "UTC" }) : month || "No month";
+}
+
+function shiftDays(date: string, days: number) {
+  const value = new Date(`${date}T00:00:00Z`);
+  value.setUTCDate(value.getUTCDate() + days);
+  return value.toISOString().slice(0, 10);
+}
+
+/** Postings of each transaction in the period, in date order. */
+function transactionsInPeriod(ledger: Ledger, options: ReportOptions) {
+  const byTxn = new Map<string, Ledger["postings"]>();
+  for (const posting of ledger.postings) {
+    if (!inPeriod(posting.date, options)) continue;
+    byTxn.set(posting.txnId, [...(byTxn.get(posting.txnId) ?? []), posting]);
+  }
+  return [...byTxn.entries()].sort(([, a], [, b]) => a[0].date.localeCompare(b[0].date) || a[0].number.localeCompare(b[0].number));
+}
+
+/** The other side of a posting: one account, or "-Split-" when there are several. */
+function splitAccounts(ledger: Ledger) {
+  const byTxn = new Map<string, Set<string>>();
+  for (const posting of ledger.postings) byTxn.set(posting.txnId, (byTxn.get(posting.txnId) ?? new Set<string>()).add(posting.account));
+  return (posting: Ledger["postings"][number]) => {
+    const others = [...(byTxn.get(posting.txnId) ?? [])].filter((account) => account !== posting.account);
+    return others.length > 1 ? "-Split-" : others[0] ?? "";
+  };
+}
+
+const kindLabels: Record<string, string> = {
+  invoices: "Invoice", bills: "Bill", expenses: "Expense", journals: "Journal entry", "credit-notes": "Credit note", "supplier-credits": "Supplier credit",
+  estimates: "Estimate", "sales-orders": "Sales order", "purchase-orders": "Purchase order", customers: "Customer", vendors: "Supplier", items: "Product/service",
+  accounts: "Account", payroll: "Salary", employees: "Employee", transactions: "Bank transaction", taxes: "Tax rate", budgets: "Budget", "recurring-transactions": "Recurring template",
+  "recurring-invoices": "Recurring invoice", "inventory-movements": "Inventory adjustment", settings: "Company settings", "bank-rules": "Bank rule",
+};
+
+function kindLabel(kind: string | undefined) {
+  if (!kind) return "";
+  if (kindLabels[kind]) return kindLabels[kind];
+  const name = kind.replace(/^(crm|hr)-/, "").replace(/-/g, " ");
+  return name.charAt(0).toUpperCase() + name.slice(1);
 }
 
 /** Every list report, by its catalog key. */
@@ -513,6 +565,191 @@ export function buildListReport(key: string, records: BookkeepingRecord[], ledge
       const items = records.filter((record) => record.kind === "items").sort((a, b) => (a.data.name ?? "").localeCompare(b.data.name ?? ""));
       const lines: ReportLine[] = items.map((item) => ({ id: item.id, label: item.data.name || "Item", kind: "account" as const, depth: 0, values: [itemTypeLabel(item.data.itemType), item.data.sku ?? "", item.data.unit ?? "", num(item.data.rate), num(item.data.cost) || null, stock.has(item.id) ? stock.get(item.id)!.onHand : null, num(item.data.reorderPoint) || null], source: src(item) }));
       return asOfResult(columns, lines, asOf, "No products or services yet.");
+    }
+
+    case "payroll-summary": {
+      const columns = [count("staff", "Employees"), amount("gross", "Gross pay"), amount("tax", "Tax withheld"), amount("other", "Other deductions"), amount("net", "Net pay"), amount("paid", "Paid")];
+      const months = groupBy(payrollInPeriod(records, options), (entry) => entry.data.month || "");
+      const lines: ReportLine[] = months.map(([month, entries]) => {
+        const sum = (key: string) => entries.reduce((total, entry) => total + num(entry.data[key]), 0);
+        return { id: month, label: monthLabel(month), kind: "account" as const, depth: 0, values: [entries.length, sum("grossSalary"), sum("taxDeduction"), sum("totalDeductions") - sum("taxDeduction"), sum("payableSalary"), sum("paidAmount")] };
+      });
+      if (lines.length) lines.push({ id: "total", label: "TOTAL", kind: "grand", depth: 0, values: columns.map((_, index) => lines.reduce((total, line) => total + ((line.values[index] as number) || 0), 0)) });
+      return periodResult(columns, lines, options, "No salaries in this period.");
+    }
+
+    case "payroll-details": {
+      const columns = [text("month", "Month"), text("ref", "Reference"), count("days", "Days worked"), amount("gross", "Gross pay"), amount("tax", "Tax withheld"), amount("other", "Other deductions"), amount("net", "Net pay"), text("status", "Status")];
+      const groups = groupBy(payrollInPeriod(records, options), (entry) => entry.data.employeeName || "Not specified").map(([label, entries]) => ({
+        label,
+        rows: entries.sort((a, b) => (a.data.month || "").localeCompare(b.data.month || "")).map((entry) => ({
+          values: [monthLabel(entry.data.month || ""), entry.data.reference || "", num(entry.data.workedDays), num(entry.data.grossSalary), num(entry.data.taxDeduction), num(entry.data.totalDeductions) - num(entry.data.taxDeduction), num(entry.data.payableSalary), entry.data.status || "Unpaid"],
+          source: src(entry),
+        })),
+      }));
+      const lines = grouped(columns, groups);
+      lines.forEach((line) => { if (line.kind !== "account") line.values[2] = null; });
+      return periodResult(columns, lines, options, "No salaries in this period.");
+    }
+
+    case "payroll-tax-liability": {
+      const columns = [amount("gross", "Gross pay"), amount("tax", "Tax withheld"), amount("paid", "Salary paid"), pct("rate", "Effective rate")];
+      const people = groupBy(payrollInPeriod(records, options), (entry) => entry.data.employeeName || "Not specified");
+      const lines: ReportLine[] = people.map(([name, entries]) => {
+        const gross = entries.reduce((total, entry) => total + num(entry.data.grossSalary), 0);
+        const tax = entries.reduce((total, entry) => total + num(entry.data.taxDeduction), 0);
+        return { id: name, label: name, kind: "account" as const, depth: 0, values: [gross, tax, entries.reduce((total, entry) => total + num(entry.data.paidAmount), 0), gross ? (tax / gross) * 100 : null] };
+      });
+      if (lines.length) {
+        const gross = lines.reduce((total, line) => total + (line.values[0] as number), 0);
+        const tax = lines.reduce((total, line) => total + (line.values[1] as number), 0);
+        lines.push({ id: "total", label: "TOTAL", kind: "grand", depth: 0, values: [gross, tax, lines.reduce((total, line) => total + (line.values[2] as number), 0), gross ? (tax / gross) * 100 : null] });
+      }
+      return periodResult(columns, lines, options, "No tax withheld from salaries in this period.");
+    }
+
+    case "employee-details": {
+      const columns = [text("id", "Employee ID"), text("designation", "Designation"), text("department", "Department"), text("email", "Email"), text("mobile", "Mobile"), text("joined", "Joining date"), amount("salary", "Base salary"), text("status", "Status")];
+      const lines: ReportLine[] = records.filter((record) => record.kind === "employees").sort((a, b) => (a.data.name ?? "").localeCompare(b.data.name ?? ""))
+        .map((employee) => ({ id: employee.id, label: employee.data.name || "Employee", kind: "account" as const, depth: 0, values: [employee.data.employeeId ?? "", employee.data.designation ?? "", employee.data.department ?? "", employee.data.email ?? "", employee.data.mobile ?? "", employee.data.joiningDate ?? "", num(employee.data.baseSalary), employee.data.status || "Active"], source: src(employee) }));
+      return asOfResult(columns, lines, asOf, "No employees yet.");
+    }
+
+    case "attendance-summary": {
+      const statuses = ["Present", "Late", "Half day", "Absent", "On leave", "Holiday"];
+      const columns = [...statuses.map((status) => count(status, status)), count("hours", "Hours worked")];
+      const marks = records.filter((record) => record.kind === "hr-attendance" && record.data.date && inPeriod(record.data.date, options));
+      const lines: ReportLine[] = groupBy(marks, (mark) => mark.data.employee || "Not specified").map(([name, entries]) => ({
+        id: name, label: name, kind: "account" as const, depth: 0,
+        values: [...statuses.map((status) => entries.filter((entry) => (entry.data.status || "Present") === status).length), entries.reduce((total, entry) => total + num(entry.data.hoursWorked), 0)],
+      }));
+      if (lines.length) lines.push({ id: "total", label: "TOTAL", kind: "grand", depth: 0, values: columns.map((_, index) => lines.reduce((total, line) => total + ((line.values[index] as number) || 0), 0)) });
+      return periodResult(columns, lines, options, "No attendance marked in this period.");
+    }
+
+    case "leave-summary": {
+      const columns = [count("entitled", "Days per year"), count("taken", "Taken"), count("pending", "Awaiting approval"), count("remaining", "Remaining")];
+      const types = new Map(records.filter((record) => record.kind === "hr-leave-types").map((type) => [type.id, type]));
+      const typeName = (value: string) => types.get(value)?.data.leaveName || value || "Leave";
+      const leaves = records.filter((record) => record.kind === "hr-leaves" && (record.data.fromDate || "") <= options.to && (record.data.toDate || record.data.fromDate || "") >= options.from);
+      const groups = groupBy(leaves, (leave) => leave.data.employee || "Not specified").map(([label, entries]) => ({
+        label,
+        rows: groupBy(entries, (entry) => entry.data.leaveType || "").map(([type, typed]) => {
+          const entitled = num(types.get(type)?.data.daysPerYear ?? [...types.values()].find((entry) => entry.data.leaveName === type)?.data.daysPerYear);
+          const taken = typed.filter((entry) => entry.data.status === "Approved").reduce((total, entry) => total + num(entry.data.days), 0);
+          const pending = typed.filter((entry) => !entry.data.status || entry.data.status === "Pending").reduce((total, entry) => total + num(entry.data.days), 0);
+          return { values: [entitled || null, taken, pending, entitled ? entitled - taken : null] };
+        }),
+        types: groupBy(entries, (entry) => entry.data.leaveType || "").map(([type]) => typeName(type)),
+      }));
+      const lines = grouped([text("type", "Leave type"), ...columns], groups.map((group) => ({ label: group.label, rows: group.rows.map((row, index) => ({ values: [group.types[index], ...row.values] })) })), { grandTotal: false });
+      lines.forEach((line) => { if (line.kind === "total") { line.values[1] = null; line.values[4] = null; } });
+      return periodResult([text("type", "Leave type"), ...columns], lines, options, "No leave in this period.");
+    }
+
+    case "loans-outstanding": {
+      const columns = [text("type", "Type"), text("start", "First deduction"), amount("amount", "Amount"), amount("installment", "Monthly installment"), amount("repaid", "Repaid"), amount("outstanding", "Balance")];
+      const loans = records.filter((record) => record.kind === "hr-loans" && record.data.status === "Approved");
+      const groups = groupBy(loans, (loan) => loan.data.employee || "Not specified").map(([label, entries]) => ({
+        label,
+        rows: entries.map((loan) => {
+          const total = num(loan.data.amount);
+          const repaid = num(loan.data.repaidAmount);
+          return { values: [loan.data.loanType || "Loan", loan.data.startMonth || "", total, num(loan.data.monthlyInstallment), repaid, loan.data.balance ? num(loan.data.balance) : total - repaid] };
+        }),
+      }));
+      const lines = grouped(columns, groups);
+      lines.forEach((line) => { if (line.kind !== "account") line.values[3] = null; });
+      return asOfResult(columns, lines, asOf, "No loans or advances to recover.");
+    }
+
+    case "account-list": {
+      const columns = [text("code", "Number"), text("type", "Account type"), text("detail", "Detail type"), text("description", "Description"), amount("balance", "Balance")];
+      const balances = new Map<string, number>();
+      for (const posting of ledger.postings) if (posting.date <= asOf) balances.set(posting.account, (balances.get(posting.account) ?? 0) + posting.amount);
+      const natural = (category: string) => (["Liability", "Equity", "Income"].includes(category) ? -1 : 1);
+      const chart = records.filter((record) => record.kind === "accounts");
+      const lines: ReportLine[] = [...ledger.accounts.values()]
+        .sort((a, b) => (a.code || "~").localeCompare(b.code || "~") || a.name.localeCompare(b.name))
+        .map((account) => {
+          const record = chart.find((entry) => entry.data.name === account.name);
+          return { id: account.name, label: account.name, kind: "account" as const, depth: 0, values: [account.code, account.accountType, account.detailType, record?.data.description ?? "", (balances.get(account.name) ?? 0) * natural(account.category)], source: record ? src(record) : undefined };
+        });
+      return asOfResult(columns, lines, asOf, "No accounts yet.");
+    }
+
+    case "journal": {
+      const columns = [text("date", "Date"), text("type", "Transaction type"), text("no", "No."), text("name", "Name"), text("memo", "Memo/Description"), text("account", "Account"), amount("debit", "Debit"), amount("credit", "Credit")];
+      const lines: ReportLine[] = [];
+      let debits = 0;
+      let credits = 0;
+      for (const [txnId, postings] of transactionsInPeriod(ledger, options)) {
+        postings.forEach((posting, index) => {
+          const debit = posting.amount > 0 ? posting.amount : null;
+          const credit = posting.amount < 0 ? -posting.amount : null;
+          debits += debit ?? 0;
+          credits += credit ?? 0;
+          lines.push({ id: `${txnId}:${index}`, label: "", kind: "account", depth: 0, values: index === 0 ? [posting.date, posting.type, posting.number, posting.name, posting.memo, posting.account, debit, credit] : ["", "", "", "", posting.memo, posting.account, debit, credit], source: { kind: posting.sourceKind, id: posting.sourceId } });
+        });
+        const total = postings.reduce((sum, posting) => sum + Math.max(0, posting.amount), 0);
+        lines.push({ id: `${txnId}:total`, label: "", kind: "total", depth: 0, values: ["", "", "", "", "", "", total, total] });
+      }
+      if (lines.length) lines.push({ id: "total", label: "TOTAL", kind: "grand", depth: 0, values: ["", "", "", "", "", "", debits, credits] });
+      return periodResult(columns, lines, options, "No transactions in this period.");
+    }
+
+    case "transaction-detail-by-account": {
+      const columns = [text("date", "Date"), text("type", "Transaction type"), text("no", "No."), text("name", "Name"), text("memo", "Memo/Description"), text("split", "Split"), amount("amount", "Amount"), amount("balance", "Balance")];
+      const splits = splitAccounts(ledger);
+      const postings = ledger.postings.filter((posting) => inPeriod(posting.date, options)).sort((a, b) => a.date.localeCompare(b.date));
+      const groups = groupBy(postings, (posting) => posting.account).map(([label, entries]) => ({
+        label,
+        rows: entries.map((posting) => ({ values: [posting.date, posting.type, posting.number, posting.name, posting.memo, splits(posting), posting.amount, null], source: { kind: posting.sourceKind, id: posting.sourceId } })),
+      }));
+      const lines = grouped(columns, groups, { runningBalance: 6, grandTotal: false });
+      lines.forEach((line) => { if (line.kind !== "account") line.values[7] = null; });
+      return periodResult(columns, lines, options, "No transactions in this period.");
+    }
+
+    case "transaction-list-by-date":
+    case "recent-transactions": {
+      const columns = [text("date", "Date"), text("type", "Transaction type"), text("no", "No."), text("name", "Name"), text("memo", "Memo/Description"), text("account", "Account"), text("split", "Split"), amount("amount", "Amount")];
+      const created = new Map(records.map((record) => [record.id, record.createdAt.slice(0, 10)]));
+      const since = shiftDays(asOf, -4);
+      const recent = key === "recent-transactions";
+      const lines: ReportLine[] = [];
+      const transactions = recent ? transactionsInPeriod(ledger, { ...options, from: "0000-01-01", to: "9999-12-31" }).filter(([, postings]) => (created.get(postings[0].sourceId.split("#")[0]) ?? "") >= since) : transactionsInPeriod(ledger, options);
+      for (const [txnId, postings] of transactions) {
+        const first = postings.find((posting) => posting.amount > 0) ?? postings[0];
+        const others = [...new Set(postings.filter((posting) => posting.account !== first.account).map((posting) => posting.account))];
+        lines.push({ id: txnId, label: "", kind: "account", depth: 0, values: [first.date, first.type, first.number, first.name, first.memo, first.account, others.length > 1 ? "-Split-" : others[0] ?? "", postings.reduce((sum, posting) => sum + Math.max(0, posting.amount), 0)], source: { kind: first.sourceKind, id: first.sourceId } });
+      }
+      if (recent) lines.sort((a, b) => String(b.values[0]).localeCompare(String(a.values[0])));
+      return recent ? { columns, lines, period: `Added since ${formatLongDate(since)}`, empty: "Nothing added in the last few days." } : periodResult(columns, lines, options, "No transactions in this period.");
+    }
+
+    case "reconciliation-reports": {
+      const columns = [text("statement", "Statement ending"), text("done", "Reconciled on"), amount("opening", "Beginning balance"), amount("deposits", "Cleared deposits"), amount("withdrawals", "Cleared payments"), amount("ending", "Ending balance"), count("items", "Items cleared")];
+      const done = records.filter((record) => record.kind === "reconciliations" && (record.data.statementDate || "") <= asOf);
+      const groups = groupBy(done, (entry) => entry.data.bankAccountName || "Bank account").map(([label, entries]) => ({
+        label,
+        rows: entries.sort((a, b) => (b.data.statementDate || "").localeCompare(a.data.statementDate || "")).map((entry) => ({ values: [entry.data.statementDate || "", entry.createdAt.slice(0, 10), num(entry.data.openingBalance), num(entry.data.clearedDeposits), num(entry.data.clearedWithdrawals), num(entry.data.endingBalance), num(entry.data.clearedCount)] })),
+      }));
+      const lines = grouped(columns, groups, { groupTotals: false, grandTotal: false });
+      return asOfResult(columns, lines, asOf, "No completed reconciliations yet.");
+    }
+
+    case "audit-log": {
+      const columns = [text("changed", "Date changed"), text("user", "User"), text("event", "Event"), text("type", "Type"), text("no", "No. / name"), text("name", "Customer / supplier"), amount("amount", "Amount")];
+      const existing = new Set(records.map((record) => record.id));
+      const events = records.filter((record) => record.kind === "audit-events" && inPeriod((record.data.at || record.createdAt).slice(0, 10), options))
+        .sort((a, b) => (b.data.at || b.createdAt).localeCompare(a.data.at || a.createdAt));
+      const lines: ReportLine[] = events.map((event) => ({
+        id: event.id, label: "", kind: "account" as const, depth: 0,
+        values: [(event.data.at || event.createdAt).replace("T", " ").slice(0, 16), event.data.actorName || event.data.actorEmail || "—", event.data.action || "", kindLabel(event.data.recordKind), event.data.label || "", event.data.name || "", event.data.amount ? num(event.data.amount) : null],
+        source: event.data.action !== "Deleted" && existing.has(event.data.recordId) ? { kind: event.data.recordKind, id: event.data.recordId } : undefined,
+      }));
+      return periodResult(columns, lines, options, "No changes recorded in this period. Changes are recorded from now on.");
     }
 
     default:

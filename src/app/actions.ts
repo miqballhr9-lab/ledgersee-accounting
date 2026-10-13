@@ -286,7 +286,54 @@ export async function listAllBookkeepingRecords(): Promise<BookkeepingRecord[]> 
   return rows.filter((row) => canReadKind(me.role, row.kind)).map(serializeRow);
 }
 
-export async function saveBookkeepingRecord(
+/** Every add, edit, delete and payment, for the Audit Log report. */
+const unaudited = new Set(["audit-events", "automation-log", "automation-settings", "team-members"]);
+
+function auditLabel(data: Record<string, string>) {
+  return data.invoiceNumber || data.billNumber || data.creditNumber || data.estimateNumber || data.orderNumber || data.poNumber || data.reference || data.referenceNumber
+    || data.rtName || data.employeeName || data.name || data.description || data.payee || "";
+}
+
+async function recordAudit(me: Awaited<ReturnType<typeof requireUser>>, action: string, kind: string, id: string, data: Record<string, string>) {
+  if (unaudited.has(kind)) return;
+  try {
+    await db.insert(bookkeepingRecord).values({
+      userId: me.id,
+      kind: "audit-events",
+      data: {
+        action,
+        recordKind: kind,
+        recordId: id,
+        label: auditLabel(data).slice(0, 200),
+        name: (data.customer || data.vendor || data.payee || data.employeeName || "").slice(0, 200),
+        amount: data.amount ?? "",
+        actorName: me.name ?? "",
+        actorEmail: me.email ?? "",
+        at: new Date().toISOString(),
+      },
+    });
+  } catch {
+    // The audit trail never blocks the change itself.
+  }
+}
+
+/** Logs a payment against an invoice, bill, expense or salary, with the amount of the payment just recorded. */
+async function auditPayment(me: Awaited<ReturnType<typeof requireUser>>, kind: string, id: string) {
+  const link = { invoices: "invoiceId", bills: "billId", expenses: "expenseId", payroll: "payrollId" }[kind] ?? "";
+  const [record] = await db.select().from(bookkeepingRecord).where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id))).limit(1);
+  const [payment] = link ? await db.select().from(bookkeepingRecord)
+    .where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "payments"), sql`${bookkeepingRecord.data}->>${link} = ${id}`))
+    .orderBy(desc(bookkeepingRecord.createdAt)).limit(1) : [];
+  if (record) await recordAudit(me, "Payment", kind, id, { ...record.data, amount: payment?.data.amount ?? "" });
+}
+
+export async function saveBookkeepingRecord(kind: string, input: Record<string, string>, id?: string): Promise<BookkeepingRecord> {
+  const saved = await saveRecord(kind, input, id);
+  await recordAudit(await requireUser(), id ? "Edited" : "Added", kind, saved.id, saved.data);
+  return saved;
+}
+
+async function saveRecord(
   kind: string,
   input: Record<string, string>,
   id?: string,
@@ -1030,6 +1077,13 @@ export async function sendBudgetSummary(id: string, recipient: string): Promise<
 
 export async function deleteBookkeepingRecord(kind: string, id: string): Promise<void> {
   const me = await requireUser();
+  const [before] = isRecordKind(kind) ? await db.select().from(bookkeepingRecord).where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, kind))).limit(1) : [];
+  await deleteRecord(kind, id);
+  if (before) await recordAudit(me, "Deleted", kind, id, before.data);
+}
+
+async function deleteRecord(kind: string, id: string): Promise<void> {
+  const me = await requireUser();
   assertCanWrite(me, kind);
   if (!isRecordKind(kind)) throw new ActionError("That section isn’t available.");
   if (kind === "reconciliations") throw new ActionError("Completed reconciliations can’t be deleted.");
@@ -1177,6 +1231,7 @@ export async function recordInvoicePayment(
       ...(typeof reference === "string" && reference.trim() ? { referenceNumber: reference.trim().slice(0, 120) } : {}),
     },
   });
+  await auditPayment(me, "invoices", id);
   revalidatePath("/app", "layout");
 }
 
@@ -1281,6 +1336,7 @@ export async function recordBillPayment(id: string, paymentDate: string, account
       data: { billId: id, billNumber: bill.data.billNumber ?? "Bill", vendor: bill.data.vendor ?? "", amount: amount.toFixed(2), paymentDate, method, paymentAccountId: account.id, paymentAccountName: name, direction: "out", ...(typeof reference === "string" && reference.trim() ? { referenceNumber: reference.trim().slice(0, 120) } : {}) },
     });
   });
+  await auditPayment(me, "bills", id);
   revalidatePath("/app", "layout");
 }
 
@@ -1369,6 +1425,7 @@ export async function recordExpensePayment(id: string, paymentDate: string, acco
     kind: "payments",
     data: { expenseId: id, reference: expense.data.referenceNumber ?? "", vendor: expense.data.payee ?? "", amount: amount.toFixed(2), paymentDate, method, paymentAccountId: account.id, paymentAccountName: name, direction: "out" },
   });
+  await auditPayment(me, "expenses", id);
   revalidatePath("/app", "layout");
 }
 
@@ -1400,6 +1457,7 @@ export async function recordPayrollPayment(id: string, paymentDate: string, acco
   });
   // The salary's loan deduction pays down the employee's HR loans once the salary is fully paid.
   if (fullyPaid) await applyLoanRepayment(me.id, entry.data, 1);
+  await auditPayment(me, "payroll", id);
   revalidatePath("/app", "layout");
 }
 

@@ -3,7 +3,12 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { ChevronDown, ChevronLeft, ChevronRight, FileDown, Printer, SlidersHorizontal, Star } from "lucide-react";
+import { ChevronDown, ChevronLeft, ChevronRight, FileDown, Printer, Save, SlidersHorizontal, Star } from "lucide-react";
+import { toast } from "sonner";
+
+import { saveBookkeepingRecord } from "@/app/actions";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { readableError } from "@/lib/action-error";
 
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -41,6 +46,7 @@ const sourceSlug: Record<string, string> = {
   invoices: "invoices", bills: "bills", expenses: "expenses", "credit-notes": "credit-notes", "supplier-credits": "supplier-credits",
   journals: "journals", transactions: "transactions", accounts: "accounts", payroll: "payroll",
   customers: "customers", vendors: "vendors", estimates: "estimates", "sales-orders": "sales-orders", "purchase-orders": "purchase-orders", items: "items",
+  employees: "employees", "recurring-transactions": "recurring", "inventory-movements": "inventory",
 };
 
 const asOfEngines = new Set(["bs", "trial-balance", "ar-ageing", "ap-ageing"]);
@@ -49,6 +55,7 @@ const asOfReports = new Set([
   "accounts-receivable-ageing-detail", "accounts-payable-ageing-detail", "collections-report", "customer-balance-summary", "customer-balance-detail",
   "supplier-balance-summary", "supplier-balance-detail", "open-invoices", "unpaid-bills", "open-purchase-order-list", "customer-contact-list", "supplier-contact-list",
   "inventory-valuation-summary", "stock-take-worksheet", "product-service-list",
+  "employee-details", "loans-outstanding", "account-list", "reconciliation-reports", "recent-transactions",
 ]);
 const isAsOfReport = (report: ReportDefinition) => asOfEngines.has(report.engine ?? "") || asOfReports.has(report.key);
 
@@ -99,6 +106,27 @@ export default function ReportViewer({ reportKey, records, today }: ReportViewer
   const [header, setHeader] = useState({ company: true, title: true, period: true, footer: true });
   const [nameDraft, setNameDraft] = useState(options.nameFilter ?? "");
   const [notes, setNotes] = useState("");
+  const [saveOpen, setSaveOpen] = useState(false);
+  const [saveName, setSaveName] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  /** Save customisation, as in QuickBooks: keeps this report's settings under a name in Custom reports. */
+  async function saveCustomisation() {
+    if (!saveName.trim()) return;
+    setSaving(true);
+    try {
+      const settingsQuery = new URLSearchParams(params.toString());
+      settingsQuery.delete("back");
+      settingsQuery.delete("cname");
+      await saveBookkeepingRecord("custom-reports", { name: saveName.trim().slice(0, 120), reportKey: report.key, reportLabel: report.label, query: settingsQuery.toString() });
+      toast.success(`Saved “${saveName.trim()}” in Custom reports.`);
+      setSaveOpen(false);
+    } catch (error) {
+      toast.error(error instanceof Error ? readableError(error) : "We couldn’t save this report.");
+    } finally {
+      setSaving(false);
+    }
+  }
   const [notesOpen, setNotesOpen] = useState(false);
   const { favourites, toggle } = useFavouriteReports();
 
@@ -179,6 +207,7 @@ export default function ReportViewer({ reportKey, records, today }: ReportViewer
     if (value === null || value === "") return "";
     if (typeof value === "string") return value;
     if (kind === "pct") return `${value.toFixed(2)} %`;
+    if (kind === "count") return value.toLocaleString(undefined, { maximumFractionDigits: 2 });
     return money(value);
   }
 
@@ -353,6 +382,7 @@ export default function ReportViewer({ reportKey, records, today }: ReportViewer
               <button type="button" className="hover:underline" onClick={() => setNotesOpen((value) => !value)}>{notesOpen ? "Hide notes" : "Add notes"}</button>
             </div>
             <div className="flex gap-1.5">
+              {!isZoom ? <Button type="button" variant="outline" className="gap-1.5" onClick={() => { setSaveName(params.get("cname") || report.label); setSaveOpen(true); }}><Save size={16} />Save customisation</Button> : null}
               <Button type="button" variant="outline" size="icon" aria-label="Print or save as PDF" onClick={() => window.print()}><Printer size={16} /></Button>
               <DropdownMenu>
                 <DropdownMenuTrigger render={<Button type="button" variant="outline" className="gap-1.5"><FileDown size={16} />Export<ChevronDown size={14} /></Button>} />
@@ -480,6 +510,22 @@ export default function ReportViewer({ reportKey, records, today }: ReportViewer
           </SheetFooter>
         </SheetContent>
       </Sheet>
+      <Dialog open={saveOpen} onOpenChange={setSaveOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Save customisation</DialogTitle>
+            <DialogDescription>Keep this report with its period, columns and filters. Open it again from Custom reports.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="custom-report-name">Custom report name</Label>
+            <Input id="custom-report-name" value={saveName} maxLength={120} onChange={(event) => setSaveName(event.target.value)} />
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setSaveOpen(false)} disabled={saving}>Cancel</Button>
+            <Button type="button" onClick={() => void saveCustomisation()} disabled={saving || !saveName.trim()}>{saving ? "Saving…" : "Save"}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </main>
   );
 }

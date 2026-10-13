@@ -9,6 +9,8 @@ export const recordKinds = [
   "supplier-credits",
   "recurring-invoices",
   "recurring-transactions",
+  "audit-events",
+  "custom-reports",
   "bills",
   "expenses",
   "purchase-orders",
