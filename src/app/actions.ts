@@ -17,6 +17,7 @@ import { buildInventory, inventoryKinds, isInventoryItem } from "@/lib/inventory
 import { siteUrl } from "@/lib/site";
 import { isRecordKind, type BookkeepingRecord, type RecordKind } from "@/lib/bookkeeping-types";
 import { paymentAccountType } from "@/lib/payment-accounts";
+import { recurringKinds, type RecurringKind } from "@/lib/recurring";
 import { accountCategoryForType, accountDetailsForType } from "@/lib/account-types";
 import { standardAccounts } from "@/lib/standard-accounts";
 import { budgetActual, budgetExpectedTotal, payrollBudgetHead, budgetVariance, parseBudgetLines, parseCsv, recordsWithinBudgetDates, type BudgetCategory, type BudgetLine, type BudgetLineType, type BudgetPeriod } from "@/lib/budget-utils";
@@ -107,6 +108,32 @@ function sanitizePayload(input: Record<string, string>): Record<string, string> 
       return [key, value.trim().slice(0, key === "emailTemplate" ? 12000 : key === "lines" || key === "lineItems" ? 30000 : 4000)];
     }),
   );
+}
+
+/** Checks a recurring template's schedule, as in QuickBooks' Recurring transactions. */
+function recurringTemplateData(me: Parameters<typeof assertCanWrite>[0], data: Record<string, string>): Record<string, string> {
+  if (!recurringKinds.includes(data.rtKind as RecurringKind)) throw new ActionError("Choose an invoice, bill, expense or journal to repeat.");
+  assertCanWrite(me, data.rtKind);
+  if (!data.rtName?.trim()) throw new ActionError("Enter a template name.");
+  if (!["Scheduled", "Reminder", "Unscheduled"].includes(data.rtType)) throw new ActionError("Choose Scheduled, Reminder or Unscheduled.");
+  if (data.rtType !== "Unscheduled") {
+    if (!["Daily", "Weekly", "Monthly", "Yearly"].includes(data.rtInterval)) throw new ActionError("Choose how often it repeats.");
+    const every = Number(data.rtEvery || "1");
+    if (!Number.isInteger(every) || every < 1 || every > 99) throw new ActionError("Repeat every 1 to 99 periods.");
+    if (!isIsoDate(data.rtStart)) throw new ActionError("Choose a start date.");
+    if (!["None", "By", "After"].includes(data.rtEndType || "None")) throw new ActionError("Choose when the schedule ends.");
+    if (data.rtEndType === "By" && (!isIsoDate(data.rtEndDate) || data.rtEndDate < data.rtStart)) throw new ActionError("Choose an end date on or after the start date.");
+    const occurrences = Number(data.rtOccurrences);
+    if (data.rtEndType === "After" && (!Number.isInteger(occurrences) || occurrences < 1 || occurrences > 999)) throw new ActionError("Enter how many times it repeats, from 1 to 999.");
+    data = { ...data, rtEvery: String(every), rtEndType: data.rtEndType || "None", rtNext: data.rtNext && isIsoDate(data.rtNext) ? data.rtNext : data.rtStart };
+  } else {
+    data = { ...data, rtInterval: "", rtEvery: "", rtStart: "", rtEndType: "", rtEndDate: "", rtOccurrences: "", rtNext: "" };
+  }
+  return { ...data, rtName: data.rtName.trim().slice(0, 120), rtStatus: ["Active", "Paused", "Ended"].includes(data.rtStatus) ? data.rtStatus : "Active", rtCount: String(Math.max(0, Number(data.rtCount) || 0)) };
+}
+
+function isIsoDate(value: string | undefined) {
+  return Boolean(value && /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(new Date(`${value}T00:00:00Z`).getTime()));
 }
 
 function amountFromLineItems(data: Record<string, string>, kind: string): Record<string, string> {
@@ -271,6 +298,9 @@ export async function saveBookkeepingRecord(
   if (kind === "team-members") throw new ActionError("Add and change team members from Users & roles.");
   let data = amountFromLineItems(sanitizePayload(input), kind);
   if (kind === "purchase-orders" && !id) data = { ...data, status: "Draft" };
+  if (kind === "recurring-transactions") data = recurringTemplateData(me, data);
+  // A check is an expense paid from a bank account, with a check number.
+  if (kind === "expenses" && data.docType && data.docType !== "Check") data = { ...data, docType: "" };
   if (kind === "items") {
     if (data.itemType === "Product") data.itemType = "Inventory";
     if (!["Inventory", "Non-inventory", "Service", "Bundle"].includes(data.itemType || "Inventory")) throw new ActionError("Choose Inventory, Non-inventory, Service or Bundle.");

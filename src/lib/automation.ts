@@ -36,9 +36,9 @@ export const automationTemplates: readonly AutomationTemplate[] = [
   },
   {
     action: "recurringInvoices",
-    name: "Generate due recurring invoices",
-    model: "Recurring invoices",
-    description: "Creates a draft invoice for every active recurring schedule whose next invoice date has arrived, then moves the schedule to its next date.",
+    name: "Generate due recurring transactions",
+    model: "Recurring transactions",
+    description: "Creates a draft invoice for every active recurring invoice schedule, and the invoice, bill, expense or journal for every scheduled recurring template, whose next date has arrived, then moves each schedule to its next date.",
     trigger: "daily",
     dayOfMonth: "1",
   },

@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import { BookOpen, ChevronDown, Copy, History, FileUp, GripVertical, LoaderCircle, Paperclip, Plus, Trash2, X } from "lucide-react";
+import { BookOpen, ChevronDown, Copy, History, FileUp, GripVertical, LoaderCircle, Paperclip, Plus, Repeat, Trash2, X } from "lucide-react";
 import { readableError } from "@/lib/action-error";
 
 import { getAttachmentUploadTarget, saveBookkeepingRecord } from "@/app/actions";
+import MakeRecurringDialog from "@/components/bookkeeping/MakeRecurringDialog";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -228,6 +229,7 @@ export default function JournalEntryEditor({ accounts, record, defaults, currenc
   const [status, setStatus] = useState("");
   const [pending, setPending] = useState(false);
   const [memo, setMemo] = useState(record?.data.memo ?? defaults.memo ?? "");
+  const [recurringPayload, setRecurringPayload] = useState<Record<string, string> | null>(null);
   const [attachment, setAttachment] = useState({ url: record?.data.attachment ?? "", name: record?.data.attachmentName ?? "" });
   const [uploading, setUploading] = useState(false);
   const [draggedLineId, setDraggedLineId] = useState<number | null>(null);
@@ -399,6 +401,23 @@ export default function JournalEntryEditor({ accounts, record, defaults, currenc
     } catch (importError) {
       setError(importError instanceof Error ? readableError(importError) : "We couldn’t read that CSV file.");
     }
+  }
+
+  /** "Make recurring": the journal's lines become a template that repeats. */
+  function startRecurring() {
+    const filled = lines.filter((line) => line.accountId && (Number(line.debit) > 0 || Number(line.credit) > 0));
+    if (filled.length < 2 || totals.debit === 0 || totals.debit !== totals.credit) {
+      setError("Balance the journal's debits and credits before making it recurring.");
+      return;
+    }
+    setError("");
+    setRecurringPayload({
+      date,
+      reference,
+      currency: record?.data.currency || currency,
+      memo,
+      lines: JSON.stringify(filled.map(({ accountId, debit, credit, description, name }) => ({ accountId, debit, credit, description, name }))),
+    });
   }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -662,6 +681,7 @@ export default function JournalEntryEditor({ accounts, record, defaults, currenc
           <Button type="button" variant="ghost" className="text-sidebar-foreground hover:bg-white/10 hover:text-white" onClick={() => onOpenChange(false)} disabled={pending}>Cancel</Button>
           <div className="flex items-center gap-2">
             <>
+                <Button type="button" variant="ghost" className="text-sidebar-foreground hover:bg-white/10 hover:text-white" onClick={startRecurring} disabled={pending}><Repeat size={15} />Make recurring</Button>
                 <Button type="button" variant="ghost" className="text-sidebar-foreground hover:bg-white/10 hover:text-white" onClick={reverseJournal} disabled={pending || !record} title={record ? "Start a new journal with debits and credits swapped" : "Save the journal first to reverse it"}>Reverse</Button>
                 <DropdownMenu>
                   <DropdownMenuTrigger render={<Button type="button" variant="ghost" className="gap-1 text-sidebar-foreground hover:bg-white/10 hover:text-white" disabled={pending || !record} title={record ? undefined : "Save the journal first to copy, delete or review it"}>More<ChevronDown size={14} /></Button>} />
@@ -686,6 +706,7 @@ export default function JournalEntryEditor({ accounts, record, defaults, currenc
           </div>
         </div>
       </DialogContent>
+      {recurringPayload ? <MakeRecurringDialog open onOpenChange={(next) => { if (!next) setRecurringPayload(null); }} kind="journals" payload={recurringPayload} defaultName={memo.trim().slice(0, 60) || "Journal entry"} /> : null}
       {record ? (
         <Dialog open={infoView !== null} onOpenChange={(next) => { if (!next) setInfoView(null); }}>
           <DialogContent className="sm:max-w-2xl">

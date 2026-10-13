@@ -52,7 +52,7 @@ export function areaForKind(kind: string): Area | "settings" {
     customers: "sales", items: "sales", invoices: "sales", estimates: "sales", "sales-orders": "sales", "credit-notes": "sales", "recurring-invoices": "sales", payments: "sales",
     vendors: "purchases", bills: "purchases", expenses: "purchases", "purchase-orders": "purchases", "supplier-credits": "purchases",
     "inventory-movements": "inventory",
-    "bank-accounts": "accounting", transactions: "accounting", "bank-rules": "accounting", accounts: "accounting", journals: "accounting", taxes: "accounting", reconciliations: "accounting",
+    "bank-accounts": "accounting", transactions: "accounting", "bank-rules": "accounting", accounts: "accounting", journals: "accounting", taxes: "accounting", reconciliations: "accounting", "recurring-transactions": "accounting",
     budgets: "budgets",
     payroll: "payroll", employees: "payroll",
   };
@@ -91,7 +91,7 @@ export function areaForPage(path: string): Area | null {
   if (slug === "crm") return "crm";
   if (slug === "hr" || slug === "my") return slug === "my" ? "self" : "hr";
   if (slug === "invoices" || slug === "documents" || slug === "sales") return "sales";
-  if (slug === "reconciliation" || slug === "reports" || slug === "tax-setup" || slug === "tax-returns") return "accounting";
+  if (slug === "recurring" || slug === "reconciliation" || slug === "reports" || slug === "tax-setup" || slug === "tax-returns") return "accounting";
   if (slug === "inventory") return "inventory";
   if (slug === "automation") return "admin";
   const area = areaForKind(slug);

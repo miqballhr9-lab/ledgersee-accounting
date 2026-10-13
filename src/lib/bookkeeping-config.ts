@@ -506,6 +506,7 @@ export const navigationGroups: NavigationGroup[] = [
       { slug: "bank-rules", label: "Bank rules", icon: "ListFilter" },
       { slug: "accounts", label: "Chart of accounts", icon: "ListTree" },
       { slug: "journals", label: "Manual journals", icon: "BookOpenCheck" },
+      { slug: "recurring", label: "Recurring transactions", icon: "Repeat" },
       { slug: "taxes", label: "Taxes", icon: "Percent" },
       { slug: "tax-setup", label: "Tax setup", icon: "Globe" },
       { slug: "tax-returns", label: "Tax returns", icon: "FileSpreadsheet" },

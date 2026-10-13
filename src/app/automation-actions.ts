@@ -6,6 +6,7 @@ import { revalidatePath, withoutRevalidation } from "@/lib/revalidate";
 import { db } from "@/db";
 import { bookkeepingRecord } from "@/db/schema";
 import { deleteBookkeepingRecord, generateRecurringInvoice, saveBookkeepingRecord } from "@/app/actions";
+import { runDueRecurringTransactions } from "@/app/recurring-actions";
 import { ActionError } from "@/lib/action-error";
 import { assertAdmin, requireUser } from "@/lib/auth";
 import { sendEmailOrThrow } from "@/lib/email";
@@ -240,9 +241,13 @@ async function runRecurringInvoices(userId: string) {
       errors.push(`${schedule.data.name || "Schedule"}: ${error instanceof Error ? error.message : "couldn’t be generated"}`);
     }
   }
+  // Scheduled recurring transactions (invoices, bills, expenses and journals) come due on the same run.
+  const recurring = await runDueRecurringTransactions();
+  for (const entry of recurring.created) items.push({ kind: entry.kind, id: entry.id, label: entry.label, status: "Pending approval" });
+  errors.push(...recurring.errors);
   const summary = items.length
-    ? `Generated ${items.length} draft ${items.length === 1 ? "invoice" : "invoices"}.`
-    : errors.length ? `Couldn’t generate ${errors.length} due ${errors.length === 1 ? "invoice" : "invoices"}.` : "No recurring invoices were due.";
+    ? `Generated ${items.length} recurring ${items.length === 1 ? "transaction" : "transactions"}.`
+    : errors.length ? `Couldn’t generate ${errors.length} due ${errors.length === 1 ? "transaction" : "transactions"}.` : "No recurring transactions were due.";
   return { items, errors, summary };
 }
 

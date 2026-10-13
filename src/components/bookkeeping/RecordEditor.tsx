@@ -3,7 +3,7 @@
 import { Fragment, useEffect, useRef, useState, type FormEvent } from "react";
 import { toast } from "sonner";
 import Link from "next/link";
-import { ChevronDown, Copy, LoaderCircle, Mail, MessageCircle, MessageSquareText, Plus, Printer, Share2, Trash2, UploadCloud, X } from "lucide-react";
+import { ChevronDown, Copy, LoaderCircle, Repeat, Mail, MessageCircle, MessageSquareText, Plus, Printer, Share2, Trash2, UploadCloud, X } from "lucide-react";
 import { readableError } from "@/lib/action-error";
 
 import {
@@ -16,7 +16,9 @@ import {
   sendCustomerDocumentRecord,
   sendInvoiceRecord,
 } from "@/app/actions";
+import MakeRecurringDialog from "@/components/bookkeeping/MakeRecurringDialog";
 import NoAccountsNotice from "@/components/bookkeeping/NoAccountsNotice";
+import type { RecurringKind } from "@/lib/recurring";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -150,6 +152,7 @@ function getInitialValues(module: ModuleDefinition, record: BookkeepingRecord | 
       values.shippingAddress = values.shippingAddress?.trim() || formatCustomerAddress(customer.data, "shipping");
     }
   }
+  if (module.kind === "expenses") values.docType = record?.data.docType ?? defaults.docType ?? "";
   if (module.kind === "invoices" || module.kind === "bills") {
     values.paymentMethod = record?.data.paymentAccountId || record?.data.paymentMethod || (values.docType === "Sales receipt" ? "" : "Credit");
   }
@@ -248,6 +251,7 @@ export default function RecordEditor({ module, record, customers, vendors, items
   }, [open, hasTaxField, record, taxSide]);
   const taxOptions = taxes.filter((tax) => tax.data.type !== "Withholding" && (tax.data.appliesTo || "Both") !== (taxSide === "Sales" ? "Purchases" : "Sales"));
   const [customTax, setCustomTax] = useState(false);
+  const [recurringPayload, setRecurringPayload] = useState<Record<string, string> | null>(null);
 
   const [invoiceLines, setInvoiceLines] = useState<InvoiceLine[]>(() => readInvoiceLines(record?.data.lineItems ?? "", items));
   const [expenseLines, setExpenseLines] = useState<ExpenseEntryLine[]>(() => readExpenseEditorLines(record));
@@ -378,6 +382,34 @@ export default function RecordEditor({ module, record, customers, vendors, items
     sendWindow.current = null;
   }
 
+  /** The fields a save sends, also used as the pattern for "Make recurring". */
+  function buildRecordValues(serializedDocumentLines: string, serializedExpenseLines: string): Record<string, string> {
+    const selectedCustomer = shareableDocumentKinds.has(module.kind)
+      ? customerOptions.find((customer) => customer.id === values.customerId || customer.id === values.customer)
+        ?? customerOptions.find((customer) => customer.data.name?.trim().toLowerCase() === values.customer?.trim().toLowerCase())
+      : undefined;
+    const normalizedValues = selectedCustomer?.data.name
+      ? { ...values, customer: selectedCustomer.data.name, customerId: selectedCustomer.id }
+      : values;
+    const expenseCategories = [...new Set(expenseLines.map((line) => line.category.trim()).filter(Boolean))];
+    const expenseDescription = values.memo?.trim() || expenseLines.map((line) => line.description.trim()).filter(Boolean).join("; ") || expenseCategories.join(", ");
+    return module.kind === "vendors"
+      ? {
+          ...normalizedValues,
+          displayName: normalizedValues.name?.trim() || normalizedValues.company?.trim() || "",
+        }
+      : categoryLineKinds.has(module.kind)
+      ? {
+          ...normalizedValues,
+          category: expenseCategories.length > 1 ? "Multiple categories" : expenseCategories[0] ?? "",
+          description: expenseDescription,
+          lineItems: serializedExpenseLines,
+        }
+      : structuredLineKinds.has(module.kind)
+        ? { ...normalizedValues, lineItems: serializedDocumentLines, ...(module.kind === "credit-notes" ? { amount: invoiceTotal.toFixed(2) } : {}) }
+        : normalizedValues;
+  }
+
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const submitter = (event.nativeEvent as SubmitEvent).submitter;
@@ -420,6 +452,10 @@ export default function RecordEditor({ module, record, customers, vendors, items
         return;
       }
     }
+    if (isCheck && !record && !savedRecordId && !values.payNowAccountId) {
+      setError("Choose the bank account this check is drawn on.");
+      return;
+    }
     if (isSalesReceipt && !record && (!values.paymentMethod || values.paymentMethod === "Credit")) {
       setError("Choose the account this sales receipt was deposited to.");
       return;
@@ -460,30 +496,7 @@ export default function RecordEditor({ module, record, customers, vendors, items
     setError("");
     setNotice("");
     try {
-      const selectedCustomer = shareableDocumentKinds.has(module.kind)
-        ? customerOptions.find((customer) => customer.id === values.customerId || customer.id === values.customer)
-          ?? customerOptions.find((customer) => customer.data.name?.trim().toLowerCase() === values.customer?.trim().toLowerCase())
-        : undefined;
-      const normalizedValues = selectedCustomer?.data.name
-        ? { ...values, customer: selectedCustomer.data.name, customerId: selectedCustomer.id }
-        : values;
-      const expenseCategories = [...new Set(expenseLines.map((line) => line.category.trim()).filter(Boolean))];
-      const expenseDescription = values.memo?.trim() || expenseLines.map((line) => line.description.trim()).filter(Boolean).join("; ") || expenseCategories.join(", ");
-      const recordValues = module.kind === "vendors"
-        ? {
-            ...normalizedValues,
-            displayName: normalizedValues.name?.trim() || normalizedValues.company?.trim() || "",
-          }
-        : categoryLineKinds.has(module.kind)
-        ? {
-            ...normalizedValues,
-            category: expenseCategories.length > 1 ? "Multiple categories" : expenseCategories[0] ?? "",
-            description: expenseDescription,
-            lineItems: serializedExpenseLines,
-          }
-        : structuredLineKinds.has(module.kind)
-          ? { ...normalizedValues, lineItems: serializedDocumentLines, ...(module.kind === "credit-notes" ? { amount: invoiceTotal.toFixed(2) } : {}) }
-          : normalizedValues;
+      const recordValues = buildRecordValues(serializedDocumentLines, serializedExpenseLines);
       const { payNowAccountId, ...valuesToSave } = recordValues as Record<string, string>;
       const firstSave = !savedRecordId;
       let saved = await saveBookkeepingRecord(module.kind, record ? { ...record.data, ...valuesToSave } : valuesToSave, savedRecordId ?? undefined);
@@ -560,7 +573,8 @@ export default function RecordEditor({ module, record, customers, vendors, items
   const hasStructuredLines = structuredLineKinds.has(module.kind);
   const isTransactionForm = hasStructuredLines || categoryLineKinds.has(module.kind);
   const isSalesReceipt = module.kind === "invoices" && values.docType === "Sales receipt";
-  const documentLabel = isSalesReceipt ? "Sales receipt" : module.label;
+  const isCheck = module.kind === "expenses" && values.docType === "Check";
+  const documentLabel = isSalesReceipt ? "Sales receipt" : isCheck ? "Check" : module.label;
   const customerOptions = customers.filter((customer) => customer.data.name?.trim());
   const expenseAccounts = accounts.filter((account) =>
     account.data.locked !== "true" && accountCategoryForType(account.data.accountType ?? "") === "Expense",
@@ -916,6 +930,19 @@ export default function RecordEditor({ module, record, customers, vendors, items
     const busy = pending || Boolean(uploading);
     const footerGhost = "text-sidebar-foreground hover:bg-white/10 hover:text-white";
     const hasItemLines = purchaseItems.length > 0;
+    const canRepeat = ["invoices", "bills", "expenses"].includes(module.kind) && !isSalesReceipt;
+    const startRecurring = () => {
+      if (!(documentTotal > 0)) {
+        setError(`Add the ${module.label.toLowerCase()}'s lines before making it recurring.`);
+        return;
+      }
+      if (partyFields.some((field) => field.required && !values[field.key]?.trim())) {
+        setError(`Choose the ${partyFields[0]?.label.toLowerCase() ?? "contact"} before making it recurring.`);
+        return;
+      }
+      setError("");
+      setRecurringPayload(buildRecordValues(serializeInvoiceLines(invoiceLines), serializeExpenseEditorLines(expenseLines, purchaseItems)));
+    };
 
     const productTable = hasStructuredLines ? (
       <section className="rounded-xl border border-border bg-card" aria-labelledby={`${module.kind}-line-items-label`}>
@@ -1135,15 +1162,15 @@ export default function RecordEditor({ module, record, customers, vendors, items
                     {partyFields.map((field) => fieldBlock(field))}
                     {module.kind === "expenses" && !record ? (
                       <div className="min-w-0 space-y-2">
-                        <Label htmlFor="field-payNowAccountId">Payment account</Label>
-                        <Select value={values.payNowAccountId || "unpaid"} onValueChange={(next) => changeValue("payNowAccountId", next === "unpaid" ? "" : next ?? "")}>
-                          <SelectTrigger id="field-payNowAccountId" className="w-full" disabled={Boolean(savedRecordId)}><SelectValue /></SelectTrigger>
+                        <Label htmlFor="field-payNowAccountId">{isCheck ? <>Bank account <span className="text-destructive">*</span></> : "Payment account"}</Label>
+                        <Select value={values.payNowAccountId || (isCheck ? null : "unpaid")} onValueChange={(next) => changeValue("payNowAccountId", next === "unpaid" ? "" : next ?? "")}>
+                          <SelectTrigger id="field-payNowAccountId" className="w-full" disabled={Boolean(savedRecordId)}><SelectValue placeholder="Choose a bank account" /></SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="unpaid">Not paid yet</SelectItem>
-                            {paymentAccounts.map((account) => <SelectItem key={account.id} value={account.id}>{paymentAccountLabel(account)}</SelectItem>)}
+                            {isCheck ? null : <SelectItem value="unpaid">Not paid yet</SelectItem>}
+                            {paymentAccounts.filter((account) => !isCheck || paymentAccountType(account) === "Bank").map((account) => <SelectItem key={account.id} value={account.id}>{paymentAccountLabel(account)}</SelectItem>)}
                           </SelectContent>
                         </Select>
-                        <p className="text-xs leading-5 text-muted-foreground">The Cash, Bank or Credit card account this was paid from, on the expense date.</p>
+                        <p className="text-xs leading-5 text-muted-foreground">{isCheck ? "The bank account the check is drawn on." : "The Cash, Bank or Credit card account this was paid from, on the expense date."}</p>
                       </div>
                     ) : null}
                     {selectedCustomer && partyFields.some((field) => field.key === "customer") ? (
@@ -1204,6 +1231,7 @@ export default function RecordEditor({ module, record, customers, vendors, items
           <footer className="flex flex-wrap items-center justify-between gap-2 bg-sidebar px-4 py-3 text-sidebar-foreground sm:px-6">
             <Button type="button" variant="ghost" className={footerGhost} onClick={() => onOpenChange(false)} disabled={busy}>Cancel</Button>
             <div className="flex flex-wrap items-center gap-1">
+              {canRepeat ? <Button type="button" variant="ghost" className={footerGhost} disabled={busy} onClick={startRecurring}><Repeat size={15} />Make recurring</Button> : null}
               {shareableDocumentKinds.has(module.kind) && savedRecordId ? (
                 <>
                   <Button type="button" variant="ghost" className={footerGhost} nativeButton={false} render={<Link href={module.kind === "invoices" ? `/app/invoices/${savedRecordId}/print` : `/app/documents/${module.kind}/${savedRecordId}/print`} target="_blank" rel="noreferrer" />}><Printer size={15} />Print or preview</Button>
@@ -1240,6 +1268,15 @@ export default function RecordEditor({ module, record, customers, vendors, items
             </div>
           </footer>
         </DialogContent>
+        {recurringPayload ? (
+          <MakeRecurringDialog
+            open
+            onOpenChange={(next) => { if (!next) setRecurringPayload(null); }}
+            kind={module.kind as RecurringKind}
+            payload={recurringPayload}
+            defaultName={[values.customer || values.vendor || values.payee, module.label].filter(Boolean).join(" · ")}
+          />
+        ) : null}
       </Dialog>
     );
   }

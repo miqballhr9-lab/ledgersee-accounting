@@ -170,6 +170,7 @@ const gearGroups = [
       { label: "Bank rules", href: "/app/bank-rules", icon: ListFilter },
       { label: "Chart of accounts", href: "/app/accounts", icon: ListTree },
       { label: "Manual journals", href: "/app/journals", icon: BookOpenCheck },
+      { label: "Recurring transactions", href: "/app/recurring", icon: Repeat },
       { label: "Taxes", href: "/app/taxes", icon: Percent },
       { label: "Reports", href: "/app/reports", icon: BarChart3 },
     ],

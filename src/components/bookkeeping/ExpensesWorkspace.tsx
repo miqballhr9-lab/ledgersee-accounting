@@ -75,6 +75,19 @@ function escapeCsv(value: string) {
   return `"${value.replaceAll('"', '""')}"`;
 }
 
+/** A check is an expense paid from a bank account, numbered like a cheque book. */
+function checkModule(module: ModuleDefinition | undefined, check: boolean): ModuleDefinition | undefined {
+  if (!module || !check) return module;
+  const labels: Record<string, string> = { expenseDate: "Payment date", referenceNumber: "Check no." };
+  return { ...module, label: "Check", plural: "Checks", description: "Pay a supplier by check from a bank account.", fields: module.fields.map((field) => (labels[field.key] ? { ...field, label: labels[field.key] } : field)) };
+}
+
+/** The number after the highest check number used so far, starting at 1001. */
+function nextCheckNumber(records: BookkeepingRecord[]) {
+  const used = records.filter((record) => record.data.docType === "Check").map((record) => Number(record.data.referenceNumber)).filter((value) => Number.isInteger(value) && value > 0);
+  return String(used.length ? Math.max(...used) + 1 : 1001);
+}
+
 function dateCutoff(preset: DatePreset, asOfDate: string) {
   const today = new Date(`${asOfDate}T00:00:00`);
   if (preset === "all" || preset === "custom") return "";
@@ -160,8 +173,8 @@ export default function ExpensesWorkspace({ expenses: initialExpenses, bills: in
 
   useEffect(() => setPage(1), [categoryFilter, customEnd, customStart, datePreset, search, statusFilter, typeFilter]);
 
-  function getEditorModule(kind: "bills" | "expenses", record: BookkeepingRecord | null) {
-    const baseModule = moduleBySlug(kind);
+  function getEditorModule(kind: "bills" | "expenses", record: BookkeepingRecord | null, check = false) {
+    const baseModule = checkModule(moduleBySlug(kind), check);
     if (!baseModule) return null;
     const categoryOptions = [...new Set([
       ...expenseCategories.map((account) => account.data.name),
@@ -192,12 +205,12 @@ export default function ExpensesWorkspace({ expenses: initialExpenses, bills: in
     };
   }
 
-  function openNewTransaction(kind: "bills" | "expenses") {
-    const module = getEditorModule(kind, null);
+  function openNewTransaction(kind: "bills" | "expenses", check = false) {
+    const module = getEditorModule(kind, null, check);
     if (!module) return;
     setEditorModule(module);
     setEditingRecord(null);
-    setEditorDefaults(createDefaults(kind, records, asOfDate));
+    setEditorDefaults(check ? { ...createDefaults(kind, records, asOfDate), docType: "Check", referenceNumber: nextCheckNumber(records) } : createDefaults(kind, records, asOfDate));
     setActionMessage("");
   }
 
@@ -209,7 +222,7 @@ export default function ExpensesWorkspace({ expenses: initialExpenses, bills: in
 
   function openEditTransaction(record: BookkeepingRecord) {
     if (record.kind !== "bills" && record.kind !== "expenses") return;
-    const module = getEditorModule(record.kind, record);
+    const module = getEditorModule(record.kind, record, record.data.docType === "Check");
     if (!module) return;
     setEditorModule(module);
     setEditingRecord(record);
@@ -343,7 +356,7 @@ export default function ExpensesWorkspace({ expenses: initialExpenses, bills: in
     const headings = ["Date", "Type", "No. or description", "Payee", "Category", "Payment account", "Amount", "Status"];
     const rows = filteredRecords.map((record) => [
       getRecordDate(record),
-      record.kind === "bills" ? "Bill" : "Expense",
+      record.kind === "bills" ? "Bill" : record.data.docType === "Check" ? "Check" : "Expense",
       record.kind === "bills" ? record.data.billNumber || record.data.description || "" : record.data.description || "",
       record.kind === "bills" ? record.data.vendor || "" : record.data.payee || "",
       expenseCategoryLabel(record.data),
@@ -379,6 +392,7 @@ export default function ExpensesWorkspace({ expenses: initialExpenses, bills: in
             <DropdownMenuContent align="end" className="min-w-52">
               <DropdownMenuItem onClick={() => openNewTransaction("bills")}>Bill</DropdownMenuItem>
               <DropdownMenuItem onClick={() => openNewTransaction("expenses")}>Expense</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => openNewTransaction("expenses", true)}>Check</DropdownMenuItem>
               <DropdownMenuItem onClick={() => setPayBillsOpen(true)}>Pay bills</DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -473,7 +487,7 @@ export default function ExpensesWorkspace({ expenses: initialExpenses, bills: in
                   <TableRow key={`${record.kind}-${record.id}`} className="cursor-pointer" onClick={(event) => { if (!(event.target as HTMLElement).closest("button, a, input, [role=checkbox], [role=menu]")) setDetailKey(`${record.kind}-${record.id}`); }} data-state={selectedIds.has(`${record.kind}-${record.id}`) ? "selected" : undefined}>
                     <TableCell className="w-10"><Checkbox aria-label={`Select ${title || (isBill ? "bill" : "expense")}`} checked={selectedIds.has(`${record.kind}-${record.id}`)} onCheckedChange={(checked) => toggleSelected(`${record.kind}-${record.id}`, checked === true)} /></TableCell>
                     <TableCell className="whitespace-nowrap text-[13px]">{formatDate(getRecordDate(record))}</TableCell>
-                    <TableCell className="text-[13px]">{isBill ? "Bill" : "Expense"}</TableCell>
+                    <TableCell className="text-[13px]">{isBill ? "Bill" : record.data.docType === "Check" ? "Check" : "Expense"}</TableCell>
                     <TableCell className="max-w-[240px] text-[13px] font-medium text-primary"><span className="block truncate" title={title || ""}>{title || "—"}</span></TableCell>
                     <TableCell className="max-w-[180px] text-[13px]"><span className="block truncate" title={payee || ""}>{payee || "—"}</span></TableCell>
                     <TableCell className="max-w-[200px] text-[13px]"><span className="block truncate" title={expenseCategoryLabel(record.data)}>{expenseCategoryLabel(record.data) || "—"}</span></TableCell>
