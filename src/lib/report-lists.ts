@@ -5,6 +5,7 @@ import { accountOf, type Ledger } from "@/lib/ledger";
 import { formatLongDate, periodLabel, type ReportColumn, type ReportLine, type ReportOptions, type ReportResult, type ZoomSpec } from "@/lib/reports";
 import { taxLines } from "@/lib/tax-return";
 import { buildInventory, itemTypeLabel } from "@/lib/inventory";
+import { isRunningAttachment, isToApprove } from "@/lib/hr-status";
 
 /**
  * List and detail reports (who owes you, what you owe, sales, purchases and
@@ -637,19 +638,19 @@ export function buildListReport(key: string, records: BookkeepingRecord[], ledge
         rows: groupBy(entries, (entry) => entry.data.leaveType || "").map(([type, typed]) => {
           const entitled = num(types.get(type)?.data.daysPerYear ?? [...types.values()].find((entry) => entry.data.leaveName === type)?.data.daysPerYear);
           const taken = typed.filter((entry) => entry.data.status === "Approved").reduce((total, entry) => total + num(entry.data.days), 0);
-          const pending = typed.filter((entry) => !entry.data.status || entry.data.status === "Pending").reduce((total, entry) => total + num(entry.data.days), 0);
+          const pending = typed.filter((entry) => !entry.data.status || isToApprove(entry.data.status)).reduce((total, entry) => total + num(entry.data.days), 0);
           return { values: [entitled || null, taken, pending, entitled ? entitled - taken : null] };
         }),
         types: groupBy(entries, (entry) => entry.data.leaveType || "").map(([type]) => typeName(type)),
       }));
-      const lines = grouped([text("type", "Leave type"), ...columns], groups.map((group) => ({ label: group.label, rows: group.rows.map((row, index) => ({ values: [group.types[index], ...row.values] })) })), { grandTotal: false });
+      const lines = grouped([text("type", "Time off type"), ...columns], groups.map((group) => ({ label: group.label, rows: group.rows.map((row, index) => ({ values: [group.types[index], ...row.values] })) })), { grandTotal: false });
       lines.forEach((line) => { if (line.kind === "total") { line.values[1] = null; line.values[4] = null; } });
-      return periodResult([text("type", "Leave type"), ...columns], lines, options, "No leave in this period.");
+      return periodResult([text("type", "Time off type"), ...columns], lines, options, "No time off in this period.");
     }
 
     case "loans-outstanding": {
-      const columns = [text("type", "Type"), text("start", "First deduction"), amount("amount", "Amount"), amount("installment", "Monthly installment"), amount("repaid", "Repaid"), amount("outstanding", "Balance")];
-      const loans = records.filter((record) => record.kind === "hr-loans" && record.data.status === "Approved");
+      const columns = [text("type", "Type"), text("start", "First deduction"), amount("amount", "Amount"), amount("installment", "Monthly amount"), amount("repaid", "Paid amount"), amount("outstanding", "Remaining amount")];
+      const loans = records.filter((record) => record.kind === "hr-loans" && isRunningAttachment(record.data.status));
       const groups = groupBy(loans, (loan) => loan.data.employee || "Not specified").map(([label, entries]) => ({
         label,
         rows: entries.map((loan) => {
@@ -660,7 +661,7 @@ export function buildListReport(key: string, records: BookkeepingRecord[], ledge
       }));
       const lines = grouped(columns, groups);
       lines.forEach((line) => { if (line.kind !== "account") line.values[3] = null; });
-      return asOfResult(columns, lines, asOf, "No loans or advances to recover.");
+      return asOfResult(columns, lines, asOf, "No running salary attachments.");
     }
 
     case "account-list": {

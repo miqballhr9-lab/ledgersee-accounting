@@ -32,15 +32,15 @@ export default function HrHome({ store, currency, asOfDate }: { store: CrmStore;
   const present = attendanceToday.filter((row) => ["Present", "Late", "Half day"].includes(row.data.status ?? "")).length;
   const leaves = store["hr-leaves"] ?? [];
   const onLeave = leaves.filter((leave) => leave.data.status === "Approved" && leave.data.fromDate <= asOfDate && leave.data.toDate >= asOfDate);
-  const pendingLeaves = leaves.filter((leave) => leave.data.status === "Pending");
-  const pendingLoans = (store["hr-loans"] ?? []).filter((loan) => loan.data.status === "Requested");
+  const pendingLeaves = leaves.filter((leave) => leave.data.status === "To Approve");
+  const pendingLoans = (store["hr-loans"] ?? []).filter((loan) => loan.data.status === "To Approve");
   const pendingClaims = (store["hr-claims"] ?? []).filter((claim) => claim.data.status === "Submitted");
-  const loanBalance = (store["hr-loans"] ?? []).filter((loan) => loan.data.status === "Approved").reduce((sum, loan) => sum + Number(loan.data.balance || 0), 0);
+  const loanBalance = (store["hr-loans"] ?? []).filter((loan) => loan.data.status === "Running").reduce((sum, loan) => sum + Number(loan.data.balance || 0), 0);
   const expiring = (store["hr-documents"] ?? []).filter((doc) => doc.data.expiryDate && doc.data.expiryDate <= addDays(asOfDate, 30)).sort((a, b) => a.data.expiryDate.localeCompare(b.data.expiryDate));
   const holidays = (store["hr-holidays"] ?? []).filter((holiday) => (holiday.data.date ?? "") >= asOfDate).sort((a, b) => a.data.date.localeCompare(b.data.date)).slice(0, 6);
-  const openJobs = (store["hr-jobs"] ?? []).filter((job) => job.data.status === "Open");
+  const openJobs = (store["hr-jobs"] ?? []).filter((job) => job.data.status === "Recruiting");
   const candidates = store["hr-candidates"] ?? [];
-  const stages = ["Applied", "Screening", "Interview", "Offer", "Hired"].map((stage) => ({ stage, count: candidates.filter((candidate) => candidate.data.stage === stage).length }));
+  const stages = ["New", "Initial Qualification", "First Interview", "Second Interview", "Contract Proposal", "Contract Signed"].map((stage) => ({ stage, count: candidates.filter((candidate) => candidate.data.stage === stage).length }));
   const maxStage = Math.max(1, ...stages.map((item) => item.count));
   const departments = Object.entries(employees.reduce<Record<string, number>>((counts, employee) => {
     const name = employee.data.department || "No department";
@@ -49,9 +49,9 @@ export default function HrHome({ store, currency, asOfDate }: { store: CrmStore;
   }, {})).sort((a, b) => b[1] - a[1]);
   const maxDept = Math.max(1, ...departments.map(([, count]) => count));
   const joiners = employees.filter((employee) => (employee.data.joiningDate ?? "").startsWith(asOfDate.slice(0, 7)));
-  const waiting = [...pendingLeaves.map((row) => ({ row, kind: "Leave", href: "/app/hr/leave-requests", text: `${row.data.leaveType} · ${row.data.fromDate} → ${row.data.toDate} (${row.data.days} days)` })),
-    ...pendingLoans.map((row) => ({ row, kind: "Loan", href: "/app/hr/loans", text: `${row.data.loanType} · ${formatMoney(row.data.amount, currency)}` })),
-    ...pendingClaims.map((row) => ({ row, kind: "Claim", href: "/app/hr/expense-claims", text: `${row.data.category} · ${formatMoney(row.data.amount, currency)}` }))];
+  const waiting = [...pendingLeaves.map((row) => ({ row, kind: "Time off", href: "/app/hr/time-off", text: `${row.data.leaveType} · ${row.data.fromDate} → ${row.data.toDate} (${row.data.days} days)` })),
+    ...pendingLoans.map((row) => ({ row, kind: "Salary attachment", href: "/app/hr/salary-attachments", text: `${row.data.loanType} · ${formatMoney(row.data.amount, currency)}` })),
+    ...pendingClaims.map((row) => ({ row, kind: "Expense", href: "/app/hr/expenses", text: `${row.data.category} · ${formatMoney(row.data.amount, currency)}` }))];
 
   const month = asOfDate.slice(0, 7);
   const monthName = new Date(`${month}-01T12:00:00Z`).toLocaleDateString("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
@@ -61,7 +61,7 @@ export default function HrHome({ store, currency, asOfDate }: { store: CrmStore;
   const unpaidLeaveDays = leaves
     .filter((leave) => leave.data.status === "Approved" && leave.data.paid === "false" && (leave.data.fromDate ?? "").startsWith(month))
     .reduce((sum, leave) => sum + Number(leave.data.days || 0), 0);
-  const activeLoans = (store["hr-loans"] ?? []).filter((loan) => loan.data.status === "Approved" && (!loan.data.startMonth || loan.data.startMonth <= month)).length;
+  const activeLoans = (store["hr-loans"] ?? []).filter((loan) => loan.data.status === "Running" && (!loan.data.startMonth || loan.data.startMonth <= month)).length;
   const payrollGross = monthPayroll.length
     ? monthPayroll.reduce((sum, row) => sum + Number(row.data.grossSalary || 0), 0)
     : employees.reduce((sum, employee) => sum + Number(employee.data.baseSalary || 0), 0);
@@ -71,7 +71,7 @@ export default function HrHome({ store, currency, asOfDate }: { store: CrmStore;
   const allPaid = monthPayroll.length > 0 && paidCount === monthPayroll.length;
   const steps = [
     { title: "Attendance", note: markedDays ? `${markedDays} ${markedDays === 1 ? "day" : "days"} marked this month` : "No days marked yet", done: markedDays > 0, current: false },
-    { title: "Leave & loans", note: `${unpaidLeaveDays} unpaid leave ${unpaidLeaveDays === 1 ? "day" : "days"} · ${activeLoans} loan ${activeLoans === 1 ? "installment" : "installments"}`, done: pendingLeaves.length === 0 && pendingLoans.length === 0, current: false },
+    { title: "Time off & attachments", note: `${unpaidLeaveDays} unpaid time off ${unpaidLeaveDays === 1 ? "day" : "days"} · ${activeLoans} salary ${activeLoans === 1 ? "attachment" : "attachments"}`, done: pendingLeaves.length === 0 && pendingLoans.length === 0, current: false },
     { title: "Salary sheet", note: monthPayroll.length ? `${monthPayroll.length} of ${employees.length} prepared` : "Not prepared yet", done: sheetReady, current: !sheetReady },
     { title: "Pay & payslips", note: monthPayroll.length ? `${paidCount} of ${monthPayroll.length} paid` : "Waiting for the salary sheet", done: allPaid, current: sheetReady && !allPaid },
   ];
@@ -82,9 +82,9 @@ export default function HrHome({ store, currency, asOfDate }: { store: CrmStore;
   const kpis = [
     { label: "Active employees", value: String(employees.length), note: joiners.length ? `${joiners.length} joined this month` : "No new joiners this month", icon: Users },
     { label: "Present today", value: attendanceToday.length ? `${present} / ${employees.length}` : "—", note: attendanceToday.length ? `${attendanceToday.length} marked` : "Not marked yet", icon: Clock },
-    { label: "On leave today", value: String(onLeave.length), note: `${pendingLeaves.length} requests waiting`, icon: CalendarDays },
-    { label: "Loans outstanding", value: formatMoney(loanBalance, currency), note: `${pendingLoans.length} requests waiting`, icon: HandCoins },
-    { label: "Open jobs", value: String(openJobs.length), note: `${candidates.filter((candidate) => !["Hired", "Rejected", "Withdrawn"].includes(candidate.data.stage ?? "")).length} candidates in progress`, icon: BriefcaseBusiness },
+    { label: "Time off today", value: String(onLeave.length), note: `${pendingLeaves.length} requests waiting`, icon: CalendarDays },
+    { label: "Salary attachments", value: formatMoney(loanBalance, currency), note: `${pendingLoans.length} requests waiting`, icon: HandCoins },
+    { label: "Job positions", value: String(openJobs.length), note: `${candidates.filter((candidate) => !["Contract Signed", "Refused"].includes(candidate.data.stage ?? "")).length} applications in progress`, icon: BriefcaseBusiness },
   ];
 
   return (
@@ -96,8 +96,8 @@ export default function HrHome({ store, currency, asOfDate }: { store: CrmStore;
           <p className="mt-1.5 max-w-2xl text-sm text-muted-foreground">Today&apos;s attendance, who is away, this month&apos;s payroll, what is waiting for approval, and your hiring at a glance.</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button variant="outline" className="gap-2" nativeButton={false} render={<Link href="/app/hr/attendance" />}><Clock size={15} />Attendance</Button>
-          <Button variant="outline" className="gap-2" nativeButton={false} render={<Link href="/app/hr/leave-requests?new=1" />}><Plus size={15} />Leave</Button>
+          <Button variant="outline" className="gap-2" nativeButton={false} render={<Link href="/app/hr/attendances" />}><Clock size={15} />Attendance</Button>
+          <Button variant="outline" className="gap-2" nativeButton={false} render={<Link href="/app/hr/time-off?new=1" />}><Plus size={15} />Time off</Button>
           <Button variant="outline" className="gap-2 border-primary text-primary" nativeButton={false} render={<Link href="/app/payroll" />}><Banknote size={15} />Run payroll</Button>
           <Button className="gap-2" nativeButton={false} render={<Link href="/app/employees?new=1" />}><Plus size={15} />Add employee</Button>
         </div>
@@ -166,7 +166,7 @@ export default function HrHome({ store, currency, asOfDate }: { store: CrmStore;
           ) : <Empty text="Nothing is waiting for approval." />}
         </Panel>
 
-        <Panel title="Away today" href="/app/hr/leave-requests">
+        <Panel title="Away today" href="/app/hr/time-off">
           {onLeave.length ? (
             <ul className="divide-y divide-border">
               {onLeave.map((leave) => (
@@ -192,7 +192,7 @@ export default function HrHome({ store, currency, asOfDate }: { store: CrmStore;
           ) : <Empty text="No employees yet." />}
         </Panel>
 
-        <Panel title="Hiring pipeline" href="/app/hr/candidates">
+        <Panel title="Hiring pipeline" href="/app/hr/applications">
           {candidates.length ? (
             <ul className="space-y-3">
               {stages.map((item) => (
@@ -218,7 +218,7 @@ export default function HrHome({ store, currency, asOfDate }: { store: CrmStore;
           ) : <Empty text="No documents expire in the next 30 days." />}
         </Panel>
 
-        <Panel title="Upcoming holidays" href="/app/hr/holidays">
+        <Panel title="Upcoming holidays" href="/app/hr/public-holidays">
           {holidays.length ? (
             <ul className="divide-y divide-border">
               {holidays.map((holiday) => (

@@ -123,8 +123,8 @@ export const reportCategories: ReportCategory[] = [
       { key: "payroll-tax-liability", label: "Payroll Tax Liability", description: "Tax withheld from salaries, by employee.", ready: true, engine: "list" },
       { key: "employee-details", label: "Employee Details", description: "Employee records and contact details.", ready: true, engine: "list" },
       { key: "attendance-summary", label: "Attendance Summary", description: "Days present, absent and on leave.", ready: true, engine: "list" },
-      { key: "leave-summary", label: "Leave Summary", description: "Leave taken and remaining.", ready: true, engine: "list" },
-      { key: "loans-outstanding", label: "Loans outstanding", description: "Employee loans and advances still to recover.", ready: true, engine: "list" },
+      { key: "leave-summary", label: "Time Off Summary", description: "Time off taken and remaining, by type.", ready: true, engine: "list" },
+      { key: "loans-outstanding", label: "Salary Attachments", description: "Loans, advances and other deductions still running.", ready: true, engine: "list" },
     ],
   },
   {

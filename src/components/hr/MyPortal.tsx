@@ -77,7 +77,7 @@ export default function MyPortal({ portal, name, email, currency, canRequest }: 
     return (
       <div className="mx-auto max-w-lg px-4 py-20 text-center">
         <h1 className="text-xl font-semibold">Your HR portal isn’t set up yet</h1>
-        <p className="mt-2 text-sm text-muted-foreground">Ask HR in {portal.business} to add your email ({email}) to your employee profile. Then your attendance, leave, payslips and requests appear here.</p>
+        <p className="mt-2 text-sm text-muted-foreground">Ask HR in {portal.business} to add your email ({email}) to your employee profile. Then your attendance, time off, payslips and requests appear here.</p>
       </div>
     );
   }
@@ -112,12 +112,12 @@ export default function MyPortal({ portal, name, email, currency, canRequest }: 
       </section>
 
       <div className="mt-4 grid gap-4 lg:grid-cols-2">
-        <Card title="My leave" icon={CalendarDays} action={canRequest ? <Button size="sm" variant="outline" onClick={() => open("hr-leaves")}>Request leave</Button> : undefined}>
+        <Card title="My time off" icon={CalendarDays} action={canRequest ? <Button size="sm" variant="outline" onClick={() => open("hr-leaves")}>New time off</Button> : undefined}>
           {portal.leaves.length ? (
             <ul className="divide-y divide-border">{portal.leaves.slice(0, 8).map((leave) => (
               <li key={leave.id} className="flex items-center justify-between gap-3 py-2"><div><p className="font-medium">{leave.data.leaveType}</p><p className="text-xs text-muted-foreground">{leave.data.fromDate} → {leave.data.toDate} · {leave.data.days} days</p></div><StatusBadge value={leave.data.status} /></li>
             ))}</ul>
-          ) : <Empty text="No leave requests yet." />}
+          ) : <Empty text="No time off yet." />}
         </Card>
 
         <Card title="My payslips" icon={Wallet}>
@@ -141,20 +141,20 @@ export default function MyPortal({ portal, name, email, currency, canRequest }: 
           ) : <Empty text="No attendance yet." />}
         </Card>
 
-        <Card title="My loans & advances" icon={HandCoins} action={canRequest ? <Button size="sm" variant="outline" onClick={() => open("hr-loans")}>Request</Button> : undefined}>
+        <Card title="My salary attachments" icon={HandCoins} action={canRequest ? <Button size="sm" variant="outline" onClick={() => open("hr-loans")}>Request</Button> : undefined}>
           {portal.loans.length ? (
             <ul className="divide-y divide-border">{portal.loans.map((loan) => (
-              <li key={loan.id} className="flex items-center justify-between gap-3 py-2"><div><p className="font-medium">{loan.data.loanType} · {formatMoney(loan.data.amount, currency)}</p><p className="text-xs text-muted-foreground">{formatMoney(loan.data.monthlyInstallment, currency)} a month · balance {formatMoney(loan.data.balance, currency)}</p></div><StatusBadge value={loan.data.status} /></li>
+              <li key={loan.id} className="flex items-center justify-between gap-3 py-2"><div><p className="font-medium">{loan.data.loanType} · {formatMoney(loan.data.amount, currency)}</p><p className="text-xs text-muted-foreground">{formatMoney(loan.data.monthlyInstallment, currency)} a month · remaining {formatMoney(loan.data.balance, currency)}</p></div><StatusBadge value={loan.data.status} /></li>
             ))}</ul>
-          ) : <Empty text="No loans or advances." />}
+          ) : <Empty text="No salary attachments." />}
         </Card>
 
-        <Card title="My expense claims" icon={ReceiptText} action={canRequest ? <Button size="sm" variant="outline" onClick={() => open("hr-claims")}>New claim</Button> : undefined}>
+        <Card title="My expenses" icon={ReceiptText} action={canRequest ? <Button size="sm" variant="outline" onClick={() => open("hr-claims")}>New expense</Button> : undefined}>
           {portal.claims.length ? (
             <ul className="divide-y divide-border">{portal.claims.slice(0, 8).map((claim) => (
               <li key={claim.id} className="flex items-center justify-between gap-3 py-2"><div><p className="font-medium">{claim.data.description}</p><p className="text-xs text-muted-foreground">{claim.data.date} · {claim.data.category} · {formatMoney(claim.data.amount, currency)}</p></div><StatusBadge value={claim.data.status} /></li>
             ))}</ul>
-          ) : <Empty text="No claims yet." />}
+          ) : <Empty text="No expenses yet." />}
         </Card>
 
         <Card title="My documents & holidays" icon={FileText}>
@@ -174,7 +174,7 @@ export default function MyPortal({ portal, name, email, currency, canRequest }: 
       <Dialog open={request !== null} onOpenChange={(next) => { if (!busy) setRequest(next ? request : null); }}>
         <DialogContent className="sm:max-w-[480px]">
           <DialogHeader>
-            <DialogTitle>{request === "hr-leaves" ? "Request leave" : request === "hr-loans" ? "Request a loan or advance" : "New expense claim"}</DialogTitle>
+            <DialogTitle>{request === "hr-leaves" ? "New time off" : request === "hr-loans" ? "Ask for a loan or advance" : "New expense"}</DialogTitle>
             <DialogDescription>HR is notified in the app and approves or rejects it.</DialogDescription>
           </DialogHeader>
           <form id="self-request" className="grid gap-3 sm:grid-cols-2" onSubmit={(event) => {
@@ -185,7 +185,7 @@ export default function MyPortal({ portal, name, email, currency, canRequest }: 
             {request === "hr-leaves" ? (
               <>
                 <div className="space-y-1.5 sm:col-span-2">
-                  <Label htmlFor="self-type">Leave type</Label>
+                  <Label htmlFor="self-type">Time off type</Label>
                   <Select value={form.leaveTypeId || null} onValueChange={(value) => setForm({ ...form, leaveTypeId: String(value ?? "") })}>
                     <SelectTrigger id="self-type" className="w-full"><SelectValue placeholder="Choose" /></SelectTrigger>
                     <SelectContent>{portal.leaveTypes.map((type) => <SelectItem key={type.id} value={type.id}>{type.name}</SelectItem>)}</SelectContent>

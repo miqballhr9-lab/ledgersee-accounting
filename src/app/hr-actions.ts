@@ -8,7 +8,8 @@ import { saveCrmRecord } from "@/app/crm-actions";
 import { ActionError } from "@/lib/action-error";
 import { assertCanWrite, requireUser } from "@/lib/auth";
 import type { BookkeepingRecord, RecordKind } from "@/lib/bookkeeping-types";
-import { applyHrRules, leaveUsed } from "@/lib/hr-rules";
+import { applyHrRules, leaveUsed, timeOffAllowance } from "@/lib/hr-rules";
+import { odooHrData } from "@/lib/hr-status";
 import { canAccess } from "@/lib/permissions";
 import { revalidatePath } from "@/lib/revalidate";
 import { runWithRole } from "@/lib/role-override";
@@ -16,7 +17,7 @@ import { runWithRole } from "@/lib/role-override";
 type StoredRow = typeof bookkeepingRecord.$inferSelect;
 
 function toRecord(row: StoredRow): BookkeepingRecord {
-  return { id: row.id, kind: row.kind as RecordKind, data: row.data, createdAt: row.createdAt.toISOString(), updatedAt: row.updatedAt.toISOString() };
+  return { id: row.id, kind: row.kind as RecordKind, data: odooHrData(row.kind, row.data), createdAt: row.createdAt.toISOString(), updatedAt: row.updatedAt.toISOString() };
 }
 
 async function rows(userId: string, kinds: string[]) {
@@ -94,7 +95,7 @@ export async function getMyPortal(): Promise<MyPortal> {
   const { me, employee } = await myEmployee();
   const empty: MyPortal = { employee: null, business: me.workspaceName, payslips: [], leaves: [], leaveTypes: [], attendance: [], loans: [], claims: [], documents: [], holidays: [] };
   if (!employee) return empty;
-  const all = await rows(me.id, ["payroll", "hr-leaves", "hr-leave-types", "hr-attendance", "hr-loans", "hr-claims", "hr-documents", "hr-holidays"]);
+  const all = await rows(me.id, ["payroll", "hr-leaves", "hr-leave-types", "hr-allocations", "hr-attendance", "hr-loans", "hr-claims", "hr-documents", "hr-holidays"]);
   const mine = (kind: string) => all.filter((row) => row.kind === kind && (row.data.employeeId === employee.id || (kind === "payroll" && (row.data.employeeEmail?.toLowerCase() === me.email.toLowerCase() || row.data.employeeName === employee.data.name))));
   const year = new Date().toISOString().slice(0, 4);
   const leaves = mine("hr-leaves");
@@ -106,7 +107,7 @@ export async function getMyPortal(): Promise<MyPortal> {
     leaveTypes: all.filter((row) => row.kind === "hr-leave-types").map((type) => ({
       id: type.id,
       name: type.data.leaveName ?? "Leave",
-      allowance: Number(type.data.daysPerYear || 0),
+      allowance: timeOffAllowance({ byKind: (kind) => all.filter((row) => row.kind === kind), actor: "" }, { employeeId: employee.id, leaveTypeId: type.id }, year) ?? 0,
       used: leaveUsed(leaves, { employeeId: employee.id, leaveTypeId: type.id }, year),
       paid: type.data.paid !== "false",
     })),
@@ -165,7 +166,8 @@ export async function selfRequest(kind: "hr-leaves" | "hr-loans" | "hr-claims", 
   const values: Record<string, string> = Object.fromEntries((allowed[kind] ?? []).map((key) => [key, String(input[key] ?? "")]));
   values.employeeId = employee.id;
   values.employee = employee.data.name ?? "";
-  values.status = kind === "hr-leaves" ? "Pending" : kind === "hr-loans" ? "Requested" : "Submitted";
+  // Time off follows its type's approval; the rest wait for HR.
+  if (kind !== "hr-leaves") values.status = kind === "hr-loans" ? "To Approve" : "Submitted";
   if (kind === "hr-loans") values.requestDate = new Date().toISOString().slice(0, 10);
   await saveAsEmployee(kind, values);
 }

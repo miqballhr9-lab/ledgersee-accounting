@@ -45,6 +45,7 @@ export const recordKinds = [
   "hr-attendance",
   "hr-leave-types",
   "hr-leaves",
+  "hr-allocations",
   "hr-holidays",
   "hr-loans",
   "hr-claims",

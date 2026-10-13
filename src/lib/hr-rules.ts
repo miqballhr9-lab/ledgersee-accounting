@@ -5,6 +5,7 @@ import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { bookkeepingRecord } from "@/db/schema";
 import { ActionError } from "@/lib/action-error";
+import { isCompletedAttachment, isHiredStage, isRunningAttachment, isToApprove, odooHrData } from "@/lib/hr-status";
 
 /**
  * The working-out behind HR records: leave days and balances, attendance hours,
@@ -64,8 +65,30 @@ export function leaveUsed(leaves: StoredRow[], data: Record<string, string>, yea
     .reduce((sum, row) => sum + money(row.data.days), 0);
 }
 
+/** Every public holiday date, a holiday with an end date counting each day. */
+export function holidayDates(holidays: StoredRow[]) {
+  return holidays.flatMap((row) => (row.data.date ? dates(row.data.date, row.data.endDate && row.data.endDate > row.data.date ? row.data.endDate : row.data.date) : []));
+}
+
+/**
+ * Days of a time off type an employee may take in a year: their approved allocations
+ * valid that year, else the type's days a year; null when the type has no limit.
+ */
+export function timeOffAllowance(context: HrContext, data: Record<string, string>, year: string) {
+  const type = context.byKind("hr-leave-types").find((row) => row.id === data.leaveTypeId);
+  if (!type) return null;
+  const allocations = context.byKind("hr-allocations").filter((row) => row.data.status === "Approved" && sameEmployee(row.data, data) && row.data.leaveTypeId === data.leaveTypeId
+    && (row.data.validFrom ?? "") <= `${year}-12-31` && (!row.data.validTo || row.data.validTo >= `${year}-01-01`));
+  if (allocations.length) return allocations.reduce((sum, row) => sum + money(row.data.days), 0);
+  if (type.data.requiresAllocation === "No limit") return null;
+  return money(type.data.daysPerYear);
+}
+
 /** Fills in and checks the calculated parts of an HR record before it is saved. */
-export function applyHrRules(kind: string, data: Record<string, string>, existing: Record<string, string> | undefined, context: HrContext, id?: string) {
+export function applyHrRules(kind: string, data: Record<string, string>, existingData: Record<string, string> | undefined, context: HrContext, id?: string) {
+  // States are stored under their Odoo names; older records are moved over as they are saved.
+  Object.assign(data, odooHrData(kind, data));
+  const existing = existingData ? odooHrData(kind, existingData) : undefined;
   if (kind === "hr-attendance") {
     const start = minutes(data.checkIn);
     const end = minutes(data.checkOut);
@@ -79,25 +102,37 @@ export function applyHrRules(kind: string, data: Record<string, string>, existin
 
   if (kind === "hr-leaves") {
     if (data.toDate < data.fromDate) throw new ActionError("The leave can’t end before it starts.");
-    const holidays = context.byKind("hr-holidays").map((row) => row.data.date).filter(Boolean);
+    const holidays = holidayDates(context.byKind("hr-holidays"));
     const days = leaveDays(data.fromDate, data.toDate, data.halfDay === "true", holidays);
-    if (!days) throw new ActionError("Those dates are all Sundays or holidays, so no leave is needed.");
+    if (!days) throw new ActionError("Those dates are all Sundays or public holidays, so no time off is needed.");
     data.days = String(days);
-    if (!data.status) data.status = "Pending";
-    const overlapping = context.byKind("hr-leaves").find((row) => row.id !== id && ["Pending", "Approved"].includes(row.data.status ?? "") && sameEmployee(row.data, data) && row.data.fromDate <= data.toDate && row.data.toDate >= data.fromDate);
-    if (overlapping && data.status !== "Rejected" && data.status !== "Cancelled") throw new ActionError(`${data.employee} already has leave from ${overlapping.data.fromDate} to ${overlapping.data.toDate}.`);
+    const type = context.byKind("hr-leave-types").find((row) => row.id === data.leaveTypeId);
+    // As in Odoo, a type with no validation is approved as soon as it is asked for.
+    if (!data.status) data.status = !existing && type?.data.approval === "No validation" ? "Approved" : "To Approve";
+    const overlapping = context.byKind("hr-leaves").find((row) => row.id !== id && (isToApprove(row.data.status) || row.data.status === "Approved") && sameEmployee(row.data, data) && row.data.fromDate <= data.toDate && row.data.toDate >= data.fromDate);
+    if (overlapping && data.status !== "Refused" && data.status !== "Cancelled") throw new ActionError(`${data.employee} already has time off from ${overlapping.data.fromDate} to ${overlapping.data.toDate}.`);
     if (data.status === "Approved" && existing?.status !== "Approved") {
-      const type = context.byKind("hr-leave-types").find((row) => row.id === data.leaveTypeId);
-      const allowance = money(type?.data.daysPerYear);
+      const allowance = timeOffAllowance(context, data, data.fromDate.slice(0, 4));
       const used = leaveUsed(context.byKind("hr-leaves"), data, data.fromDate.slice(0, 4), id);
-      if (type && allowance > 0 && used + days > allowance) {
-        throw new ActionError(`${data.employee} has ${Math.max(0, allowance - used)} of ${allowance} ${type.data.leaveName} days left this year, so ${days} can’t be approved.`);
+      if (type && allowance !== null && used + days > allowance) {
+        throw new ActionError(allowance > 0
+          ? `${data.employee} has ${Math.max(0, allowance - used)} of ${allowance} ${type.data.leaveName} days left this year, so ${days} can’t be approved.`
+          : `${data.employee} has no ${type.data.leaveName} allocation. Add one in Allocations first.`);
       }
       data.approvedBy = context.actor;
       data.approvedOn = new Date().toISOString().slice(0, 10);
       data.paid = type?.data.paid === "false" ? "false" : "true";
     }
-    if (data.status !== "Approved") data.approvedBy = data.status === "Rejected" ? `Rejected by ${context.actor}` : "";
+    if (data.status !== "Approved") data.approvedBy = data.status === "Refused" ? `Refused by ${context.actor}` : "";
+  }
+
+  if (kind === "hr-allocations") {
+    const days = money(data.days);
+    if (days <= 0) throw new ActionError("Enter the number of days to allocate.");
+    if (data.validTo && data.validFrom && data.validTo < data.validFrom) throw new ActionError("The validity can’t end before it starts.");
+    data.days = String(days);
+    if (!data.status) data.status = "To Approve";
+    if (data.status === "Approved" && existing?.status !== "Approved") data.approvedBy = context.actor;
   }
 
   if (kind === "hr-loans") {
@@ -109,9 +144,9 @@ export function applyHrRules(kind: string, data: Record<string, string>, existin
     const repaid = Math.min(amount, money(data.repaidAmount));
     data.repaidAmount = fixed(repaid);
     data.balance = fixed(amount - repaid);
-    if (!data.status) data.status = "Requested";
-    if (data.status === "Approved" && amount - repaid <= 0) data.status = "Repaid";
-    if (!data.startMonth && data.status === "Approved") {
+    if (!data.status) data.status = "To Approve";
+    if (isRunningAttachment(data.status) && amount - repaid <= 0) data.status = "Completed";
+    if (!data.startMonth && isRunningAttachment(data.status)) {
       const next = new Date();
       next.setUTCMonth(next.getUTCMonth() + 1);
       data.startMonth = next.toISOString().slice(0, 7);
@@ -119,12 +154,15 @@ export function applyHrRules(kind: string, data: Record<string, string>, existin
     if (data.startMonth && !/^\d{4}-\d{2}$/.test(data.startMonth)) throw new ActionError("Enter the first deduction month as YYYY-MM.");
   }
 
-  if (kind === "hr-claims" && !data.status) data.status = "Submitted";
+  if (kind === "hr-claims") {
+    if (!data.status) data.status = "To Submit";
+    if (!data.paidBy) data.paidBy = "Employee (to reimburse)";
+  }
 
   if (kind === "hr-appraisals") {
     const ratings = ["qualityRating", "productivityRating", "teamworkRating", "punctualityRating"].map((key) => money(data[key])).filter((value) => value > 0);
     data.overallRating = ratings.length ? (ratings.reduce((sum, value) => sum + value, 0) / ratings.length).toFixed(1) : "";
-    if (!data.status) data.status = "Draft";
+    if (!data.status) data.status = "To Confirm";
   }
 
   if (kind === "hr-settlements") {
@@ -132,7 +170,7 @@ export function applyHrRules(kind: string, data: Record<string, string>, existin
     if (!data.monthlySalary && employee?.data.baseSalary) data.monthlySalary = fixed(money(employee.data.baseSalary));
     if (!data.joiningDate && employee?.data.joiningDate) data.joiningDate = employee.data.joiningDate;
     if (!existing && !data.loanRecovery) {
-      const open = context.byKind("hr-loans").filter((row) => row.data.status === "Approved" && sameEmployee(row.data, data));
+      const open = context.byKind("hr-loans").filter((row) => isRunningAttachment(row.data.status) && sameEmployee(row.data, data));
       data.loanRecovery = fixed(open.reduce((sum, row) => sum + money(row.data.balance), 0));
     }
     if (!data.gratuityDaysPerYear) data.gratuityDaysPerYear = "30";
@@ -172,7 +210,7 @@ const onboardingChecklist = [
 /** What some saves set off elsewhere. Returns a note for the toast, if any. */
 export async function afterHrSave(userId: string, kind: string, before: Record<string, string> | undefined, after: StoredRow): Promise<string | undefined> {
   const data = after.data;
-  if (kind === "hr-candidates" && data.stage === "Hired" && before?.stage !== "Hired" && !data.hiredEmployeeId) {
+  if (kind === "hr-candidates" && isHiredStage(data.stage) && !isHiredStage(before?.stage) && !data.hiredEmployeeId) {
     const employeeId = await nextEmployeeId(userId);
     const today = new Date().toISOString().slice(0, 10);
     const [employee] = await db.insert(bookkeepingRecord).values({
@@ -185,7 +223,7 @@ export async function afterHrSave(userId: string, kind: string, before: Record<s
         mobile: data.phone ?? "",
         designation: data.job ?? "",
         joiningDate: today,
-        baseSalary: data.expectedSalary || "0",
+        baseSalary: data.proposedSalary || data.expectedSalary || "0",
         status: "Active",
         cnic: "",
         notes: "Hired from recruitment.",
@@ -197,11 +235,11 @@ export async function afterHrSave(userId: string, kind: string, before: Record<s
       await db.insert(bookkeepingRecord).values({
         userId,
         kind: "hr-onboarding",
-        data: { employee: data.candidateName, employeeId: employee.id, task, dueDate: due.toISOString().slice(0, 10), status: "Not Started" },
+        data: { employee: data.candidateName, employeeId: employee.id, task, dueDate: due.toISOString().slice(0, 10), status: "To Do" },
       });
     }
     await db.update(bookkeepingRecord).set({ data: { ...data, hiredEmployeeId: employee.id } }).where(eq(bookkeepingRecord.id, after.id));
-    return `${data.candidateName} added to Employees as ${employeeId}, with an onboarding checklist.`;
+    return `${data.candidateName} added to Employees as ${employeeId}, with the onboarding plan's activities.`;
   }
   if (kind === "hr-settlements" && data.status === "Approved" && before?.status !== "Approved" && data.employeeId) {
     const [employee] = await db.select().from(bookkeepingRecord).where(and(eq(bookkeepingRecord.id, data.employeeId), eq(bookkeepingRecord.userId, userId))).limit(1);
@@ -220,7 +258,7 @@ export function payrollAdjustments(month: string, employee: { id?: string; emplo
     .filter((row) => row.data.status === "Approved" && row.data.paid === "false" && matches(row.data) && (row.data.fromDate ?? "").slice(0, 7) <= month && (row.data.toDate ?? "").slice(0, 7) >= month)
     .reduce((sum, row) => sum + dates(row.data.fromDate, row.data.toDate).filter((date) => date.startsWith(month) && new Date(`${date}T12:00:00Z`).getUTCDay() !== 0).length * (row.data.halfDay === "true" ? 0.5 : 1), 0);
   const loanDeduction = loans
-    .filter((row) => row.data.status === "Approved" && matches(row.data) && (!row.data.startMonth || row.data.startMonth <= month))
+    .filter((row) => isRunningAttachment(row.data.status) && matches(row.data) && (!row.data.startMonth || row.data.startMonth <= month))
     .reduce((sum, row) => sum + Math.min(money(row.data.monthlyInstallment), money(row.data.balance)), 0);
   return { unpaidDays, loanDeduction: Math.round(loanDeduction * 100) / 100 };
 }
@@ -233,7 +271,7 @@ export async function applyLoanRepayment(userId: string, payroll: Record<string,
   let remaining = money(payroll.loanDeduction);
   if (remaining <= 0) return;
   const loans = (await db.select().from(bookkeepingRecord).where(and(eq(bookkeepingRecord.userId, userId), eq(bookkeepingRecord.kind, "hr-loans"))))
-    .filter((row) => (row.data.employee === payroll.employeeName) && (direction === 1 ? row.data.status === "Approved" : ["Approved", "Repaid"].includes(row.data.status ?? "")))
+    .filter((row) => (row.data.employee === payroll.employeeName) && (direction === 1 ? isRunningAttachment(row.data.status) : isRunningAttachment(row.data.status) || isCompletedAttachment(row.data.status)))
     .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
   if (direction === -1) loans.reverse();
   for (const loan of loans) {
@@ -245,7 +283,7 @@ export async function applyLoanRepayment(userId: string, payroll: Record<string,
     remaining -= change;
     const nextRepaid = repaid + change * direction;
     await db.update(bookkeepingRecord).set({
-      data: { ...loan.data, repaidAmount: fixed(nextRepaid), balance: fixed(amount - nextRepaid), status: amount - nextRepaid <= 0.004 ? "Repaid" : "Approved" },
+      data: { ...loan.data, repaidAmount: fixed(nextRepaid), balance: fixed(amount - nextRepaid), status: amount - nextRepaid <= 0.004 ? "Completed" : "Running" },
       updatedAt: new Date(),
     }).where(eq(bookkeepingRecord.id, loan.id));
   }

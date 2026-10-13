@@ -474,7 +474,7 @@ export default function CrmWorkspace({ page, initialStore, currency, me, owners,
         </section>
       ) : null}
 
-      {mod?.kind === "hr-leaves" && view === "balances" ? <LeaveBalances employees={store.employees ?? []} leaveTypes={store["hr-leave-types"] ?? []} leaves={store["hr-leaves"] ?? []} /> : null}
+      {mod?.kind === "hr-leaves" && view === "balances" ? <LeaveBalances employees={store.employees ?? []} leaveTypes={store["hr-leave-types"] ?? []} leaves={store["hr-leaves"] ?? []} allocations={store["hr-allocations"] ?? []} /> : null}
 
       {mod && view === "kanban" && mod.kanbanKey ? (
         <section className="mt-4 flex gap-3 overflow-x-auto pb-3">

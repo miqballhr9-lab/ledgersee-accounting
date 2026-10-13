@@ -83,16 +83,16 @@ function startValues(module: CrmModule, record: BookkeepingRecord | null, preset
   }
   if (module.kind === "crm-solutions") values.status = "Draft";
   if (module.kind === "hr-attendance") Object.assign(values, { date: today(), status: "Present", checkIn: "09:00" });
-  if (module.kind === "hr-leaves") Object.assign(values, { fromDate: today(), toDate: today(), status: "Pending" });
-  if (module.kind === "hr-loans") Object.assign(values, { loanType: "Loan", requestDate: today(), installments: "6", status: "Requested" });
-  if (module.kind === "hr-claims") Object.assign(values, { date: today(), status: "Submitted" });
-  if (module.kind === "hr-jobs") Object.assign(values, { status: "Open", openings: "1", employmentType: "Full time" });
-  if (module.kind === "hr-candidates") Object.assign(values, { stage: "Applied" });
-  if (module.kind === "hr-onboarding") Object.assign(values, { status: "Not Started", dueDate: today() });
-  if (module.kind === "hr-appraisals") Object.assign(values, { status: "Draft", period: String(new Date().getFullYear()), reviewDate: today() });
-  if (module.kind === "hr-settlements") Object.assign(values, { status: "Draft", reason: "Resignation", lastWorkingDay: today(), gratuityDaysPerYear: "30" });
-  if (module.kind === "hr-leave-types") Object.assign(values, { paid: "true", daysPerYear: "14" });
-  if (module.kind === "hr-holidays") Object.assign(values, { type: "Public" });
+  if (module.kind === "hr-leaves") Object.assign(values, { fromDate: today(), toDate: today(), status: "To Approve" });
+  if (module.kind === "hr-allocations") Object.assign(values, { validFrom: `${new Date().getFullYear()}-01-01`, validTo: `${new Date().getFullYear()}-12-31`, status: "To Approve" });
+  if (module.kind === "hr-loans") Object.assign(values, { loanType: "Loan", requestDate: today(), installments: "6", status: "To Approve" });
+  if (module.kind === "hr-claims") Object.assign(values, { date: today(), status: "To Submit", paidBy: "Employee (to reimburse)" });
+  if (module.kind === "hr-jobs") Object.assign(values, { status: "Recruiting", openings: "1", employmentType: "Full time" });
+  if (module.kind === "hr-candidates") Object.assign(values, { stage: "New" });
+  if (module.kind === "hr-onboarding") Object.assign(values, { status: "To Do", dueDate: today() });
+  if (module.kind === "hr-appraisals") Object.assign(values, { status: "To Confirm", period: String(new Date().getFullYear()), reviewDate: today() });
+  if (module.kind === "hr-settlements") Object.assign(values, { status: "Draft", reason: "Resigned", lastWorkingDay: today(), gratuityDaysPerYear: "30" });
+  if (module.kind === "hr-leave-types") Object.assign(values, { paid: "true", daysPerYear: "14", approval: "By time off officer", requiresAllocation: "Yes" });
   if (!module.fields.some((field) => field.type === "owner")) delete values.owner;
   return { ...values, ...preset };
 }
