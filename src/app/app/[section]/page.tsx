@@ -12,6 +12,8 @@ import ExpensesWorkspace from "@/components/bookkeeping/ExpensesWorkspace";
 import VendorsWorkspace from "@/components/bookkeeping/VendorsWorkspace";
 import ModuleWorkspace from "@/components/bookkeeping/ModuleWorkspace";
 import PayrollWorkspace from "@/components/bookkeeping/PayrollWorkspace";
+import EmployeesWorkspace from "@/components/hr/EmployeesWorkspace";
+import { odooHrData } from "@/lib/hr-status";
 import { moduleBySlug } from "@/lib/bookkeeping-config";
 import { packFor } from "@/lib/tax-packs";
 import type { BookkeepingRecord, RecordKind } from "@/lib/bookkeeping-types";
@@ -59,6 +61,13 @@ export default async function SectionPage({ params, searchParams }: SectionPageP
     const settingsData = groups.settings?.[0]?.data;
     const pack = packFor(settingsData?.taxCountry);
     return <PayrollWorkspace records={groups.payroll ?? []} accounts={groups.accounts ?? []} employees={groups.employees ?? []} asOfDate={new Date().toISOString().slice(0, 10)} dateRange={{ startDate, endDate }} currency={settingsData?.currency || pack?.currency || "PKR"} taxRule={pack?.payroll.incomeTax ?? "pakistan-slabs"} />;
+  }
+
+  if (section === "employees") {
+    const relatedKinds = ["hr-leaves", "hr-attendance", "payroll", "hr-claims", "hr-appraisals", "hr-documents", "hr-loans"] as const;
+    const groups = await listBookkeepingRecordGroups(["employees", "hr-departments", "accounts", ...relatedKinds]);
+    const related = Object.fromEntries(relatedKinds.map((kind) => [kind, (groups[kind] ?? []).map((record) => ({ ...record, data: odooHrData(kind, record.data) }))]));
+    return <EmployeesWorkspace employees={groups.employees ?? []} departments={groups["hr-departments"] ?? []} accounts={groups.accounts ?? []} related={related} asOfDate={new Date().toISOString().slice(0, 10)} />;
   }
 
   if (section === "budgets") {

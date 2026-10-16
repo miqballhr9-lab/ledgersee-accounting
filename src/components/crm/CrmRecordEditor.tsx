@@ -100,6 +100,7 @@ function startValues(module: CrmModule, record: BookkeepingRecord | null, preset
 export default function CrmRecordEditor({ module, record, preset, open, onOpenChange, context, onSaved }: CrmRecordEditorProps) {
   const [values, setValues] = useState<Record<string, string>>(() => startValues(module, record, preset, context.me));
   const [saving, setSaving] = useState(false);
+  const [tab, setTab] = useState("");
   const [uploading, setUploading] = useState<string | null>(null);
 
   async function upload(key: string, file: File | undefined) {
@@ -133,9 +134,14 @@ export default function CrmRecordEditor({ module, record, preset, open, onOpenCh
 
   async function save(event: React.FormEvent) {
     event.preventDefault();
+    await persist();
+  }
+
+  /** Saves, optionally with a change on top, as Odoo's header buttons (Approve, Refuse…) do. */
+  async function persist(override?: Record<string, string>) {
     setSaving(true);
     try {
-      const saved = await saveCrmRecord(module.kind, values, record?.id);
+      const saved = await saveCrmRecord(module.kind, { ...values, ...override }, record?.id);
       context.upsert([saved]);
       toast.success(record ? `${module.label} updated.` : `${module.label} created.`);
       onSaved?.(saved);
@@ -247,6 +253,108 @@ export default function CrmRecordEditor({ module, record, preset, open, onOpenCh
         placeholder={field.placeholder}
         onChange={(event) => set({ [field.key]: event.target.value })}
       />
+    );
+  }
+
+  if (module.section === "hr") {
+    // Odoo's form: breadcrumb with Save and Discard, header buttons and the status bar, then the sheet with its notebook.
+    const statusKey = module.statusKey;
+    const statusField = module.fields.find((field) => field.key === statusKey && field.type === "select");
+    const current = statusKey ? values[statusKey] ?? "" : "";
+    const states = (statusField?.options ?? []).filter((option) => !["Refused", "Cancelled"].includes(option) || option === current);
+    const titleField = module.fields.find((field) => field.key === module.titleKey && (!field.type || field.type === "text"));
+    const fields = module.fields.filter((field) => field !== titleField && field.key !== statusKey);
+    const [mainSection, ...tabSections] = [...new Set(fields.map((field) => field.section))];
+    const activeTab = tabSections.includes(tab) ? tab : tabSections[0];
+    const actions = record && statusKey ? (module.quickActions ?? []).filter((action) => action.key === statusKey && action.value !== current) : [];
+    const fieldRow = (field: CrmField) => (
+      <div key={field.key} className={`grid min-w-0 items-start gap-x-4 gap-y-1 py-1.5 sm:grid-cols-[170px_minmax(0,1fr)] ${field.wide ? "md:col-span-2" : ""}`}>
+        {field.type !== "checkbox" ? (
+          <Label htmlFor={`crm-${module.key}-${field.key}`} className="pt-2 text-sm font-semibold text-foreground/90">{field.label}{field.required ? <span className="text-destructive"> *</span> : null}</Label>
+        ) : <span className="hidden sm:block" />}
+        <div className="min-w-0 space-y-1">
+          {renderField(field)}
+          {field.help ? <p className="text-xs text-muted-foreground">{field.help}</p> : null}
+        </div>
+      </div>
+    );
+    return (
+      <Dialog open={open} onOpenChange={(next) => { if (!saving) onOpenChange(next); }}>
+        <DialogContent showCloseButton={false} className="top-0 left-0 flex h-dvh max-h-dvh w-screen max-w-none translate-x-0 translate-y-0 flex-col gap-0 rounded-none bg-background p-0 ring-0 sm:max-w-none data-open:zoom-in-100 data-closed:zoom-out-100">
+          <header className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-card px-4 py-2.5 sm:px-6">
+            <div className="flex min-w-0 items-center gap-2 text-lg">
+              <button type="button" className="shrink-0 text-primary hover:underline" onClick={() => onOpenChange(false)}>{module.plural}</button>
+              <span className="text-muted-foreground">/</span>
+              <DialogTitle className="truncate text-lg font-normal">{record ? recordTitle(record) || module.label : "New"}</DialogTitle>
+              <DialogDescription className="sr-only">{module.description}</DialogDescription>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button type="button" variant="outline" disabled={saving} onClick={() => onOpenChange(false)}>Discard</Button>
+              <Button type="submit" form={`crm-form-${module.key}`} disabled={saving || Boolean(uploading)}>{saving ? "Saving…" : "Save"}</Button>
+            </div>
+          </header>
+          <div className="min-h-0 flex-1 overflow-y-auto bg-muted/40">
+            <div className="mx-auto w-full max-w-5xl p-3 sm:p-6">
+              {statusField || actions.length ? (
+                <div className="flex flex-wrap items-center justify-between gap-2 rounded-t-lg border border-border bg-card px-3 py-2 sm:px-4">
+                  <div className="flex flex-wrap gap-2">
+                    {actions.map((action) => (
+                      <Button key={action.label} type="button" size="sm" variant={action.tone === "primary" ? "default" : "outline"} className={action.tone === "danger" ? "text-destructive" : ""} disabled={saving} onClick={() => void persist({ [action.key]: action.value })}>{action.label}</Button>
+                    ))}
+                  </div>
+                  {states.length ? (
+                    <div className="flex max-w-full overflow-x-auto" role="radiogroup" aria-label={statusField?.label ?? "Status"}>
+                      {states.map((state, index) => (
+                        <button
+                          key={state}
+                          type="button"
+                          role="radio"
+                          aria-checked={state === current}
+                          onClick={() => set({ [statusKey!]: state })}
+                          className={`-ml-px h-8 shrink-0 whitespace-nowrap border border-border px-3 text-[11px] font-medium uppercase tracking-wide transition-colors first:ml-0 ${index === 0 ? "rounded-l-md" : ""} ${index === states.length - 1 ? "rounded-r-md" : ""} ${state === current ? "z-10 border-primary bg-primary text-primary-foreground" : "bg-card text-muted-foreground hover:bg-muted"}`}
+                        >
+                          {state}
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+              <form id={`crm-form-${module.key}`} onSubmit={save} className={`border border-border bg-card px-4 py-6 shadow-sm sm:px-10 sm:py-8 ${statusField || actions.length ? "rounded-b-lg border-t-0" : "rounded-lg"}`}>
+                {titleField ? (
+                  <div className="mb-6">
+                    <Label htmlFor={`crm-${module.key}-${titleField.key}`} className="text-xs font-medium text-muted-foreground">{titleField.label}</Label>
+                    <input
+                      id={`crm-${module.key}-${titleField.key}`}
+                      value={values[titleField.key] ?? ""}
+                      onChange={(event) => set({ [titleField.key]: event.target.value })}
+                      placeholder={titleField.placeholder ?? ""}
+                      className="mt-1 w-full border-0 border-b border-border bg-transparent pb-1 text-2xl! font-semibold outline-none focus:border-primary sm:text-3xl!"
+                    />
+                  </div>
+                ) : (
+                  <h2 className="mb-6 text-2xl font-semibold sm:text-3xl">{record ? recordTitle(record) || module.label : `New ${module.label.toLowerCase()}`}</h2>
+                )}
+                <div className="grid gap-x-12 md:grid-cols-2">{fields.filter((field) => field.section === mainSection).map(fieldRow)}</div>
+                {tabSections.length ? (
+                  <div className="mt-8">
+                    <div role="tablist" className="flex flex-wrap border-b border-border">
+                      {tabSections.map((section) => (
+                        <button key={section} type="button" role="tab" aria-selected={section === activeTab} onClick={() => setTab(section)} className={`-mb-px border border-transparent px-4 py-2 text-sm ${section === activeTab ? "rounded-t-md border-border border-b-card bg-card font-semibold text-foreground" : "text-muted-foreground hover:text-foreground"}`}>
+                          {section}
+                        </button>
+                      ))}
+                    </div>
+                    {tabSections.map((section) => (
+                      <div key={section} role="tabpanel" hidden={section !== activeTab} className="grid gap-x-12 pt-4 md:grid-cols-2">{fields.filter((field) => field.section === section).map(fieldRow)}</div>
+                    ))}
+                  </div>
+                ) : null}
+              </form>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     );
   }
 
