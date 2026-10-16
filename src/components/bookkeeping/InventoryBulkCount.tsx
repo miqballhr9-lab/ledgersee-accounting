@@ -17,6 +17,8 @@ import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
 
 interface InventoryBulkCountProps {
   products: BookkeepingRecord[];
+  /** Quantity on hand by item id, from the inventory ledger. */
+  onHand?: Record<string, number>;
 }
 
 interface PreviewCount extends InventoryCountRow {
@@ -45,7 +47,9 @@ function today() {
   return new Date().toISOString().slice(0, 10);
 }
 
-export default function InventoryBulkCount({ products }: InventoryBulkCountProps) {
+export default function InventoryBulkCount({ products, onHand = {} }: InventoryBulkCountProps) {
+  // Quantity on hand worked out from every sale, purchase and movement, not the item's saved figure.
+  const stockOf = (product: BookkeepingRecord) => onHand[product.id] ?? Number(product.data.stock || 0);
   const router = useRouter();
   const uploadRef = useRef<HTMLInputElement>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -66,7 +70,7 @@ export default function InventoryBulkCount({ products }: InventoryBulkCountProps
           product.id,
           product.data.sku || "",
           product.data.name || "Unnamed product",
-          Number(product.data.stock || 0),
+          stockOf(product),
           "",
           product.data.unit || "",
         ]),
@@ -142,7 +146,7 @@ export default function InventoryBulkCount({ products }: InventoryBulkCountProps
           rowNumber,
           name: product.data.name || "Unnamed product",
           sku: product.data.sku || "—",
-          currentStock: Number(product.data.stock || 0),
+          currentStock: stockOf(product),
           unit: product.data.unit || "",
         });
       }

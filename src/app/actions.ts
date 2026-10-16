@@ -2,6 +2,7 @@
 
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { randomBytes } from "node:crypto";
+import { recordAudit } from "@/lib/audit";
 import { revalidatePath } from "@/lib/revalidate";
 
 import { db } from "@/db";
@@ -201,10 +202,11 @@ function normalizePayrollData(data: Record<string, string>, taxRule: SalaryTaxRu
     description: data.description || "",
   };
 
-  if (!values.employeeId || !values.employeeName || !values.cnic || !values.designation || !values.baseSalary) {
-    throw new ActionError("Enter the employee ID, name, CNIC, designation, and base salary.");
+  // CNIC and job title are shown on the payslip when known; a new hire can be paid before they are added.
+  if (!values.employeeId || !values.employeeName || !values.baseSalary) {
+    throw new ActionError("Enter the employee ID, name and base salary.");
   }
-  if (!/^\d{5}-?\d{7}-?\d$/.test(values.cnic)) throw new ActionError("Enter a valid 13-digit CNIC.");
+  if (values.cnic && !/^\d{5}-?\d{7}-?\d$/.test(values.cnic)) throw new ActionError("Enter a valid 13-digit CNIC, or leave it empty.");
   if (values.employeeEmail && (values.employeeEmail.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(values.employeeEmail))) {
     throw new ActionError("Enter a valid employee email address.");
   }
@@ -286,37 +288,6 @@ export async function listAllBookkeepingRecords(): Promise<BookkeepingRecord[]> 
   return rows.filter((row) => canReadKind(me.role, row.kind)).map(serializeRow);
 }
 
-/** Every add, edit, delete and payment, for the Audit Log report. */
-const unaudited = new Set(["audit-events", "automation-log", "automation-settings", "team-members"]);
-
-function auditLabel(data: Record<string, string>) {
-  return data.invoiceNumber || data.billNumber || data.creditNumber || data.estimateNumber || data.orderNumber || data.poNumber || data.reference || data.referenceNumber
-    || data.rtName || data.employeeName || data.name || data.description || data.payee || "";
-}
-
-async function recordAudit(me: Awaited<ReturnType<typeof requireUser>>, action: string, kind: string, id: string, data: Record<string, string>) {
-  if (unaudited.has(kind)) return;
-  try {
-    await db.insert(bookkeepingRecord).values({
-      userId: me.id,
-      kind: "audit-events",
-      data: {
-        action,
-        recordKind: kind,
-        recordId: id,
-        label: auditLabel(data).slice(0, 200),
-        name: (data.customer || data.vendor || data.payee || data.employeeName || "").slice(0, 200),
-        amount: data.amount ?? "",
-        actorName: me.name ?? "",
-        actorEmail: me.email ?? "",
-        at: new Date().toISOString(),
-      },
-    });
-  } catch {
-    // The audit trail never blocks the change itself.
-  }
-}
-
 /** Logs a payment against an invoice, bill, expense or salary, with the amount of the payment just recorded. */
 async function auditPayment(me: Awaited<ReturnType<typeof requireUser>>, kind: string, id: string) {
   const link = { invoices: "invoiceId", bills: "billId", expenses: "expenseId", payroll: "payrollId" }[kind] ?? "";
@@ -327,10 +298,44 @@ async function auditPayment(me: Awaited<ReturnType<typeof requireUser>>, kind: s
   if (record) await recordAudit(me, "Payment", kind, id, { ...record.data, amount: payment?.data.amount ?? "" });
 }
 
+/** Logs an action on a record (conversion, credit, refund, undo…) in the Audit Log. */
+async function auditRecord(me: Awaited<ReturnType<typeof requireUser>>, action: string, id: string) {
+  const [record] = await db.select().from(bookkeepingRecord).where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id))).limit(1);
+  if (record) await recordAudit(me, action, record.kind, record.id, record.data);
+}
+
 export async function saveBookkeepingRecord(kind: string, input: Record<string, string>, id?: string): Promise<BookkeepingRecord> {
   const saved = await saveRecord(kind, input, id);
-  await recordAudit(await requireUser(), id ? "Edited" : "Added", kind, saved.id, saved.data);
+  const me = await requireUser();
+  await recordAudit(me, id ? "Edited" : "Added", kind, saved.id, saved.data);
+  if (kind === "customers" || kind === "vendors") await syncOpeningBalance(me.id, kind, saved);
   return saved;
+}
+
+/**
+ * A customer's or supplier's opening balance becomes an "Opening balance" invoice or bill, as in
+ * QuickBooks, so it ages, can be paid and shows in A/R and A/P. It posts against opening balance equity.
+ * Once anything is paid on it, it is left as it is.
+ */
+async function syncOpeningBalance(userId: string, kind: "customers" | "vendors", party: BookkeepingRecord) {
+  const docKind = kind === "customers" ? "invoices" : "bills";
+  const amount = Math.round((Number(party.data.openingBalance) || 0) * 100) / 100;
+  const [existing] = await db.select().from(bookkeepingRecord)
+    .where(and(eq(bookkeepingRecord.userId, userId), eq(bookkeepingRecord.kind, docKind), sql`${bookkeepingRecord.data}->>'openingBalanceFor' = ${party.id}`)).limit(1);
+  if (existing && (Number(existing.data.paidAmount) || 0) > 0) return;
+  if (amount <= 0) {
+    if (existing) await db.delete(bookkeepingRecord).where(eq(bookkeepingRecord.id, existing.id));
+    return;
+  }
+  const date = party.data.openingBalanceDate || new Date().toISOString().slice(0, 10);
+  const name = party.data.name || party.data.company || (kind === "customers" ? "Customer" : "Supplier");
+  const line = JSON.stringify([{ itemId: "", name: "Opening balance", description: `Opening balance as of ${date}`, quantity: "1", rate: amount.toFixed(2) }]);
+  const common = { docType: "Opening balance", openingBalanceFor: party.id, amount: amount.toFixed(2), subtotal: amount.toFixed(2), taxAmount: "0", taxRate: "", lineItems: line, paidAmount: "0", memo: "Opening balance" };
+  const data: Record<string, string> = kind === "customers"
+    ? { ...(existing?.data ?? {}), ...common, customer: name, customerId: party.id, invoiceNumber: "Opening balance", issueDate: date, dueDate: date, status: "Sent", paymentMethod: "Credit" }
+    : { ...(existing?.data ?? {}), ...common, vendor: name, billNumber: "Opening balance", billDate: date, dueDate: date, status: "Open", category: "Opening balance equity", paymentMethod: "Credit" };
+  if (existing) await db.update(bookkeepingRecord).set({ data, updatedAt: new Date() }).where(eq(bookkeepingRecord.id, existing.id));
+  else await db.insert(bookkeepingRecord).values({ userId, kind: docKind, data });
 }
 
 async function saveRecord(
@@ -343,6 +348,10 @@ async function saveRecord(
   if (!isRecordKind(kind)) throw new ActionError("That section isn’t available.");
   if (kind === "reconciliations") throw new ActionError("Completed reconciliations can only be created from the reconciliation screen.");
   if (kind === "team-members") throw new ActionError("Add and change team members from Users & roles.");
+  if (id && (kind === "invoices" || kind === "bills")) {
+    const [current] = await db.select().from(bookkeepingRecord).where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id))).limit(1);
+    if (current?.data.docType === "Opening balance") throw new ActionError(`Change this opening balance on the ${kind === "invoices" ? "customer" : "supplier"} instead.`);
+  }
   let data = amountFromLineItems(sanitizePayload(input), kind);
   if (kind === "purchase-orders" && !id) data = { ...data, status: "Draft" };
   if (kind === "recurring-transactions") data = recurringTemplateData(me, data);
@@ -907,7 +916,7 @@ export async function importPayrollCsv(input: string): Promise<{ created: number
   if (rows.length > 500) throw new ActionError("Import up to 500 payroll rows at a time.");
 
   const headerIndexes = new Map(rawHeaders.map((header, index) => [header.replace(/^\uFEFF/, "").trim().toLowerCase().replace(/[^a-z0-9]/g, ""), index]));
-  const requiredFields: (keyof PayrollValues)[] = ["employeeId", "employeeName", "cnic", "designation", "month", "baseSalary", "workingDays", "workedDays"];
+  const requiredFields: (keyof PayrollValues)[] = ["employeeId", "employeeName", "month", "baseSalary", "workingDays", "workedDays"];
   const missingFields = requiredFields.filter((fieldName) => !headerIndexes.has(fieldName.toLowerCase()));
   if (missingFields.length) throw new ActionError(`The payroll CSV is missing these columns: ${missingFields.join(", ")}.`);
 
@@ -1156,6 +1165,8 @@ async function deleteRecord(kind: string, id: string): Promise<void> {
       .limit(1);
     if (existing?.data.reconciled === "true") throw new ActionError("This transaction is part of a completed reconciliation and can’t be deleted.");
   }
+  if (kind === "credit-notes" || kind === "supplier-credits") await releaseAppliedCredit(me.id, kind, id);
+  if (kind === "purchase-orders") await removeOrderReceipts(me.id, id);
   const [deleted] = await db
     .delete(bookkeepingRecord)
     .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, kind)))
@@ -1167,6 +1178,35 @@ async function deleteRecord(kind: string, id: string): Promise<void> {
       .where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "payments"), sql`${bookkeepingRecord.data}->>${kind === "invoices" ? "invoiceId" : "payrollId"} = ${id}`));
   }
   revalidatePath("/app", "layout");
+}
+
+/** Deleting an applied credit gives the invoice or bill its balance back. */
+async function releaseAppliedCredit(userId: string, kind: "credit-notes" | "supplier-credits", id: string) {
+  const [credit] = await db.select().from(bookkeepingRecord).where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, userId), eq(bookkeepingRecord.kind, kind))).limit(1);
+  const applied = Number(credit?.data.appliedAmount) || 0;
+  if (!credit || credit.data.status !== "Applied" || applied <= 0) return;
+  const targetKind = kind === "credit-notes" ? "invoices" : "bills";
+  const targetId = kind === "credit-notes" ? credit.data.appliedInvoiceId : credit.data.appliedBillId;
+  const numberKey = kind === "credit-notes" ? "invoiceNumber" : "billNumber";
+  const candidates = await db.select().from(bookkeepingRecord).where(and(eq(bookkeepingRecord.userId, userId), eq(bookkeepingRecord.kind, targetKind)));
+  const target = candidates.find((row) => (targetId ? row.id === targetId : Boolean(credit.data[numberKey]) && row.data[numberKey] === credit.data[numberKey]));
+  if (!target) return;
+  const creditApplied = Math.max(0, (Number(target.data.creditApplied) || 0) - applied);
+  const paid = Number(target.data.paidAmount) || 0;
+  const settled = paid + creditApplied >= (Number(target.data.amount) || 0) - 0.005;
+  const status = target.data.status === "Paid" && !settled ? (paid > 0 ? "Partially Paid" : targetKind === "invoices" ? "Sent" : "Open") : target.data.status;
+  await db.update(bookkeepingRecord).set({ data: { ...target.data, creditApplied: creditApplied.toFixed(2), status }, updatedAt: new Date() }).where(eq(bookkeepingRecord.id, target.id));
+}
+
+/** Deleting a purchase order takes back the stock its receipt added. */
+async function removeOrderReceipts(userId: string, orderId: string) {
+  const receipts = (await db.select().from(bookkeepingRecord).where(and(eq(bookkeepingRecord.userId, userId), eq(bookkeepingRecord.kind, "inventory-movements"))))
+    .filter((row) => row.data.purchaseOrderId === orderId);
+  for (const receipt of receipts) {
+    const [item] = await db.select().from(bookkeepingRecord).where(and(eq(bookkeepingRecord.id, receipt.data.itemId ?? ""), eq(bookkeepingRecord.userId, userId))).limit(1);
+    if (item) await db.update(bookkeepingRecord).set({ data: { ...item.data, stock: String((Number(item.data.stock) || 0) - (Number(receipt.data.change) || 0)) }, updatedAt: new Date() }).where(eq(bookkeepingRecord.id, item.id));
+    await db.delete(bookkeepingRecord).where(eq(bookkeepingRecord.id, receipt.id));
+  }
 }
 
 export async function recordInvoicePayment(
@@ -1232,7 +1272,28 @@ export async function recordInvoicePayment(
     },
   });
   await auditPayment(me, "invoices", id);
+  if (updatedData.status === "Paid" && data.crmDealId) await markDealWon(me.id, me.name, data.crmDealId, data.invoiceNumber || "the invoice");
   revalidatePath("/app", "layout");
+}
+
+/** A deal whose invoice is paid in full is won, as in Zoho CRM. Closed deals are left alone. */
+async function markDealWon(userId: string, actor: string, dealId: string, invoiceNumber: string) {
+  const [deal] = await db.select().from(bookkeepingRecord)
+    .where(and(eq(bookkeepingRecord.id, dealId), eq(bookkeepingRecord.userId, userId), eq(bookkeepingRecord.kind, "crm-deals"))).limit(1);
+  if (!deal || (deal.data.stage ?? "").startsWith("Closed")) return;
+  let history: unknown[] = [];
+  try {
+    const parsed: unknown = JSON.parse(deal.data.history || "[]");
+    if (Array.isArray(parsed)) history = parsed;
+  } catch {
+    history = [];
+  }
+  const at = new Date().toISOString().slice(0, 16).replace("T", " ");
+  const entry = { at, by: actor, text: `Stage changed from “${deal.data.stage || "—"}” to “Closed Won” when ${invoiceNumber} was paid` };
+  await db.update(bookkeepingRecord).set({
+    data: { ...deal.data, stage: "Closed Won", probability: "100", expectedRevenue: deal.data.amount || "0", closedOn: at.slice(0, 10), history: JSON.stringify([entry, ...history].slice(0, 40)) },
+    updatedAt: new Date(),
+  }).where(eq(bookkeepingRecord.id, deal.id));
 }
 
 /**
@@ -1270,6 +1331,7 @@ export async function undoInvoicePayments(id: string): Promise<void> {
       })
       .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id)));
   });
+  await auditRecord(me, "Payment removed", id);
   revalidatePath("/app", "layout");
 }
 
@@ -1364,6 +1426,7 @@ export async function undoBillPayments(id: string): Promise<void> {
       })
       .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id)));
   });
+  await auditRecord(me, "Payment removed", id);
   revalidatePath("/app", "layout");
 }
 
@@ -1479,6 +1542,7 @@ export async function undoPayrollPayment(id: string): Promise<void> {
     .set({ data: { ...entry.data, status: "Unpaid", paidAmount: "0", paidDate: "" }, updatedAt: new Date() })
     .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id)));
   if (entry.data.status === "Paid") await applyLoanRepayment(me.id, entry.data, -1);
+  await auditRecord(me, "Payment removed", id);
   revalidatePath("/app", "layout");
 }
 
@@ -1499,6 +1563,7 @@ export async function undoExpensePayment(id: string): Promise<void> {
     .update(bookkeepingRecord)
     .set({ data: { ...expense.data, status: "Unpaid", paidAmount: "0", paymentAccount: "", paymentAccountId: "", paymentDate: "" }, updatedAt: new Date() })
     .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id)));
+  await auditRecord(me, "Payment removed", id);
   revalidatePath("/app", "layout");
 }
 
@@ -1519,6 +1584,7 @@ export async function refundSupplierCredit(id: string, refundDate: string, accou
     .update(bookkeepingRecord)
     .set({ data: { ...credit.data, status: "Refunded", refundDate, refundMethod: method, refundAccountId: account.id, refundAccountName: `${method} · ${name}` }, updatedAt: new Date() })
     .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id)));
+  await auditRecord(me, "Refunded", id);
   revalidatePath("/app", "layout");
 }
 
@@ -1625,7 +1691,7 @@ export async function convertBookkeepingRecord(id: string, target?: string): Pro
       };
     }
     const [created] = await transaction.insert(bookkeepingRecord)
-      .values({ userId: me.id, kind: targetKind, data: sourceKind === "purchase-orders" ? { ...targetData, sourcePurchaseOrderId: source.id, sourcePurchaseOrderNumber: sourceData.poNumber || "" } : targetData })
+      .values({ userId: me.id, kind: targetKind, data: sourceKind === "purchase-orders" ? { ...targetData, sourcePurchaseOrderId: source.id, sourcePurchaseOrderNumber: sourceData.poNumber || "" } : { ...targetData, convertedFromKind: sourceKind, convertedFromId: source.id } })
       .returning({ id: bookkeepingRecord.id });
     const updatedSourceData = sourceKind === "purchase-orders"
       ? { ...sourceData, convertedKind: targetKind, convertedRecordId: created.id, convertedAt: new Date().toISOString() }
@@ -1635,6 +1701,7 @@ export async function convertBookkeepingRecord(id: string, target?: string): Pro
       .set({ data: updatedSourceData, updatedAt: new Date() })
       .where(and(eq(bookkeepingRecord.id, source.id), eq(bookkeepingRecord.userId, me.id)));
   });
+  await auditRecord(me, "Converted", id);
   revalidatePath("/app", "layout");
 }
 
@@ -1725,6 +1792,7 @@ export async function convertPurchaseOrderToExpense(
       })
       .where(and(eq(bookkeepingRecord.id, order.id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "purchase-orders")));
   });
+  await auditRecord(me, "Converted", id);
   revalidatePath("/app", "layout");
 }
 
@@ -1964,6 +2032,7 @@ export async function advancePurchaseOrder(
     return "Cancelled";
   });
 
+  await auditRecord(me, "Status changed", id);
   revalidatePath("/app", "layout");
   return { status: result };
 }
@@ -2111,6 +2180,7 @@ export async function completeBankReconciliation(
     return reconciliation;
   });
 
+  await recordAudit(me, "Reconciled", "reconciliations", created.id, created.data);
   revalidatePath("/app", "layout");
   return serializeRow(created);
 }
@@ -2151,8 +2221,9 @@ export async function applyCreditNote(id: string): Promise<void> {
     .where(and(eq(bookkeepingRecord.id, invoice.id), eq(bookkeepingRecord.userId, me.id)));
   await db
     .update(bookkeepingRecord)
-    .set({ data: { ...creditNote.data, appliedAmount: creditAmount.toFixed(2), status: "Applied" }, updatedAt: new Date() })
+    .set({ data: { ...creditNote.data, appliedAmount: creditAmount.toFixed(2), appliedInvoiceId: invoice.id, status: "Applied" }, updatedAt: new Date() })
     .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id)));
+  await auditRecord(me, "Credit applied", id);
   revalidatePath("/app", "layout");
 }
 
@@ -2199,6 +2270,7 @@ export async function applySupplierCredit(id: string): Promise<void> {
       .set({ data: { ...credit.data, appliedAmount: creditAmount.toFixed(2), appliedBillId: bill.id, status: "Applied" }, updatedAt: new Date() })
       .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id)));
   });
+  await auditRecord(me, "Credit applied", id);
   revalidatePath("/app", "layout");
 }
 
@@ -2251,6 +2323,7 @@ export async function generateRecurringInvoice(id: string): Promise<void> {
       .set({ data: { ...settings.data, nextInvoiceNumber: String(sequence + 1) }, updatedAt: new Date() })
       .where(and(eq(bookkeepingRecord.id, settings.id), eq(bookkeepingRecord.userId, me.id)));
   }
+  await auditRecord(me, "Invoice generated", id);
   revalidatePath("/app", "layout");
 }
 

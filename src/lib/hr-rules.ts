@@ -162,6 +162,7 @@ export function applyHrRules(kind: string, data: Record<string, string>, existin
   }
 
   if (kind === "hr-appraisals") {
+    if (data.wageEffectiveMonth && !/^\d{4}-\d{2}$/.test(data.wageEffectiveMonth)) throw new ActionError("Enter the effective month as YYYY-MM.");
     const ratings = ["qualityRating", "productivityRating", "teamworkRating", "punctualityRating"].map((key) => money(data[key])).filter((value) => value > 0);
     data.overallRating = ratings.length ? (ratings.reduce((sum, value) => sum + value, 0) / ratings.length).toFixed(1) : "";
     if (!data.status) data.status = "To Confirm";
@@ -245,6 +246,15 @@ export async function afterHrSave(userId: string, kind: string, before: Record<s
     await db.update(bookkeepingRecord).set({ data: { ...data, hiredEmployeeId: employee.id } }).where(eq(bookkeepingRecord.id, after.id));
     return `${data.candidateName} added to Employees as ${employeeId}, with the onboarding plan's activities.`;
   }
+  if (kind === "hr-appraisals" && data.status === "Done" && before?.status !== "Done" && money(data.newWage) > 0 && data.employeeId) {
+    // A raise agreed in the appraisal becomes the employee's wage, and the old wage is kept in the notes.
+    const [employee] = await db.select().from(bookkeepingRecord).where(and(eq(bookkeepingRecord.id, data.employeeId), eq(bookkeepingRecord.userId, userId))).limit(1);
+    if (employee && money(employee.data.baseSalary) !== money(data.newWage)) {
+      const note = `Wage changed from ${employee.data.baseSalary || "0"} to ${fixed(money(data.newWage))}${data.wageEffectiveMonth ? ` from ${data.wageEffectiveMonth}` : ""} (appraisal ${data.period || data.reviewDate || ""}).`.replace(" ().", ".");
+      await db.update(bookkeepingRecord).set({ data: { ...employee.data, baseSalary: fixed(money(data.newWage)), notes: [employee.data.notes, note].filter(Boolean).join("\n") }, updatedAt: new Date() }).where(eq(bookkeepingRecord.id, employee.id));
+      return `${employee.data.name}'s wage is now ${fixed(money(data.newWage))}.`;
+    }
+  }
   const settled = (status: string | undefined) => status === "Approved" || status === "Paid";
   if (kind === "hr-settlements" && data.status === "Paid" && before?.status !== "Paid" && data.employeeId && money(data.loanRecovery) > 0) {
     // The final pay recovered what was left on the employee's salary attachments, so they are done.
@@ -264,16 +274,7 @@ export async function afterHrSave(userId: string, kind: string, before: Record<s
 }
 
 /** For payroll: approved unpaid leave days and loan installments due for an employee in a month. */
-export function payrollAdjustments(month: string, employee: { id?: string; employeeId?: string; name?: string }, leaves: StoredRow[], loans: StoredRow[]) {
-  const matches = (data: Record<string, string>) => (employee.id && data.employeeId === employee.id) || (data.employee && data.employee === employee.name);
-  const unpaidDays = leaves
-    .filter((row) => row.data.status === "Approved" && row.data.paid === "false" && matches(row.data) && (row.data.fromDate ?? "").slice(0, 7) <= month && (row.data.toDate ?? "").slice(0, 7) >= month)
-    .reduce((sum, row) => sum + dates(row.data.fromDate, row.data.toDate).filter((date) => date.startsWith(month) && new Date(`${date}T12:00:00Z`).getUTCDay() !== 0).length * (row.data.halfDay === "true" ? 0.5 : 1), 0);
-  const loanDeduction = loans
-    .filter((row) => isRunningAttachment(row.data.status) && matches(row.data) && (!row.data.startMonth || row.data.startMonth <= month))
-    .reduce((sum, row) => sum + Math.min(money(row.data.monthlyInstallment), money(row.data.balance)), 0);
-  return { unpaidDays, loanDeduction: Math.round(loanDeduction * 100) / 100 };
-}
+export { payrollAdjustments } from "@/lib/payroll-adjustments";
 
 /**
  * When a salary with a loan deduction is paid, the deduction pays down the

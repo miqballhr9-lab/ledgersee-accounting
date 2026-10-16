@@ -10,6 +10,7 @@ import { ActionError } from "@/lib/action-error";
 import { assertCanWrite, requireUser } from "@/lib/auth";
 import type { BookkeepingRecord, RecordKind } from "@/lib/bookkeeping-types";
 import { paymentAccountLabel, paymentAccountType } from "@/lib/payment-accounts";
+import { recordAudit } from "@/lib/audit";
 import { afterHrSave, applyHrRules } from "@/lib/hr-rules";
 import {
   crmKinds,
@@ -228,12 +229,14 @@ export async function saveCrmRecord(kind: string, input: Record<string, string>,
     const [saved] = await db.update(bookkeepingRecord).set({ data, updatedAt: new Date() })
       .where(and(eq(bookkeepingRecord.id, existing.id), eq(bookkeepingRecord.userId, me.id))).returning();
     if (mod.section === "hr") await afterHrSave(me.id, kind, existing.data, saved);
+    await recordAudit(me, "Edited", kind, saved.id, saved.data);
     revalidatePath("/app", "layout");
     return toRecord(saved);
   }
   if (mod.numbering) data[mod.numbering.key] = await nextNumber(me.id, kind, mod.numbering.key, mod.numbering.prefix);
   const [created] = await db.insert(bookkeepingRecord).values({ userId: me.id, kind, data }).returning();
   if (mod.section === "hr") await afterHrSave(me.id, kind, undefined, created);
+  await recordAudit(me, "Added", kind, created.id, created.data);
   revalidatePath("/app", "layout");
   return toRecord(created);
 }
@@ -257,6 +260,7 @@ export async function updateCrmField(kind: string, ids: string[], key: string, v
     const [updated] = await db.update(bookkeepingRecord).set({ data, updatedAt: new Date() })
       .where(and(eq(bookkeepingRecord.id, row.id), eq(bookkeepingRecord.userId, me.id))).returning();
     if (mod.section === "hr") await afterHrSave(me.id, kind, row.data, updated);
+    await recordAudit(me, "Edited", kind, updated.id, updated.data);
     saved.push(toRecord(updated));
   }
   revalidatePath("/app", "layout");
@@ -265,9 +269,16 @@ export async function updateCrmField(kind: string, ids: string[], key: string, v
 
 export async function deleteCrmRecords(kind: string, ids: string[]): Promise<void> {
   const me = await requireUser();
-  assertCanWrite(me, "crm-notes");
-  if (kind !== "crm-notes") crmModuleFor(kind);
   if (!ids.length) return;
+  const rows = await db.select().from(bookkeepingRecord)
+    .where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, kind), inArray(bookkeepingRecord.id, ids)));
+  if (kind === "crm-notes") {
+    // A note belongs to its record: whoever may change the record may remove its notes.
+    for (const note of rows) assertCanWrite(me, note.data.parentKind || "crm-notes");
+  } else {
+    crmModuleFor(kind);
+    assertCanWrite(me, kind);
+  }
   await db.transaction(async (transaction) => {
     await transaction.delete(bookkeepingRecord)
       .where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, kind), inArray(bookkeepingRecord.id, ids)));
@@ -278,18 +289,20 @@ export async function deleteCrmRecords(kind: string, ids: string[]): Promise<voi
       if (orphaned.length) await transaction.delete(bookkeepingRecord).where(and(eq(bookkeepingRecord.userId, me.id), inArray(bookkeepingRecord.id, orphaned)));
     }
   });
+  if (kind !== "crm-notes") for (const row of rows) await recordAudit(me, "Deleted", kind, row.id, row.data);
   revalidatePath("/app", "layout");
 }
 
 export async function addCrmNote(parentKind: string, parentId: string, title: string, content: string): Promise<BookkeepingRecord> {
   const me = await requireUser();
-  assertCanWrite(me, "crm-notes");
   if (parentKind !== "customers" && !crmKinds.includes(parentKind as RecordKind) && !hrKinds.includes(parentKind as RecordKind)) throw new ActionError("Notes can’t be added here.");
   const text = content.trim().slice(0, 8000);
   if (!text) throw new ActionError("Write the note first.");
   const [parent] = await db.select({ id: bookkeepingRecord.id }).from(bookkeepingRecord)
     .where(and(eq(bookkeepingRecord.id, parentId), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, parentKind))).limit(1);
   if (!parent) throw new ActionError("We couldn’t find that record. Refresh and try again.");
+  // Notes go with the record they are on, so HR notes need HR rights and CRM notes CRM rights.
+  assertCanWrite(me, parentKind);
   const [created] = await db.insert(bookkeepingRecord).values({
     userId: me.id,
     kind: "crm-notes",
@@ -464,6 +477,7 @@ export async function convertLead(leadId: string, input: ConvertLeadInput): Prom
 
     return { accountId, contactId: contact.id, dealId };
   });
+  await recordAudit(me, "Converted", "crm-leads", leadId, lead.data);
   revalidatePath("/app", "layout");
   return result;
 }

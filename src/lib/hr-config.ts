@@ -237,6 +237,8 @@ export const hrModules: readonly CrmModule[] = [
       { key: "punctualityRating", label: "Punctuality (1–5)", type: "select", options: ["1", "2", "3", "4", "5"], section: "Skills" },
       { key: "overallRating", label: "Skills score", type: "number", section: "Skills", readOnly: true },
       { key: "finalRating", label: "Final rating", type: "select", options: ["Needs improvement", "Meets expectations", "Exceeds expectations", "Strongly exceeds expectations"], section: "Skills" },
+      { key: "newWage", label: "New wage (monthly)", type: "currency", section: "Salary review", help: "Set when the appraisal brings a raise. Marking it done updates the employee's wage for the next payroll." },
+      { key: "wageEffectiveMonth", label: "Effective from", section: "Salary review", placeholder: "YYYY-MM" },
     ],
   },
   {

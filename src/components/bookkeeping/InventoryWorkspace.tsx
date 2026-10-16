@@ -143,7 +143,7 @@ export default function InventoryWorkspace({ products: productRecords, stock: st
           <p className="mt-1.5 text-sm text-muted-foreground">Stock goes down when you invoice and up when you enter bills or receive purchase orders. Cost of goods sold is worked out first-in, first-out.</p>
         </div>
         <div className="flex flex-wrap gap-2 xl:shrink-0 xl:flex-nowrap xl:justify-end">
-          <InventoryBulkCount products={products} />
+          <InventoryBulkCount products={products} onHand={Object.fromEntries(Object.entries(stockById).map(([id, summary]) => [id, summary.onHand]))} />
           {[...movementActions].sort((a, b) => Number(a.variant === "default") - Number(b.variant === "default")).map(({ type, label, icon: Icon, variant }) => (
             <Button key={type} type="button" variant={variant} disabled={!products.length} onClick={() => openMovement(type)}>
               <Icon size={16} strokeWidth={1.8} />

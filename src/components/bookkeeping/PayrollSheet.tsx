@@ -13,6 +13,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { readableError } from "@/lib/action-error";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
 import { calculatePayroll, emptyPayrollValues, type PayrollValues, type SalaryTaxRule } from "@/lib/payroll-utils";
+import { adjustedWorkedDays, payrollAdjustments } from "@/lib/payroll-adjustments";
+
+export interface PayrollHrRecords {
+  leaves: BookkeepingRecord[];
+  loans: BookkeepingRecord[];
+  attendance: BookkeepingRecord[];
+}
 
 interface PayrollSheetProps {
   open: boolean;
@@ -27,6 +34,15 @@ interface PayrollSheetProps {
   /** The country's salary tax, for the estimate shown when the tax box is empty. */
   taxRule?: SalaryTaxRule;
   currency?: string;
+  /** Unpaid time off and absences lower a new line's worked days; running salary attachments fill its loan deduction. */
+  hr?: PayrollHrRecords;
+}
+
+/** The HR figures for a new line: worked days after unpaid time off and absences, and this month's loan installment. */
+function hrLine(month: string, employee: BookkeepingRecord, workingDays: string, hr?: PayrollHrRecords): Partial<SheetRow> {
+  if (!hr) return {};
+  const adjustments = payrollAdjustments(month, { id: employee.id, name: employee.data.name }, hr.leaves, hr.loans, hr.attendance);
+  return { workedDays: adjustedWorkedDays(workingDays, adjustments), ...(adjustments.loanDeduction ? { loanDeduction: String(adjustments.loanDeduction) } : {}) };
 }
 
 interface Person {
@@ -128,7 +144,7 @@ function rowFromEntry(id: number, entry: BookkeepingRecord, personKey: string): 
 }
 
 /** The month's saved entries first, then active employees who have none yet, padded to five lines. */
-function startingRows(month: string, entries: BookkeepingRecord[], activeEmployees: BookkeepingRecord[], employees: BookkeepingRecord[], workingDays: string, copyFrom?: BookkeepingRecord | null) {
+function startingRows(month: string, entries: BookkeepingRecord[], activeEmployees: BookkeepingRecord[], employees: BookkeepingRecord[], workingDays: string, copyFrom?: BookkeepingRecord | null, hr?: PayrollHrRecords) {
   const keyFor = (entry: BookkeepingRecord) => employees.find((employee) => samePerson(entry, employee))?.id ?? `entry:${entry.id}`;
   const rows: SheetRow[] = copyFrom
     ? [{ ...rowFromEntry(1, copyFrom, keyFor(copyFrom)), workedDays: workingDays }]
@@ -136,7 +152,7 @@ function startingRows(month: string, entries: BookkeepingRecord[], activeEmploye
   if (!copyFrom) {
     for (const employee of activeEmployees) {
       if (!rows.some((row) => row.personKey === employee.id)) {
-        rows.push({ ...blankRow(rows.length + 1, workingDays), personKey: employee.id, baseSalary: employee.data.baseSalary || "" });
+        rows.push({ ...blankRow(rows.length + 1, workingDays), personKey: employee.id, baseSalary: employee.data.baseSalary || "", ...hrLine(month, employee, workingDays, hr) });
       }
     }
   }
@@ -158,14 +174,14 @@ function formatPay(value: number, currency: string) {
 }
 
 /** Enter a month's salaries for many employees at once, one employee per line. */
-export default function PayrollSheet({ open, onOpenChange, month: initialMonth, copyFrom, employees, existingRecords, onSaved, taxRule, currency = "PKR" }: PayrollSheetProps) {
+export default function PayrollSheet({ open, onOpenChange, month: initialMonth, copyFrom, employees, existingRecords, onSaved, taxRule, currency = "PKR", hr }: PayrollSheetProps) {
   const rupees = (value: number) => formatPay(value, currency);
   const activeEmployees = employees.filter((employee) => employee.data.name?.trim() && employee.data.status !== "Inactive");
   const monthEntries = existingRecords.filter((entry) => entry.data.month === initialMonth);
   const [month, setMonth] = useState(initialMonth);
   const [reference, setReference] = useState(() => (copyFrom ? "" : monthEntries.find((entry) => entry.data.reference)?.data.reference) || defaultReference(initialMonth));
   const [workingDays, setWorkingDays] = useState(() => (copyFrom ?? monthEntries[0])?.data.workingDays || "26");
-  const [rows, setRows] = useState<SheetRow[]>(() => startingRows(initialMonth, existingRecords, activeEmployees, employees, (copyFrom ?? monthEntries[0])?.data.workingDays || "26", copyFrom));
+  const [rows, setRows] = useState<SheetRow[]>(() => startingRows(initialMonth, existingRecords, activeEmployees, employees, (copyFrom ?? monthEntries[0])?.data.workingDays || "26", copyFrom, hr));
   const [nextId, setNextId] = useState(() => rows.length + 1);
   // People who appear only on saved entries (not on the Employees list) stay pickable.
   const entryPeople = new Map<string, Person>();
@@ -209,7 +225,9 @@ export default function PayrollSheet({ open, onOpenChange, month: initialMonth, 
       if (row.id !== id) return row;
       if (key !== "personKey") return { ...row, [key]: value };
       const employee = employees.find((item) => item.id === value);
-      return { ...row, personKey: value, baseSalary: row.baseSalary || employee?.data.baseSalary || "" };
+      // A newly picked employee brings their wage and this month's time off, absences and loan installment.
+      const fresh = !row.personKey && employee ? hrLine(month, employee, workingDays, hr) : {};
+      return { ...row, ...fresh, personKey: value, baseSalary: row.baseSalary || employee?.data.baseSalary || "" };
     }));
   }
 

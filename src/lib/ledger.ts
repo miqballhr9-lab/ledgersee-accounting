@@ -286,7 +286,8 @@ export function buildLedger(allRecords: BookkeepingRecord[], method: AccountingM
       const income = total - tax;
       const base = { type: "Invoice", number: data.invoiceNumber ?? "", name: data.customer ?? "", customer: data.customer ?? "", supplier: "", memo: "", sourceKind: "invoices", sourceId: record.id };
       // Income goes to each item's income account (Sales by default); lines carry the discount, not the tax.
-      const incomeLines = splitIncome(data, income);
+      // An opening balance invoice brings in what a customer already owed, against opening balance equity.
+      const incomeLines: Array<[string, number]> = data.docType === "Opening balance" ? [[openingEquity, income]] : splitIncome(data, income);
       if (method === "accrual") {
         post({ ...base, txnId: `inv-${record.id}`, date }, [[ar, total], ...incomeLines.map(([account, amount]) => [account, -amount] as [string, number]), [salesTax, -tax]]);
         for (const payment of docPayments(record, date)) {
@@ -346,6 +347,7 @@ export function buildLedger(allRecords: BookkeepingRecord[], method: AccountingM
         const stockLines: Array<[string, number]> = itemLines.map((line) => [received ? receivedNotBilled() : assetFor(line.itemId), line.qty * line.unit]);
         debitLines = [...stockLines, ...others.filter(([, amount]) => Math.abs(amount) > 0.004)];
       }
+      if (isBill && data.docType === "Opening balance") debitLines = [[openingEquity, total]];
       const party = (isBill || isCredit ? data.vendor : data.payee) ?? "";
       const base = {
         type: isBill ? "Bill" : isCredit ? "Supplier credit" : "Expense",

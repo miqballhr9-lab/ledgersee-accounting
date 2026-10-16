@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import PaymentDialog from "@/components/bookkeeping/PaymentDialog";
-import PayrollSheet from "@/components/bookkeeping/PayrollSheet";
+import PayrollSheet, { type PayrollHrRecords } from "@/components/bookkeeping/PayrollSheet";
 import { useNewRecordParam } from "@/hooks/use-new-record-param";
 import { paymentAccountType } from "@/lib/payment-accounts";
 import { useRouter } from "next/navigation";
@@ -33,6 +33,8 @@ interface PayrollWorkspaceProps {
   /** The business's currency (Settings); Pakistani rupees until one is set. */
   currency?: string;
   taxRule?: SalaryTaxRule;
+  /** Time off, salary attachments and attendance, which adjust a new month's lines. */
+  hr?: PayrollHrRecords;
 }
 
 function formatPayAmount(amount: number, currency: string) {
@@ -90,7 +92,7 @@ function payrollColumns(currency: string): PayrollColumn[] {
       render: (record) => (
         <>
           <p className="font-medium">{record.data.employeeName || "Unnamed employee"}</p>
-          <p className="mt-0.5 text-xs text-muted-foreground">{record.data.employeeId} · {record.data.cnic}</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">{[record.data.employeeId, record.data.cnic].filter(Boolean).join(" · ")}</p>
           {record.data.employeeEmail ? <p className="mt-0.5 text-xs text-muted-foreground">{record.data.employeeEmail}</p> : null}
           <p className="mt-0.5 text-xs text-muted-foreground">Joined: {record.data.joiningDate || "Not set"}</p>
         </>
@@ -131,7 +133,7 @@ function payrollColumns(currency: string): PayrollColumn[] {
 }
 
 
-export default function PayrollWorkspace({ records, accounts, employees = [], asOfDate, dateRange, currency = "PKR", taxRule }: PayrollWorkspaceProps) {
+export default function PayrollWorkspace({ records, accounts, employees = [], hr, asOfDate, dateRange, currency = "PKR", taxRule }: PayrollWorkspaceProps) {
   const formatRupees = (amount: number) => formatPayAmount(amount, currency);
   const router = useRouter();
   const uploadRef = useRef<HTMLInputElement>(null);
@@ -555,6 +557,7 @@ export default function PayrollWorkspace({ records, accounts, employees = [], as
           month={sheet.month}
           copyFrom={sheet.copyFrom}
           employees={employees}
+          hr={hr}
           existingRecords={savedRecords}
           taxRule={taxRule}
           currency={currency}

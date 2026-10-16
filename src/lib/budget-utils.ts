@@ -86,7 +86,13 @@ export function payrollBudgetHead(name: string) {
   return payrollBudgetHeads.find((item) => item.head.toLocaleLowerCase() === key);
 }
 
-export function budgetActualRecords(line: BudgetLine, records: BookkeepingRecord[]) {
+/** Documents that are not in the books: drafts, voided or cancelled ones, opening balances and unapproved automation. */
+function outsideBooks(record: BookkeepingRecord) {
+  return ["Draft", "Cancelled", "Void"].includes(record.data.status ?? "") || record.data.docType === "Opening balance" || record.data.awaitingApproval === "true";
+}
+
+export function budgetActualRecords(line: BudgetLine, allRecords: BookkeepingRecord[]) {
+  const records = allRecords.filter((record) => !outsideBooks(record));
   const budgetHead = line.budgetHead.trim().toLocaleLowerCase();
   if (!budgetHead) return [];
 
@@ -97,7 +103,7 @@ export function budgetActualRecords(line: BudgetLine, records: BookkeepingRecord
   if (line.type === "Income") {
     return records
       .filter((record) => {
-        if (record.kind !== "invoices" || ["Draft", "Cancelled"].includes(record.data.status ?? "")) return false;
+        if (record.kind !== "invoices") return false;
         const allSales = ["sales", "income", "revenue", "all sales"].includes(budgetHead) || budgetHead.includes("sales") || budgetHead.includes("revenue");
         return allSales || record.data.category?.trim().toLocaleLowerCase() === budgetHead || record.data.customer?.trim().toLocaleLowerCase() === budgetHead;
       });
@@ -107,7 +113,6 @@ export function budgetActualRecords(line: BudgetLine, records: BookkeepingRecord
   return records
     .filter((record) => {
       if (record.kind !== "expenses" && record.kind !== "bills") return false;
-      if (record.data.status === "Cancelled") return false;
       if (allCosts) return true;
       return expenseLinesFromData(record.data).some((expenseLine) => expenseLine.category.toLocaleLowerCase() === budgetHead);
     });
@@ -119,7 +124,8 @@ export function budgetActual(line: BudgetLine, records: BookkeepingRecord[]) {
       const fields: readonly string[] = payrollBudgetHead(line.budgetHead)?.fields ?? ["grossSalary"];
       return sum + fields.reduce((fieldTotal, field) => fieldTotal + (Number(record.data[field]) || 0), 0);
     }
-    if (record.kind === "invoices") return sum + Math.max(0, (Number(record.data.amount) || 0) - (Number(record.data.creditApplied) || 0));
+    // Income is counted before tax, as the Profit and Loss shows it.
+    if (record.kind === "invoices") return sum + Math.max(0, (Number(record.data.amount) || 0) - (Number(record.data.taxAmount) || 0) - (Number(record.data.creditApplied) || 0));
     if (record.kind === "expenses" || record.kind === "bills") {
       const budgetHead = line.budgetHead.trim().toLocaleLowerCase();
       const allCosts = ["expenses", "all expenses", "operating expenses", "all costs"].includes(budgetHead);

@@ -15,7 +15,7 @@ import { revalidatePath } from "@/lib/revalidate";
 type StoredRow = typeof bookkeepingRecord.$inferSelect;
 
 /** Fields that belong to one saved transaction, not to the pattern it repeats. */
-const perTransactionKeys = ["paidAmount", "paymentAccountId", "paymentAccountName", "paymentDate", "paymentAccount", "creditApplied", "shareToken", "sentAt", "reminderSentAt", "viewedAt", "receivedAt", "payNowAccountId", "docType", "amountPaid", "sourcePurchaseOrderId", "convertedFrom"];
+const perTransactionKeys = ["paidAmount", "paymentAccountId", "paymentAccountName", "paymentDate", "paymentAccount", "creditApplied", "shareToken", "sentAt", "reminderSentAt", "viewedAt", "receivedAt", "payNowAccountId", "docType", "amountPaid", "sourcePurchaseOrderId", "convertedFrom", "convertedFromKind", "convertedFromId", "awaitingApproval", "openingBalanceFor"];
 
 async function rows(userId: string, kind: string) {
   return db.select().from(bookkeepingRecord).where(and(eq(bookkeepingRecord.userId, userId), eq(bookkeepingRecord.kind, kind)));

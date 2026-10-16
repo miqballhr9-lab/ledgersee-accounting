@@ -11,7 +11,7 @@ import { ActionError } from "@/lib/action-error";
 import { assertAdmin, requireUser } from "@/lib/auth";
 import { sendEmailOrThrow } from "@/lib/email";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
-import { payrollAdjustments } from "@/lib/hr-rules";
+import { adjustedWorkedDays, payrollAdjustments } from "@/lib/payroll-adjustments";
 import { runCaseEscalation, runLeadFollowUp, runOverdueTasks, runStaleDeals, runWonDealInvoices } from "@/lib/crm-automation";
 import {
   automationTemplate,
@@ -158,7 +158,7 @@ const payrollAmountFields = ["baseSalary", "increment", "incentive", "overtimeAl
 async function runMonthlyPayroll(userId: string) {
   const month = today().slice(0, 7);
   const lastMonth = previousMonth(month);
-  const [payroll, employees, leaves, loans] = await Promise.all([rowsOfKind(userId, "payroll"), rowsOfKind(userId, "employees"), rowsOfKind(userId, "hr-leaves"), rowsOfKind(userId, "hr-loans")]);
+  const [payroll, employees, leaves, loans, attendance] = await Promise.all([rowsOfKind(userId, "payroll"), rowsOfKind(userId, "employees"), rowsOfKind(userId, "hr-leaves"), rowsOfKind(userId, "hr-loans"), rowsOfKind(userId, "hr-attendance")]);
   const thisMonth = payroll.filter((row) => row.data.month === month);
   const lastMonthEntries = payroll.filter((row) => row.data.month === lastMonth);
   const hasEntry = (employeeId: string, name: string) => thisMonth.some((row) => row.data.employeeId === employeeId && row.data.employeeName?.trim() === name.trim());
@@ -203,11 +203,11 @@ async function runMonthlyPayroll(userId: string) {
       description: "Created by automation",
     };
     for (const field of payrollAmountFields) payload[field] = source[field] || "0";
-    // HR: unpaid leave comes off the worked days, and approved loans set this month's installment.
+    // HR: unpaid time off and absences come off the worked days, and running attachments set this month's installment.
     const employee = employees.find((row) => row.data.employeeId === payload.employeeId && row.data.name?.trim() === payload.employeeName.trim());
-    const hr = payrollAdjustments(month, { id: employee?.id, name: payload.employeeName }, leaves, loans);
-    if (hr.unpaidDays > 0) payload.workedDays = String(Math.max(0, Math.ceil(Number(workingDays) - hr.unpaidDays)));
-    if (loans.some((row) => row.data.employee === payload.employeeName || row.data.employeeId === employee?.id)) payload.loanDeduction = hr.loanDeduction.toFixed(2);
+    const hr = payrollAdjustments(month, { id: employee?.id, name: payload.employeeName }, leaves, loans, attendance);
+    payload.workedDays = adjustedWorkedDays(workingDays, hr);
+    if (hr.hasLoans) payload.loanDeduction = hr.loanDeduction.toFixed(2);
     try {
       const saved = await saveBookkeepingRecord("payroll", payload);
       items.push({ kind: "payroll", id: saved.id, label: `${payload.employeeName} · salary ${month}`, status: "Pending approval" });
