@@ -2,11 +2,11 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowDownToLine, CalendarDays, CircleDollarSign, Undo2, Filter, MoreHorizontal, Pencil, Plus, Search, Trash2 } from "lucide-react";
+import { ArrowDownToLine, Ban, CalendarDays, CircleDollarSign, Undo2, Filter, MoreHorizontal, Pencil, Plus, Search, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { readableError } from "@/lib/action-error";
 
-import { deleteBookkeepingRecord, recordBillPayment, recordExpensePayment, undoBillPayments, undoExpensePayment } from "@/app/actions";
+import { deleteBookkeepingRecord, recordBillPayment, recordExpensePayment, undoBillPayments, undoExpensePayment, voidBookkeepingRecord } from "@/app/actions";
 import PaymentDialog from "@/components/bookkeeping/PaymentDialog";
 import PayBillsDialog from "@/components/bookkeeping/PayBillsDialog";
 import RecordEditor from "@/components/bookkeeping/RecordEditor";
@@ -320,6 +320,22 @@ export default function ExpensesWorkspace({ expenses: initialExpenses, bills: in
     router.refresh();
   }
 
+  async function handleVoid(record: BookkeepingRecord) {
+    if (!window.confirm(`Void this ${record.kind === "bills" ? "bill" : "expense"}? It stays on file but no longer counts in your books.`)) return;
+    setPendingDelete(record.id);
+    setActionMessage("");
+    try {
+      await voidBookkeepingRecord(record.kind, record.id);
+      setRecords((current) => current.map((item) => (item.id === record.id ? { ...item, data: { ...item.data, status: "Void" } } : item)));
+      router.refresh();
+      setActionMessage(`${record.kind === "bills" ? "Bill" : "Expense"} voided.`);
+    } catch (error) {
+      setActionMessage(error instanceof Error ? readableError(error) : "That transaction couldn’t be voided.");
+    } finally {
+      setPendingDelete(null);
+    }
+  }
+
   async function handleDelete(record: BookkeepingRecord) {
     if (!window.confirm(`Delete this ${record.kind === "bills" ? "bill" : "expense"}? This can’t be undone.`)) return;
     setPendingDelete(record.id);
@@ -505,6 +521,7 @@ export default function ExpensesWorkspace({ expenses: initialExpenses, bills: in
                             {isUnpaid(record) ? <DropdownMenuItem disabled={bulkPending} onClick={() => setPaymentTargets([record])}><CircleDollarSign size={14} />Record payment</DropdownMenuItem> : null}
                             {hasPayment(record) ? <DropdownMenuItem disabled={bulkPending} onClick={() => void undoPayment(record)}><Undo2 size={14} />Undo payment</DropdownMenuItem> : null}
                             <DropdownMenuSeparator />
+                            {record.data.status !== "Void" && !hasPayment(record) ? <DropdownMenuItem disabled={pendingDelete === record.id} onClick={() => void handleVoid(record)}><Ban size={14} />Void</DropdownMenuItem> : null}
                             <DropdownMenuItem variant="destructive" disabled={pendingDelete === record.id} onClick={() => void handleDelete(record)}><Trash2 size={14} />Delete</DropdownMenuItem>
                           </DropdownMenuContent>
                         </DropdownMenu>

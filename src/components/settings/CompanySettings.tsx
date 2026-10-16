@@ -357,6 +357,10 @@ export default function CompanySettings({ settings, workspaceName }: CompanySett
                   {select("accountingMethod", "Accounting method", ["Accrual", "Cash"], "The basis reports open with; you can still switch on each report.")}
                 </>,
               )}
+              {section("closing", "Close the books",
+                <Row label="Closing date" value={saved.booksClosedThrough ? `Closed through ${saved.booksClosedThrough}` : "Not closed"} />,
+                <>{text("booksClosedThrough", "Closing date", { type: "date", help: "Nothing dated on or before this day can be added, changed or deleted, so filed periods stay as they are. Leave empty to keep every period open." })}</>,
+              )}
               {section("currency", "Currency",
                 <Row label="Home currency" value={saved.currency} />,
                 <Field label="Home currency" htmlFor="settings-currency" wide help="Changing it after you have transactions changes how existing amounts read in reports.">

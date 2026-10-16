@@ -14,7 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { readableError } from "@/lib/action-error";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
 import { currencyAmount } from "@/lib/invoice-utils";
-import { paymentAccountLabel, paymentAccountType } from "@/lib/payment-accounts";
+import { paymentAccountLabel, receivingAccountType } from "@/lib/payment-accounts";
 
 interface ReceivePaymentDialogProps {
   open: boolean;
@@ -60,7 +60,7 @@ export default function ReceivePaymentDialog({ open, onOpenChange, customers, in
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
 
-  const paymentAccounts = accounts.filter((account) => paymentAccountType(account));
+  const paymentAccounts = accounts.filter((account) => receivingAccountType(account));
   const customerNames = [...new Set([
     ...customers.map((record) => record.data.name?.trim() ?? ""),
     ...openInvoices.map((invoice) => invoice.data.customer?.trim() ?? ""),

@@ -13,6 +13,18 @@ export function paymentAccountType(account: Pick<BookkeepingRecord, "kind" | "da
   return null;
 }
 
-export function paymentAccountLabel(account: BookkeepingRecord): string {
-  return `${paymentAccountType(account)} · ${account.data.name || "Unnamed account"}`;
+export function paymentAccountLabel(account: Pick<BookkeepingRecord, "kind" | "data">): string {
+  const type = paymentAccountType(account) ?? (isUndepositedFunds(account) ? "Undeposited funds" : "");
+  const name = account.data.name || "Unnamed account";
+  return type && type !== name ? `${type} · ${name}` : name;
+}
+
+/** QuickBooks' Undeposited funds: money received but not yet banked, moved to a bank with a bank deposit. */
+export function isUndepositedFunds(account: Pick<BookkeepingRecord, "kind" | "data">) {
+  return account.kind === "accounts" && account.data.locked !== "true" && account.data.type === "Asset" && /undeposited/i.test(`${account.data.detailType ?? ""} ${account.data.name ?? ""}`);
+}
+
+/** Where money received from a customer can go: a cash, bank or card account, or Undeposited funds. */
+export function receivingAccountType(account: Pick<BookkeepingRecord, "kind" | "data">): PaymentAccountType | "Undeposited funds" | null {
+  return paymentAccountType(account) ?? (isUndepositedFunds(account) ? "Undeposited funds" : null);
 }

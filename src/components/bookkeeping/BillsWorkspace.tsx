@@ -2,10 +2,10 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowDownToLine, CircleDollarSign, MoreHorizontal, Pencil, Plus, Search, Trash2, Undo2 } from "lucide-react";
+import { ArrowDownToLine, Ban, CircleDollarSign, MoreHorizontal, Pencil, Plus, Search, Trash2, Undo2 } from "lucide-react";
 import { readableError } from "@/lib/action-error";
 
-import { deleteBookkeepingRecord, recordBillPayment, undoBillPayments } from "@/app/actions";
+import { deleteBookkeepingRecord, recordBillPayment, undoBillPayments, voidBookkeepingRecord } from "@/app/actions";
 import PaymentDialog from "@/components/bookkeeping/PaymentDialog";
 import PayBillsDialog from "@/components/bookkeeping/PayBillsDialog";
 import { paymentAccountType } from "@/lib/payment-accounts";
@@ -216,6 +216,21 @@ export default function BillsWorkspace({ records: initialRecords, vendors, accou
     await processBills([record], "undo-payment");
   }
 
+  async function handleVoid(record: BookkeepingRecord) {
+    if (!window.confirm(`Void ${record.data.billNumber || "this bill"}? It stays on file but no longer counts in your books.`)) return;
+    setPendingAction(true);
+    setActionMessage("");
+    try {
+      await voidBookkeepingRecord("bills", record.id);
+      setRecords((current) => current.map((item) => (item.id === record.id ? { ...item, data: { ...item.data, status: "Void" } } : item)));
+      setActionMessage("Bill voided.");
+    } catch (error) {
+      setActionMessage(error instanceof Error ? readableError(error) : "We couldn’t void that bill.");
+    } finally {
+      setPendingAction(false);
+    }
+  }
+
   async function handleDelete(record: BookkeepingRecord) {
     if (!window.confirm(`Delete ${record.data.billNumber || "this bill"}? This can’t be undone.`)) return;
     setPendingAction(true);
@@ -371,6 +386,7 @@ export default function BillsWorkspace({ records: initialRecords, vendors, accou
                           <DropdownMenuItem onClick={() => openEditBill(record)}><Pencil size={14} />Edit bill</DropdownMenuItem>
                           {Number(record.data.paidAmount) > 0 ? <DropdownMenuItem disabled={bulkPending} onClick={() => void handleUndoPayment(record)}><Undo2 size={14} />Undo payment</DropdownMenuItem> : null}
                           <DropdownMenuSeparator />
+                          {record.data.status !== "Void" && !(Number(record.data.paidAmount) > 0) ? <DropdownMenuItem disabled={pendingAction} onClick={() => void handleVoid(record)}><Ban size={14} />Void bill</DropdownMenuItem> : null}
                           <DropdownMenuItem variant="destructive" disabled={pendingAction} onClick={() => void handleDelete(record)}><Trash2 size={14} />Delete bill</DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>

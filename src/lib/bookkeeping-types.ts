@@ -27,6 +27,7 @@ export const recordKinds = [
   "team-members",
   "settings",
   "payments",
+  "deposits",
   "reconciliations",
   "automation-settings",
   "automation-rules",

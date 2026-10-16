@@ -3,6 +3,7 @@
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { randomBytes } from "node:crypto";
 import { recordAudit } from "@/lib/audit";
+import { assertBooksOpen, documentDate } from "@/lib/closing";
 import { revalidatePath } from "@/lib/revalidate";
 
 import { db } from "@/db";
@@ -17,7 +18,7 @@ import { dueDateForTerms, parseInvoiceLines } from "@/lib/invoice-utils";
 import { buildInventory, inventoryKinds, isInventoryItem } from "@/lib/inventory";
 import { siteUrl } from "@/lib/site";
 import { isRecordKind, type BookkeepingRecord, type RecordKind } from "@/lib/bookkeeping-types";
-import { paymentAccountType } from "@/lib/payment-accounts";
+import { paymentAccountType, receivingAccountType } from "@/lib/payment-accounts";
 import { recurringKinds, type RecurringKind } from "@/lib/recurring";
 import { accountCategoryForType, accountDetailsForType } from "@/lib/account-types";
 import { standardAccounts } from "@/lib/standard-accounts";
@@ -298,6 +299,13 @@ async function auditPayment(me: Awaited<ReturnType<typeof requireUser>>, kind: s
   if (record) await recordAudit(me, "Payment", kind, id, { ...record.data, amount: payment?.data.amount ?? "" });
 }
 
+/** Undoing a payment changes the books on the payment's date, so that date must be open. */
+async function assertPaymentsOpen(userId: string, link: string, id: string) {
+  const payments = await db.select().from(bookkeepingRecord)
+    .where(and(eq(bookkeepingRecord.userId, userId), eq(bookkeepingRecord.kind, "payments"), sql`${bookkeepingRecord.data}->>${link} = ${id}`));
+  await assertBooksOpen(userId, ...payments.map((payment) => payment.data.paymentDate));
+}
+
 /** Logs an action on a record (conversion, credit, refund, undo…) in the Audit Log. */
 async function auditRecord(me: Awaited<ReturnType<typeof requireUser>>, action: string, id: string) {
   const [record] = await db.select().from(bookkeepingRecord).where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id))).limit(1);
@@ -348,10 +356,10 @@ async function saveRecord(
   if (!isRecordKind(kind)) throw new ActionError("That section isn’t available.");
   if (kind === "reconciliations") throw new ActionError("Completed reconciliations can only be created from the reconciliation screen.");
   if (kind === "team-members") throw new ActionError("Add and change team members from Users & roles.");
-  if (id && (kind === "invoices" || kind === "bills")) {
-    const [current] = await db.select().from(bookkeepingRecord).where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id))).limit(1);
-    if (current?.data.docType === "Opening balance") throw new ActionError(`Change this opening balance on the ${kind === "invoices" ? "customer" : "supplier"} instead.`);
-  }
+  const [current] = id ? await db.select().from(bookkeepingRecord).where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id))).limit(1) : [];
+  if (current?.data.docType === "Opening balance" && (kind === "invoices" || kind === "bills")) throw new ActionError(`Change this opening balance on the ${kind === "invoices" ? "customer" : "supplier"} instead.`);
+  // Nothing dated in a closed period can be added or changed.
+  await assertBooksOpen(me.id, documentDate(kind, input), documentDate(kind, current?.data));
   let data = amountFromLineItems(sanitizePayload(input), kind);
   if (kind === "purchase-orders" && !id) data = { ...data, status: "Draft" };
   if (kind === "recurring-transactions") data = recurringTemplateData(me, data);
@@ -470,7 +478,8 @@ async function saveRecord(
         .from(bookkeepingRecord)
         .where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "accounts"), eq(bookkeepingRecord.id, selectedAccountId)))
         .limit(1);
-      const accountType = paymentAccount ? paymentAccountType({ kind: "accounts", data: paymentAccount.data }) : null;
+      // Money received can also wait in Undeposited funds until it is banked with a bank deposit.
+      const accountType = paymentAccount ? (kind === "invoices" ? receivingAccountType : paymentAccountType)({ kind: "accounts", data: paymentAccount.data }) : null;
       if (!paymentAccount || !accountType) throw new ActionError("Choose a Cash, Bank, or Credit card account from Chart of Accounts.");
       paymentMethod = accountType;
       data = { ...data, paymentAccountId: paymentAccount.id, paymentAccountName: paymentAccount.data.name || paymentAccount.data.code || "Account" };
@@ -1097,6 +1106,9 @@ async function deleteRecord(kind: string, id: string): Promise<void> {
   if (!isRecordKind(kind)) throw new ActionError("That section isn’t available.");
   if (kind === "reconciliations") throw new ActionError("Completed reconciliations can’t be deleted.");
   if (kind === "team-members") throw new ActionError("Remove team members from Users & roles.");
+  const [toDelete] = await db.select().from(bookkeepingRecord).where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, kind))).limit(1);
+  await assertBooksOpen(me.id, documentDate(kind, toDelete?.data));
+  if (kind === "deposits") throw new ActionError("Delete deposits from Bank deposits, so their payments go back to Undeposited funds.");
   if (kind === "bills" || kind === "expenses") {
     await db.transaction(async (transaction) => {
       const [record] = await transaction
@@ -1220,14 +1232,15 @@ export async function recordInvoicePayment(
   assertCanWrite(me, "invoices");
   const amount = Number(amountInput);
   if (!Number.isFinite(amount) || amount <= 0) throw new ActionError("Enter a payment amount greater than zero.");
+  await assertBooksOpen(me.id, paymentDate);
 
   const [paymentAccount] = await db
     .select()
     .from(bookkeepingRecord)
     .where(and(eq(bookkeepingRecord.id, accountId), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "accounts")))
     .limit(1);
-  const method = paymentAccount ? paymentAccountType({ kind: "accounts", data: paymentAccount.data }) : null;
-  if (!paymentAccount || !method) throw new ActionError("Choose a Cash, Bank, or Credit card account from Chart of Accounts.");
+  const method = paymentAccount ? receivingAccountType({ kind: "accounts", data: paymentAccount.data }) : null;
+  if (!paymentAccount || !method) throw new ActionError("Choose a Cash, Bank, or Credit card account, or Undeposited funds, from Chart of Accounts.");
 
   const [invoice] = await db
     .select()
@@ -1302,6 +1315,7 @@ async function markDealWon(userId: string, actor: string, dealId: string, invoic
  */
 export async function undoInvoicePayments(id: string): Promise<void> {
   const me = await requireUser();
+  await assertPaymentsOpen(me.id, "invoiceId", id);
   assertCanWrite(me, "invoices");
   await db.transaction(async (transaction) => {
     const [invoice] = await transaction
@@ -1371,6 +1385,7 @@ export async function recordBillPayment(id: string, paymentDate: string, account
   const me = await requireUser();
   assertCanWrite(me, "bills");
   if (!isPaymentDate(paymentDate)) throw new ActionError("Choose a payment date.");
+  await assertBooksOpen(me.id, paymentDate);
   const { account, method, name } = await findPaymentAccount(me.id, accountId);
   await db.transaction(async (transaction) => {
     const [bill] = await transaction
@@ -1405,6 +1420,7 @@ export async function recordBillPayment(id: string, paymentDate: string, account
 /** Removes the payments recorded on a bill so it can be corrected and paid again. */
 export async function undoBillPayments(id: string): Promise<void> {
   const me = await requireUser();
+  await assertPaymentsOpen(me.id, "billId", id);
   assertCanWrite(me, "bills");
   await db.transaction(async (transaction) => {
     const [bill] = await transaction
@@ -1467,6 +1483,7 @@ export async function recordExpensePayment(id: string, paymentDate: string, acco
   const me = await requireUser();
   assertCanWrite(me, "expenses");
   if (!isPaymentDate(paymentDate)) throw new ActionError("Choose a payment date.");
+  await assertBooksOpen(me.id, paymentDate);
   const { account, method, name } = await findPaymentAccount(me.id, accountId);
   const [expense] = await db
     .select()
@@ -1497,6 +1514,7 @@ export async function recordPayrollPayment(id: string, paymentDate: string, acco
   const me = await requireUser();
   assertCanWrite(me, "payroll");
   if (!isPaymentDate(paymentDate)) throw new ActionError("Choose a payment date.");
+  await assertBooksOpen(me.id, paymentDate);
   const { account, method, name } = await findPaymentAccount(me.id, accountId);
   const [entry] = await db
     .select()
@@ -1527,6 +1545,7 @@ export async function recordPayrollPayment(id: string, paymentDate: string, acco
 /** Clears the payment recorded on a salary so it shows as unpaid again. */
 export async function undoPayrollPayment(id: string): Promise<void> {
   const me = await requireUser();
+  await assertPaymentsOpen(me.id, "payrollId", id);
   assertCanWrite(me, "payroll");
   const [entry] = await db
     .select()
@@ -1549,6 +1568,7 @@ export async function undoPayrollPayment(id: string): Promise<void> {
 /** Clears the payment recorded on an expense so it can be paid from another account. */
 export async function undoExpensePayment(id: string): Promise<void> {
   const me = await requireUser();
+  await assertPaymentsOpen(me.id, "expenseId", id);
   assertCanWrite(me, "expenses");
   const [expense] = await db
     .select()
@@ -1572,6 +1592,7 @@ export async function refundSupplierCredit(id: string, refundDate: string, accou
   const me = await requireUser();
   assertCanWrite(me, "supplier-credits");
   if (!isPaymentDate(refundDate)) throw new ActionError("Choose a refund date.");
+  await assertBooksOpen(me.id, refundDate);
   const { account, method, name } = await findPaymentAccount(me.id, accountId);
   const [credit] = await db
     .select()
@@ -1585,6 +1606,28 @@ export async function refundSupplierCredit(id: string, refundDate: string, accou
     .set({ data: { ...credit.data, status: "Refunded", refundDate, refundMethod: method, refundAccountId: account.id, refundAccountName: `${method} · ${name}` }, updatedAt: new Date() })
     .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id)));
   await auditRecord(me, "Refunded", id);
+  revalidatePath("/app", "layout");
+}
+
+/**
+ * QuickBooks' Void: the document stays on file, marked Void, but no longer counts in the books.
+ * Payments and applied credits must be removed first, so nothing is left pointing at it.
+ */
+export async function voidBookkeepingRecord(kind: string, id: string): Promise<void> {
+  const me = await requireUser();
+  assertCanWrite(me, kind);
+  if (!["invoices", "bills", "expenses", "credit-notes", "supplier-credits"].includes(kind)) throw new ActionError("This can’t be voided.");
+  const [row] = await db.select().from(bookkeepingRecord).where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, kind))).limit(1);
+  if (!row) throw new ActionError("We couldn’t find that record. Refresh and try again.");
+  if (row.data.status === "Void") throw new ActionError("This is already void.");
+  if (row.data.docType === "Opening balance") throw new ActionError("Change the opening balance on the customer or supplier instead.");
+  await assertBooksOpen(me.id, documentDate(kind, row.data));
+  if ((Number(row.data.paidAmount) || 0) > 0) throw new ActionError("Undo its payments first, then void it.");
+  if ((Number(row.data.creditApplied) || 0) > 0) throw new ActionError("A credit is applied to it. Delete or unapply the credit first.");
+  if (["Applied", "Refunded"].includes(row.data.status ?? "")) throw new ActionError(`This credit has been ${row.data.status?.toLowerCase()}, so it can’t be voided.`);
+  const data = { ...row.data, status: "Void", statusBeforeVoid: row.data.status ?? "", voidedAt: new Date().toISOString().slice(0, 10), voidedBy: me.name ?? "" };
+  await db.update(bookkeepingRecord).set({ data, updatedAt: new Date() }).where(eq(bookkeepingRecord.id, row.id));
+  await recordAudit(me, "Voided", kind, row.id, data);
   revalidatePath("/app", "layout");
 }
 

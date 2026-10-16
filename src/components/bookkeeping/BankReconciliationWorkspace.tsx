@@ -7,6 +7,7 @@ import { ArrowDownRight, ArrowUpRight, Check, CircleAlert, CircleCheck, Landmark
 import { readableError } from "@/lib/action-error";
 
 import { completeBankReconciliation } from "@/app/actions";
+import { undoBankReconciliation } from "@/app/banking-actions";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -67,6 +68,23 @@ export default function BankReconciliationWorkspace({ accounts, transactions: in
   const [selectedTransactionIds, setSelectedTransactionIds] = useState<string[]>([]);
   const [transactions, setTransactions] = useState(initialTransactions);
   const [reconciliations, setReconciliations] = useState(initialReconciliations);
+  const [undoing, setUndoing] = useState(false);
+
+  /** Undoes the latest reconciliation: its transactions are uncleared and can be reconciled again. */
+  async function undo(record: BookkeepingRecord) {
+    if (!window.confirm(`Undo the reconciliation for ${record.data.statementDate}? Its transactions become uncleared again.`)) return;
+    setUndoing(true);
+    try {
+      await undoBankReconciliation(record.id);
+      setReconciliations((current) => current.filter((item) => item.id !== record.id));
+      setTransactions((current) => current.map((item) => (item.data.reconciliationId === record.id ? { ...item, data: { ...item.data, reconciled: "false", reconciliationId: "" } } : item)));
+      router.refresh();
+    } catch (error) {
+      window.alert(error instanceof Error ? readableError(error) : "That reconciliation couldn’t be undone.");
+    } finally {
+      setUndoing(false);
+    }
+  }
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -325,16 +343,19 @@ export default function BankReconciliationWorkspace({ accounts, transactions: in
             <div className="overflow-x-auto">
               <Table>
                 <TableHeader>
-                  <TableRow><TableHead>Statement date</TableHead><TableHead>Opening balance</TableHead><TableHead>Ending balance</TableHead><TableHead>Transactions cleared</TableHead><TableHead className="text-right">Status</TableHead></TableRow>
+                  <TableRow><TableHead>Statement date</TableHead><TableHead>Opening balance</TableHead><TableHead>Ending balance</TableHead><TableHead>Transactions cleared</TableHead><TableHead className="text-right">Status</TableHead><TableHead className="w-20"><span className="sr-only">Undo</span></TableHead></TableRow>
                 </TableHeader>
                 <TableBody>
-                  {accountHistory.slice(0, 5).map((record) => (
+                  {accountHistory.slice(0, 5).map((record, index) => (
                     <TableRow key={record.id}>
                       <TableCell>{formatDate(record.data.statementDate)}</TableCell>
                       <TableCell className="tabular-nums">{formatCurrency(Number(record.data.openingBalance) || 0, currency)}</TableCell>
                       <TableCell className="tabular-nums">{formatCurrency(Number(record.data.endingBalance) || 0, currency)}</TableCell>
                       <TableCell>{record.data.clearedCount || "0"}</TableCell>
                       <TableCell className="text-right"><Badge variant="outline" className="gap-1 border-primary/30 text-primary"><CircleCheck size={12} />Reconciled</Badge></TableCell>
+                      <TableCell className="text-right">
+                        {index === 0 ? <Button type="button" variant="ghost" size="sm" disabled={undoing} onClick={() => void undo(record)}>Undo</Button> : null}
+                      </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>

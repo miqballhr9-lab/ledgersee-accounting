@@ -19,6 +19,7 @@ import {
   applyCreditNote,
   applySupplierCredit,
   undoInvoicePayments,
+  voidBookkeepingRecord,
   refundSupplierCredit,
   generateRecurringInvoice,
   recordInvoicePayment,
@@ -36,7 +37,7 @@ import { navigationGroups, type ModuleDefinition } from "@/lib/bookkeeping-confi
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
 import { formatCustomerAddress } from "@/lib/customer-utils";
 import { dueDateForTerms } from "@/lib/invoice-utils";
-import { paymentAccountLabel, paymentAccountType } from "@/lib/payment-accounts";
+import { paymentAccountLabel, paymentAccountType, receivingAccountType } from "@/lib/payment-accounts";
 import { budgetActualRecords, recordsWithinBudgetDates, type BudgetLine } from "@/lib/budget-utils";
 import JournalEntryEditor from "@/components/bookkeeping/JournalEntryEditor";
 import ItemsBulkImport from "@/components/bookkeeping/ItemsBulkImport";
@@ -287,7 +288,8 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
   const [expenseCategoryId, setExpenseCategoryId] = useState("");
   const [expensePaymentAccountId, setExpensePaymentAccountId] = useState("");
   const [expenseConversionError, setExpenseConversionError] = useState("");
-  const paymentAccounts = accounts.filter((account) => paymentAccountType(account));
+  // Money received from customers can also go to Undeposited funds, banked later with a bank deposit.
+  const paymentAccounts = accounts.filter((account) => (module.kind === "invoices" ? receivingAccountType(account) : paymentAccountType(account)));
   const expenseAccounts = accounts.filter((account) => account.kind === "accounts" && account.data.type === "Expense" && account.data.locked !== "true");
   const customization = LIST_CUSTOMIZATIONS[module.kind];
   const listPreferences = customization ? storedListPreferences ?? { columns: [...customization.defaultColumns], pageSize: customization.defaultPageSize } : null;
@@ -736,6 +738,10 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
       } else if (kind === "generate") {
         await generateRecurringInvoice(record.id);
         setActionMessage("Invoice created and the next billing date advanced.");
+      } else if (kind === "void") {
+        if (!window.confirm(`Void ${record.data.invoiceNumber || record.data.creditNumber || `this ${module.label.toLowerCase()}`}? It stays on file but no longer counts in your books.`)) return;
+        await voidBookkeepingRecord(module.kind, record.id);
+        setActionMessage(`${module.label} voided.`);
       } else if (kind === "match") {
         await toggleTransactionMatch(record.id);
         setActionMessage(record.data.matched === "true" ? "Transaction marked as unmatched." : "Transaction matched.");

@@ -35,7 +35,7 @@ import { formatCustomerAddress } from "@/lib/customer-utils";
 import { expenseLinesFromData } from "@/lib/expense-utils";
 import { currencyAmount, dueDateForTerms, invoiceSubtotal, parseInvoiceLines } from "@/lib/invoice-utils";
 import { accountCategoryForType } from "@/lib/account-types";
-import { paymentAccountLabel, paymentAccountType } from "@/lib/payment-accounts";
+import { paymentAccountLabel, paymentAccountType, receivingAccountType } from "@/lib/payment-accounts";
 
 interface RecordEditorProps {
   module: ModuleDefinition;
@@ -258,7 +258,7 @@ export default function RecordEditor({ module, record, customers, vendors, items
   const [purchaseItems, setPurchaseItems] = useState<PurchaseItemLine[]>(() => readPurchaseItemLines(record));
   const availableItems = items.filter((item) => item.data.name?.trim());
   const visibleFields = module.kind === "items" ? module.fields.filter((field) => itemFieldVisible(field.key, values.itemType ?? "")) : module.fields;
-  const paymentAccounts = accounts.filter((account) => paymentAccountType(account));
+  const paymentAccounts = accounts.filter((account) => (module.kind === "invoices" ? receivingAccountType(account) : paymentAccountType(account)));
   const [savedRecordId, setSavedRecordId] = useState<string | null>(record?.id ?? null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");

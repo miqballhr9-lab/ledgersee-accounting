@@ -432,6 +432,14 @@ export function buildLedger(allRecords: BookkeepingRecord[], method: AccountingM
       // A line only categorised by a bank rule (older automation also marked it matched) still counts.
       const matched = data.matched === "true" && !(data.ruleApplied && data.matchedBy !== "user");
       if (matched || !num(data.amount)) continue;
+      if (data.type === "Transfer") {
+        // A transfer moves money between two of the business's own accounts.
+        const from = (data.accountId && accountById.get(data.accountId)) || data.account || "";
+        const to = (data.toAccountId && accountById.get(data.toAccountId)) || data.toAccount || "";
+        const amount = Math.abs(num(data.amount));
+        post({ txnId: `trf-${record.id}`, date: data.date || record.createdAt.slice(0, 10), type: "Transfer", number: "", name: "", customer: "", supplier: "", memo: data.description ?? "", sourceKind: "transactions", sourceId: record.id }, [[bankAccountFor(to), amount], [bankAccountFor(from), -amount]]);
+        continue;
+      }
       const bank = bankAccountFor(data.account ?? "");
       const inflow = (data.type ?? "").toLowerCase().startsWith("dep") || (data.type ?? "").toLowerCase() === "in" || (data.type ?? "").toLowerCase().includes("money in");
       const category = inflow ? (accounts.get(key(data.category ?? ""))?.name ?? incomeAccount(data.category ?? "")) : (accounts.get(key(data.category ?? ""))?.name ?? expenseAccount(data.category ?? ""));
@@ -476,6 +484,30 @@ export function buildLedger(allRecords: BookkeepingRecord[], method: AccountingM
       post(
         { txnId: `pr-${record.id}`, date, type: "Payroll", number: data.reference ?? "", name: data.employeeName ?? "", customer: "", supplier: "", memo: data.month ? `Salary ${data.month}` : "Salary", sourceKind: "payroll", sourceId: record.id },
         [[salaries, gross], ...withheld(1), [paid ? paymentAccountName(data) : payrollLiabilities, -net]],
+      );
+      continue;
+    }
+
+    if (record.kind === "deposits") {
+      // A bank deposit moves customer payments out of Undeposited funds, plus any other money, into the bank.
+      const total = num(data.amount);
+      if (!total) continue;
+      let lines: Array<[string, number]> = [];
+      try {
+        const parsed: unknown = JSON.parse(data.lines || "[]");
+        if (Array.isArray(parsed)) lines = parsed.flatMap((line): Array<[string, number]> => {
+          if (!line || typeof line !== "object") return [];
+          const entry = line as Record<string, string>;
+          const name = (entry.accountId && accountById.get(entry.accountId)) || entry.account || "";
+          return num(entry.amount) ? [[balanceAccount(name), -num(entry.amount)]] : [];
+        });
+      } catch {
+        lines = [];
+      }
+      const bank = (data.accountId && accountById.get(data.accountId)) || data.accountName || "";
+      post(
+        { txnId: `dep-${record.id}`, date: data.date || record.createdAt.slice(0, 10), type: "Deposit", number: data.reference ?? "", name: "", customer: "", supplier: "", memo: data.memo ?? "", sourceKind: "deposits", sourceId: record.id },
+        [[bankAccountFor(bank), total], ...(num(data.paymentTotal) ? [[ensure(undeposited, "Asset", "Current assets"), -num(data.paymentTotal)] as [string, number]] : []), ...lines],
       );
       continue;
     }

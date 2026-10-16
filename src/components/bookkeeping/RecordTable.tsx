@@ -11,7 +11,7 @@ import type { ModuleDefinition } from "@/lib/bookkeeping-config";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
 import { formatCustomerAddress } from "@/lib/customer-utils";
 
-export type RecordActionKind = "convert" | "convert-expense" | "payment" | "send" | "send-rfq" | "confirm-order" | "receive-order" | "cancel-order" | "mark-paid" | "match" | "apply-credit" | "generate" | "duplicate" | "share" | "print" | "undo-payment";
+export type RecordActionKind = "void" | "convert" | "convert-expense" | "payment" | "send" | "send-rfq" | "confirm-order" | "receive-order" | "cancel-order" | "mark-paid" | "match" | "apply-credit" | "generate" | "duplicate" | "share" | "print" | "undo-payment";
 
 interface RecordTableProps {
   module: ModuleDefinition;
@@ -188,7 +188,7 @@ export function recordActions(
   if (module.kind === "invoices" && !["Paid", "Cancelled"].includes(record.data.status ?? "")) add("payment", "Record payment", CircleDollarSign, true);
   if (module.kind === "invoices") add("send", "Send invoice", Mail, true);
   if (["estimates", "sales-orders", "credit-notes"].includes(module.kind)) add("send", `Send ${module.label.toLowerCase()}`, Mail, true);
-  if (module.kind === "bills") add("mark-paid", "Mark paid", Check, true);
+  if (module.kind === "bills" && record.data.status !== "Paid") add("mark-paid", "Mark paid", Check, true);
   if (module.kind === "credit-notes" && !["Applied", "Refunded"].includes(record.data.status ?? "")) add("apply-credit", "Apply credit", BadgeCheck, true);
   if (module.kind === "recurring-invoices") add("generate", "Generate invoice", Play, true);
   if (module.kind === "transactions") add("match", record.data.matched === "true" ? "Mark unmatched" : "Match transaction", Check, true);
@@ -198,6 +198,7 @@ export function recordActions(
     add("share", "Copy share link", Link2);
     add("print", "Print or save PDF", Printer);
     if (module.kind === "invoices" && Number(record.data.paidAmount) > 0) add("undo-payment", "Undo payment", Undo2);
+    if ((module.kind === "invoices" || module.kind === "credit-notes") && record.data.status !== "Void" && !(Number(record.data.paidAmount) > 0)) add("void", "Void", Ban);
   }
   if (canCancelPurchaseOrder) actions.push({ key: "cancel-order", label: "Cancel purchase order", icon: Ban, destructive: true, run: () => onAction("cancel-order", record) });
   actions.push({ key: "delete", label: "Delete", icon: Trash2, destructive: true, run: row.onDelete });
