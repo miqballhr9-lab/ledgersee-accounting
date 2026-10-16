@@ -119,7 +119,7 @@ const categoryLineKinds = new Set(["expenses", "bills", "supplier-credits"]);
 
 // Sales and purchase transactions open as a full-page form, as in QuickBooks Online.
 const partyKeys = new Set(["customer", "vendor", "payee"]);
-const footnoteKeys = new Set(["notes", "memo", "reason", "tags", "attachment"]);
+const footnoteKeys = new Set(["notes", "memo", "reason", "className", "location", "project", "tags", "attachment"]);
 const totalKeys = new Set(["taxRate", "discount"]);
 // QuickBooks reads across: address, terms, dates, then the rest.
 const headerOrder = ["billingAddress", "paymentTerms", "issueDate", "billDate", "date", "expenseDate", "dueDate", "expiryDate", "deliveryDate", "expectedDate", "shippingAddress"];

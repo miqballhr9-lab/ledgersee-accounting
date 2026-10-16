@@ -3,7 +3,11 @@ import { accountOf, type Ledger, type LedgerAccount, type Posting } from "@/lib/
 
 /** Report builders in the QuickBooks Online layout, all computed from the ledger. */
 
-export type ColumnsBy = "total" | "months" | "quarters" | "years" | "customers" | "suppliers";
+export type ColumnsBy = "total" | "months" | "quarters" | "years" | "customers" | "suppliers" | "classes" | "locations" | "projects";
+type DimensionField = "customer" | "supplier" | "className" | "location" | "project";
+/** Columns that split by a name on the postings (customer, class…) rather than by time. */
+const dimensionFields: Partial<Record<ColumnsBy, DimensionField>> = { customers: "customer", suppliers: "supplier", classes: "className", locations: "location", projects: "project" };
+export const isDimension = (by: ColumnsBy) => Boolean(dimensionFields[by]);
 export type Compare = "none" | "pp" | "py";
 
 export interface ReportOptions {
@@ -26,7 +30,7 @@ export interface ZoomSpec {
   from: string;
   to: string;
   name?: string;
-  nameField?: "customer" | "supplier" | "name";
+  nameField?: DimensionField | "name";
 }
 
 export interface ReportColumn {
@@ -60,7 +64,7 @@ interface Period {
   from: string;
   to: string;
   name?: string;
-  nameField?: "customer" | "supplier";
+  nameField?: DimensionField;
 }
 
 const monthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
@@ -160,8 +164,8 @@ export function presetRange(preset: PeriodPreset, today: string, fiscalStartMont
 }
 
 function splitPeriods(from: string, to: string, by: ColumnsBy, ledger: Ledger, nameFilter = ""): Period[] {
-  if (by === "customers" || by === "suppliers") {
-    const field = by === "customers" ? "customer" : "supplier";
+  const field = dimensionFields[by];
+  if (field) {
     const names = new Set<string>();
     for (const posting of ledger.postings) {
       if (posting.date < from || posting.date > to) continue;
@@ -409,7 +413,7 @@ const bsGroups = [
 ] as const;
 
 function asOfPeriods(options: ReportOptions, ledger: Ledger) {
-  if (options.columnsBy === "total" || options.columnsBy === "customers" || options.columnsBy === "suppliers") {
+  if (options.columnsBy === "total" || isDimension(options.columnsBy)) {
     return [{ label: "Total", from: "", to: options.to }];
   }
   return splitPeriods(options.from, options.to, options.columnsBy, ledger).map((period) => ({ ...period, label: period.label, from: "" }));
@@ -503,7 +507,7 @@ export function balanceSheet(ledger: Ledger, options: ReportOptions): ReportResu
 }
 
 export function cashFlows(ledger: Ledger, options: ReportOptions): ReportResult {
-  const periods = splitPeriods(options.from, options.to, options.columnsBy === "customers" || options.columnsBy === "suppliers" ? "total" : options.columnsBy, ledger);
+  const periods = splitPeriods(options.from, options.to, isDimension(options.columnsBy) ? "total" : options.columnsBy, ledger);
   const { columns, plan, slots } = buildColumns(periods, { ...options, pctOfIncome: false });
   const data = slots.map((period) => ({ period, totals: totalsFor(ledger, period, false), opening: totalsFor(ledger, { ...period, to: addDays(period.from, -1) }, true) }));
   const zero = data.map(() => 0);
@@ -652,7 +656,7 @@ export function trialBalance(ledger: Ledger, options: ReportOptions): ReportResu
 
 /** Sales by Customer Summary: income by customer, in the chosen columns. */
 export function salesByCustomer(ledger: Ledger, options: ReportOptions): ReportResult {
-  const columnsBy = options.columnsBy === "customers" || options.columnsBy === "suppliers" ? "total" : options.columnsBy;
+  const columnsBy = isDimension(options.columnsBy) ? "total" : options.columnsBy;
   const periods = splitPeriods(options.from, options.to, columnsBy, ledger);
   const { columns, plan, slots } = buildColumns(periods, { ...options, pctOfIncome: false });
   const incomeAccounts = [...ledger.accounts.values()].filter((account) => account.category === "Income").map((account) => account.name);

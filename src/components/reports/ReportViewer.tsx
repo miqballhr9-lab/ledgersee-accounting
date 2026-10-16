@@ -46,7 +46,7 @@ const sourceSlug: Record<string, string> = {
   invoices: "invoices", bills: "bills", expenses: "expenses", "credit-notes": "credit-notes", "supplier-credits": "supplier-credits",
   journals: "journals", transactions: "transactions", accounts: "accounts", payroll: "payroll",
   customers: "customers", vendors: "vendors", estimates: "estimates", "sales-orders": "sales-orders", "purchase-orders": "purchase-orders", items: "items",
-  employees: "employees", "recurring-transactions": "recurring", "inventory-movements": "inventory", deposits: "deposits",
+  employees: "employees", "recurring-transactions": "recurring", "inventory-movements": "inventory", deposits: "deposits", "time-activities": "time-activities", mileage: "mileage",
 };
 
 const asOfEngines = new Set(["bs", "trial-balance", "ar-ageing", "ap-ageing"]);
@@ -328,6 +328,9 @@ export default function ReportViewer({ reportKey, records, today }: ReportViewer
                   <SelectItem value="years">Years</SelectItem>
                   {showCustomerColumns ? <SelectItem value="customers">Customers</SelectItem> : null}
                   {showCustomerColumns ? <SelectItem value="suppliers">Suppliers</SelectItem> : null}
+                  {showCustomerColumns ? <SelectItem value="classes">Classes</SelectItem> : null}
+                  {showCustomerColumns ? <SelectItem value="locations">Locations</SelectItem> : null}
+                  {showCustomerColumns ? <SelectItem value="projects">Projects</SelectItem> : null}
                 </SelectContent>
               </Select>
             </Field>

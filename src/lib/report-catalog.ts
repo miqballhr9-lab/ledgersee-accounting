@@ -15,7 +15,7 @@ export interface ReportDefinition {
   engine?: ReportEngine;
   /** Settings this report opens with. */
   defaults?: {
-    columnsBy?: "total" | "months" | "quarters" | "customers";
+    columnsBy?: "total" | "months" | "quarters" | "customers" | "classes" | "locations" | "projects";
     compare?: "py" | "pp";
     pctOfIncome?: boolean;
     period?: string;
@@ -46,6 +46,9 @@ export const reportCategories: ReportCategory[] = [
       { key: "profit-and-loss-detail", label: "Profit and Loss Detail", description: "Every income and expense transaction for the period.", ready: true, engine: "pnl-detail" },
       { key: "profit-and-loss-by-customer", label: "Profit and Loss by Customer", description: "Income and expenses split by customer.", ready: true, engine: "pnl", defaults: { columnsBy: "customers" } },
       { key: "profit-and-loss-by-month", label: "Profit and Loss by Month", description: "Each month in its own column.", ready: true, engine: "pnl", defaults: { columnsBy: "months" } },
+      { key: "profit-and-loss-by-class", label: "Profit and Loss by Class", description: "Income and expenses split by class.", ready: true, engine: "pnl", defaults: { columnsBy: "classes" } },
+      { key: "profit-and-loss-by-location", label: "Profit and Loss by Location", description: "Income and expenses split by location or branch.", ready: true, engine: "pnl", defaults: { columnsBy: "locations" } },
+      { key: "project-profitability", label: "Project Profitability Summary", description: "Income, costs and profit of each project.", ready: true, engine: "pnl", defaults: { columnsBy: "projects" } },
       { key: "quarterly-profit-and-loss", label: "Quarterly Profit and Loss Summary", description: "Each quarter in its own column.", ready: true, engine: "pnl", defaults: { columnsBy: "quarters" } },
       { key: "statement-of-cash-flows", label: "Statement of Cash Flows", description: "Where cash came from and where it went.", ready: true, engine: "cf" },
       { key: "budget-overview", label: "Budget Overview", description: "The amounts set in each budget.", ready: true, engine: "budget-overview" },
@@ -75,6 +78,9 @@ export const reportCategories: ReportCategory[] = [
       { key: "sales-by-product-summary", label: "Sales by Product/Service Summary", description: "Quantity and sales for each item.", ready: true, engine: "list" },
       { key: "sales-by-product-detail", label: "Sales by Product/Service Detail", description: "Each sale, grouped by item.", ready: true, engine: "list" },
       { key: "estimates-by-customer", label: "Estimates by Customer", description: "Estimates, grouped by customer.", ready: true, engine: "list" },
+      { key: "unbilled-time", label: "Unbilled Time", description: "Billable time not yet on an invoice, by customer.", ready: true, engine: "list" },
+      { key: "time-activities-by-employee", label: "Time Activities by Employee Detail", description: "Hours worked, by employee or contractor.", ready: true, engine: "list" },
+      { key: "mileage-summary", label: "Mileage Summary", description: "Business trips and their value, by vehicle.", ready: true, engine: "list" },
       { key: "sales-order-list", label: "Sales Order List", description: "Sales orders and their status.", ready: true, engine: "list" },
       { key: "payment-method-list", label: "Payment Method List", description: "Payments received, by method.", ready: true, engine: "list" },
       { key: "customer-contact-list", label: "Customer Contact List", description: "Customer names, emails and phone numbers.", ready: true, engine: "list" },
@@ -110,7 +116,7 @@ export const reportCategories: ReportCategory[] = [
     reports: [
       { key: "tax-summary", label: "Tax Summary", description: "Tax collected, tax paid and what is left to pay.", ready: true, engine: "tax-summary" },
       { key: "tax-detail", label: "Tax Detail", description: "Each transaction with tax on it.", ready: true, engine: "list" },
-      soon("tax-exception", "Tax Exception", "Changes to transactions in periods already filed."),
+      { key: "tax-exception", label: "Tax Exception", description: "Changes to transactions in periods already filed.", ready: true, engine: "list" },
       { key: "taxable-sales-summary", label: "Taxable Sales Summary", description: "Taxable and non-taxable sales.", ready: true, engine: "list" },
     ],
   },

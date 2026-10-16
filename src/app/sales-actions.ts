@@ -7,6 +7,7 @@ import { bookkeepingRecord } from "@/db/schema";
 import { ActionError } from "@/lib/action-error";
 import { recordAudit } from "@/lib/audit";
 import { assertCanWrite, requireUser } from "@/lib/auth";
+import { saveBookkeepingRecord } from "@/app/actions";
 import { assertBooksOpen } from "@/lib/closing";
 import { sendEmailOrThrow } from "@/lib/email";
 import { paymentAccountType } from "@/lib/payment-accounts";
@@ -103,4 +104,43 @@ export async function sendCustomerStatement(customerId: string): Promise<{ invoi
   await recordAudit(me, "Statement sent", "customers", customer.id, customer.data);
   revalidatePath("/app", "layout");
   return { invoices: open.length, balance: Math.round(total * 100) / 100 };
+}
+
+/** QuickBooks' "Add billable time to an invoice": one draft invoice with a line per time entry, for one customer. */
+export async function createInvoiceFromTime(ids: string[]): Promise<{ id: string; number: string }> {
+  const me = await requireUser();
+  assertCanWrite(me, "invoices");
+  assertCanWrite(me, "time-activities");
+  const wanted = new Set((Array.isArray(ids) ? ids : []).map(String).slice(0, 200));
+  const entries = (await rows(me.id, "time-activities")).filter((row) => wanted.has(row.id));
+  if (!entries.length) throw new ActionError("Select the time entries to invoice.");
+  if (entries.some((row) => row.data.status !== "Unbilled")) throw new ActionError("Only billable time that hasn’t been invoiced can be added. Untick billed or non-billable entries.");
+  const customers = [...new Set(entries.map((row) => (row.data.customer ?? "").trim()))];
+  if (customers.length !== 1 || !customers[0]) throw new ActionError("Choose time for one customer at a time, and make sure each entry has a customer.");
+  if (entries.some((row) => !(Number(row.data.rate) > 0))) throw new ActionError("Add a rate per hour to each entry before invoicing it.");
+  const today = new Date().toISOString().slice(0, 10);
+  const invoices = await rows(me.id, "invoices");
+  const highest = invoices.reduce((max, row) => Math.max(max, Number(/^INV-(\d{1,6})$/.exec(row.data.invoiceNumber ?? "")?.[1] ?? 0)), 0);
+  const number = `INV-${String(highest + 1).padStart(4, "0")}`;
+  const lines = entries
+    .sort((a, b) => (a.data.date ?? "").localeCompare(b.data.date ?? ""))
+    .map((row) => ({ itemId: "", name: row.data.service || "Services", description: [row.data.date, row.data.employee, row.data.description].filter(Boolean).join(" · ").slice(0, 300), quantity: String(Number(row.data.hours)), rate: Number(row.data.rate).toFixed(2) }));
+  const due = new Date(`${today}T12:00:00Z`);
+  due.setUTCDate(due.getUTCDate() + 30);
+  const saved = await saveBookkeepingRecord("invoices", {
+    customer: customers[0],
+    invoiceNumber: number,
+    issueDate: today,
+    paymentTerms: "30 days",
+    dueDate: due.toISOString().slice(0, 10),
+    lineItems: JSON.stringify(lines),
+    status: "Draft",
+    paymentMethod: "Credit",
+    memo: "Billable time",
+  });
+  for (const entry of entries) {
+    await db.update(bookkeepingRecord).set({ data: { ...entry.data, status: "Billed", invoiceId: saved.id, invoiceNumber: saved.data.invoiceNumber || number }, updatedAt: new Date() }).where(eq(bookkeepingRecord.id, entry.id));
+  }
+  revalidatePath("/app", "layout");
+  return { id: saved.id, number: saved.data.invoiceNumber || number };
 }

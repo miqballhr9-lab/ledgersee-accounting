@@ -27,7 +27,7 @@ import {
   sendInvoiceRecord,
   toggleTransactionMatch,
 } from "@/app/actions";
-import { refundCustomerCredit, sendCustomerStatement, sendInvoiceReminder } from "@/app/sales-actions";
+import { createInvoiceFromTime, refundCustomerCredit, sendCustomerStatement, sendInvoiceReminder } from "@/app/sales-actions";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -510,7 +510,7 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
   }
 
   // Actions on several checked records at once, offered from the toolbar menu.
-  type BulkAction = "estimates" | "sales-orders" | "invoices" | "expense" | "pay" | "undo-payment" | "apply-credit" | "refund" | "open" | "delete";
+  type BulkAction = "estimates" | "sales-orders" | "invoices" | "expense" | "pay" | "undo-payment" | "apply-credit" | "refund" | "open" | "delete" | "invoice-time";
   const bulkMenu: { label: string; items: { action: BulkAction; label: string }[] } | null = module.kind === "sales-orders"
     ? { label: "Convert", items: [{ action: "estimates", label: "Convert to estimate" }, { action: "invoices", label: "Convert to invoice" }] }
     : module.kind === "estimates"
@@ -521,6 +521,8 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
         ? { label: "Actions", items: [{ action: "pay", label: "Record payment" }, { action: "undo-payment", label: "Undo payment" }] }
         : module.kind === "credit-notes"
           ? { label: "Actions", items: [{ action: "apply-credit", label: "Apply credit" }, { action: "refund", label: "Refund to customer" }] }
+          : module.kind === "time-activities"
+            ? { label: "Actions", items: [{ action: "invoice-time", label: "Create invoice" }] }
           : module.kind === "supplier-credits"
             ? { label: "Actions", items: [{ action: "refund", label: "Record refund" }] }
             : module.kind === "journals"
@@ -585,6 +587,20 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
       openBulkPayment();
       return;
     }
+    if (action === "invoice-time") {
+      setBulkPending(true);
+      try {
+        const created = await createInvoiceFromTime(selectedRecords.map((record) => record.id));
+        toast.success(`Draft invoice ${created.number} created from ${selectedRecords.length} time ${selectedRecords.length === 1 ? "entry" : "entries"}.`);
+        setSelectedIds(new Set());
+        router.refresh();
+      } catch (error) {
+        toast.error(error instanceof Error ? readableError(error) : "That invoice couldn’t be created.");
+      } finally {
+        setBulkPending(false);
+      }
+      return;
+    }
     if (action === "refund") {
       const refundable = selectedRecords.filter((record) => !["Applied", "Refunded"].includes(record.data.status ?? ""));
       if (!refundable.length) toast.info("The selected credit notes are already applied or refunded.");
@@ -640,6 +656,7 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
       "undo-payment": "reopened as unpaid",
       "apply-credit": "applied",
       refund: "refunded",
+      "invoice-time": "invoiced",
       open: "opened",
       delete: "deleted",
     };

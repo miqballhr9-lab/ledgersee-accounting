@@ -256,7 +256,7 @@ export default function RecordTable({ module, records, columns = module.columns,
                 />
               </TableHead>
             ) : null}
-            {columns.map((key) => <TableHead key={key} className="whitespace-nowrap px-4 text-xs font-medium text-muted-foreground">{headerLabels?.[key] ?? columnLabels[key] ?? key}</TableHead>)}
+            {columns.map((key) => <TableHead key={key} className="whitespace-nowrap px-4 text-xs font-medium text-muted-foreground">{headerLabels?.[key] ?? columnLabels[key] ?? module.fields.find((field) => field.key === key)?.label ?? key}</TableHead>)}
             <TableHead className="w-12"><span className="sr-only">Actions</span></TableHead>
           </TableRow>
         </TableHeader>

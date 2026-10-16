@@ -362,6 +362,19 @@ async function saveRecord(
   await assertBooksOpen(me.id, documentDate(kind, input), documentDate(kind, current?.data));
   let data = amountFromLineItems(sanitizePayload(input), kind);
   if (kind === "purchase-orders" && !id) data = { ...data, status: "Draft" };
+  if (kind === "mileage") {
+    const distance = Number(data.distance);
+    if (!Number.isFinite(distance) || distance <= 0) throw new ActionError("Enter the distance in km.");
+    const rate = Number(data.rate) || 0;
+    data = { ...data, tripType: data.tripType || "Business", amount: (distance * Math.max(0, rate)).toFixed(2) };
+  }
+  if (kind === "time-activities") {
+    const hours = Number(data.hours);
+    if (!Number.isFinite(hours) || hours <= 0 || hours > 24) throw new ActionError("Enter the hours worked, up to 24 a day.");
+    const billable = data.billable === "true";
+    // Billed time keeps its status; otherwise billable time waits to be invoiced.
+    data = { ...data, status: data.status === "Billed" ? "Billed" : billable ? "Unbilled" : "Not billable" };
+  }
   if (kind === "recurring-transactions") data = recurringTemplateData(me, data);
   // A check is an expense paid from a bank account, with a check number.
   if (kind === "expenses" && data.docType && !["Check", "Credit card credit"].includes(data.docType)) data = { ...data, docType: "" };

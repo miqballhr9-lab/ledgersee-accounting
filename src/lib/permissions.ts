@@ -49,10 +49,10 @@ export function areaForKind(kind: string): Area | "settings" {
   if (kind.startsWith("crm-")) return "crm";
   if (kind.startsWith("hr-")) return "hr";
   const map: Record<string, Area> = {
-    customers: "sales", items: "sales", invoices: "sales", estimates: "sales", "sales-orders": "sales", "credit-notes": "sales", "recurring-invoices": "sales", payments: "sales",
+    customers: "sales", items: "sales", "time-activities": "sales", mileage: "purchases", invoices: "sales", estimates: "sales", "sales-orders": "sales", "credit-notes": "sales", "recurring-invoices": "sales", payments: "sales",
     vendors: "purchases", bills: "purchases", expenses: "purchases", "purchase-orders": "purchases", "supplier-credits": "purchases",
     "inventory-movements": "inventory",
-    "bank-accounts": "accounting", deposits: "accounting", transactions: "accounting", "bank-rules": "accounting", accounts: "accounting", journals: "accounting", taxes: "accounting", reconciliations: "accounting", "recurring-transactions": "accounting", "custom-reports": "accounting",
+    "bank-accounts": "accounting", deposits: "accounting", "tax-filings": "accounting", transactions: "accounting", "bank-rules": "accounting", accounts: "accounting", journals: "accounting", taxes: "accounting", reconciliations: "accounting", "recurring-transactions": "accounting", "custom-reports": "accounting",
     budgets: "budgets",
     payroll: "payroll", employees: "payroll",
   };

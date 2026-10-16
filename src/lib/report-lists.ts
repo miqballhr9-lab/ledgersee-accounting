@@ -453,6 +453,51 @@ export function buildListReport(key: string, records: BookkeepingRecord[], ledge
       return periodResult(columns, lines, options, incoming ? "No payments received in this period." : "No bill payments in this period.");
     }
 
+    case "tax-exception": {
+      // Documents with tax, dated in a filed period, added or changed after that return was filed.
+      const columns = [text("date", "Date"), text("type", "Transaction type"), text("no", "No."), text("name", "Name"), text("changed", "Changed on"), text("filed", "Return filed"), amount("tax", "Tax")];
+      const filings = records.filter((record) => record.kind === "tax-filings");
+      const types: Record<string, [string, string, string, string]> = {
+        invoices: ["Invoice", "issueDate", "invoiceNumber", "customer"], "credit-notes": ["Credit note", "date", "creditNumber", "customer"],
+        bills: ["Bill", "billDate", "billNumber", "vendor"], expenses: ["Expense", "expenseDate", "referenceNumber", "payee"], "supplier-credits": ["Supplier credit", "date", "creditNumber", "vendor"],
+      };
+      const rows: Array<{ filing: BookkeepingRecord; row: Row }> = [];
+      for (const record of records) {
+        const type = types[record.kind];
+        if (!type || !num(record.data.taxAmount)) continue;
+        const date = record.data[type[1]] ?? "";
+        const filing = filings.find((item) => date >= (item.data.from ?? "") && date <= (item.data.to ?? ""));
+        if (!filing || record.updatedAt <= (filing.data.filedAt ?? "")) continue;
+        rows.push({ filing, row: { values: [date, type[0], record.data[type[2]] ?? "", record.data[type[3]] ?? "", record.updatedAt.slice(0, 10), `${filing.data.from} to ${filing.data.to}`, num(record.data.taxAmount)], source: src(record) } });
+      }
+      const lines = grouped(columns, groupBy(rows, (entry) => `${entry.filing.data.returnName || "Return"} ${entry.filing.data.from} to ${entry.filing.data.to}`).map(([label, items]) => ({ label, rows: items.map((entry) => entry.row) })));
+      return asOfResult(columns, lines, asOf, "Nothing has changed in a filed period.");
+    }
+
+    case "unbilled-time":
+    case "time-activities-by-employee": {
+      const unbilled = key === "unbilled-time";
+      const columns = [text("date", "Date"), text("name", unbilled ? "Employee" : "Customer"), text("service", "Service"), text("memo", "Description"), amount("hours", "Hours"), amount("rate", "Rate"), amount("amount", "Amount")];
+      const entries = records.filter((record) => record.kind === "time-activities" && inPeriod(record.data.date || "", options) && (!unbilled || record.data.status === "Unbilled"))
+        .sort((a, b) => (a.data.date ?? "").localeCompare(b.data.date ?? ""));
+      const lines = grouped(columns, groupBy(entries, (record) => (unbilled ? record.data.customer : record.data.employee) || "Not specified").map(([label, items]) => ({
+        label,
+        rows: items.map((record): Row => ({ values: [record.data.date ?? "", (unbilled ? record.data.employee : record.data.customer) ?? "", record.data.service ?? "", record.data.description ?? "", num(record.data.hours), num(record.data.rate), num(record.data.hours) * num(record.data.rate)], source: src(record) })),
+      })));
+      return periodResult(columns, lines, options, unbilled ? "No unbilled time in this period." : "No time recorded in this period.");
+    }
+
+    case "mileage-summary": {
+      const columns = [text("date", "Date"), text("purpose", "Purpose"), text("route", "Route"), text("type", "Type"), amount("distance", "Distance (km)"), amount("amount", "Value")];
+      const trips = records.filter((record) => record.kind === "mileage" && inPeriod(record.data.date || "", options))
+        .sort((a, b) => (a.data.date ?? "").localeCompare(b.data.date ?? ""));
+      const lines = grouped(columns, groupBy(trips, (record) => record.data.vehicle || "Vehicle").map(([label, items]) => ({
+        label,
+        rows: items.map((record): Row => ({ values: [record.data.date ?? "", record.data.purpose ?? "", [record.data.fromPlace, record.data.toPlace].filter(Boolean).join(" → "), record.data.tripType || "Business", num(record.data.distance), record.data.tripType === "Personal" ? 0 : num(record.data.amount)], source: src(record) })),
+      })));
+      return periodResult(columns, lines, options, "No trips in this period.");
+    }
+
     case "deposit-detail": {
       const columns = [text("date", "Date"), text("type", "Transaction type"), text("no", "No."), text("name", "Customer"), text("memo", "Memo"), amount("amount", "Amount")];
       const paymentsById = new Map(records.filter((record) => record.kind === "payments").map((record) => [record.id, record]));

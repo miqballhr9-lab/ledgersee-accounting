@@ -2,7 +2,14 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { ArrowDownToLine, Printer } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { toast } from "sonner";
+import { ArrowDownToLine, BadgeCheck, Printer, Trash2 } from "lucide-react";
+
+import { deleteTaxFiling, fileTaxReturn, recordTaxPayment } from "@/app/tax-actions";
+import PaymentDialog from "@/components/bookkeeping/PaymentDialog";
+import { readableError } from "@/lib/action-error";
+import { paymentAccountType } from "@/lib/payment-accounts";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -19,6 +26,9 @@ interface TaxReturnWorkspaceProps {
   parties: BookkeepingRecord[];
   settings: Record<string, string>;
   asOfDate: string;
+  /** Returns already marked filed, with their payment. */
+  filings?: BookkeepingRecord[];
+  accounts?: BookkeepingRecord[];
 }
 
 type Period = "this-month" | "last-month" | "this-quarter" | "last-quarter" | "this-year" | "custom";
@@ -35,7 +45,11 @@ function range(period: Period, asOf: string): [string, string] {
   return [iso(year, 1, 1), iso(year, 12, 31)];
 }
 
-export default function TaxReturnWorkspace({ documents, taxes, parties, settings, asOfDate }: TaxReturnWorkspaceProps) {
+export default function TaxReturnWorkspace({ documents, taxes, parties, settings, asOfDate, filings = [], accounts = [] }: TaxReturnWorkspaceProps) {
+  const router = useRouter();
+  const [busy, setBusy] = useState(false);
+  const [paying, setPaying] = useState<BookkeepingRecord | null>(null);
+  const paymentAccounts = accounts.filter((account) => paymentAccountType(account));
   const country = isCountryCode(settings.taxCountry) ? settings.taxCountry : "OTHER";
   const pack = countryPacks[country];
   const currency = settings.currency || pack.currency;
@@ -46,6 +60,28 @@ export default function TaxReturnWorkspace({ documents, taxes, parties, settings
   const rows = useMemo(() => returnRows(country, lines), [country, lines]);
   const [side, setSide] = useState<"Sales" | "Purchases">("Sales");
   const registration = pack.registrations.map((field) => (settings[field.key] ? `${field.label}: ${settings[field.key]}` : "")).filter(Boolean).join(" · ");
+
+  const outputTax = lines.filter((line) => line.side === "Sales").reduce((sum, line) => sum + line.tax, 0);
+  const inputTax = lines.filter((line) => line.side === "Purchases").reduce((sum, line) => sum + line.tax, 0);
+  const filedForPeriod = filings.find((filing) => filing.data.from <= to && filing.data.to >= from);
+
+  async function run(work: () => Promise<void>, done: string) {
+    setBusy(true);
+    try {
+      await work();
+      toast.success(done);
+      router.refresh();
+    } catch (error) {
+      toast.error(error instanceof Error ? readableError(error) : "That couldn’t be saved.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function markFiled() {
+    if (!window.confirm(`Mark the ${pack.returnName} for ${from} to ${to} as filed? Net tax: ${formatMoney(outputTax - inputTax, currency)}. Later changes to this period show in the Tax Exception report.`)) return;
+    void run(() => fileTaxReturn({ from, to, returnName: pack.returnName, outputTax, inputTax, boxes: JSON.stringify(rows) }), "Return marked as filed.");
+  }
 
   function exportCsv() {
     const summary = [["Box", "Description", "Amount", "Tax"], ...rows.map((row) => [row.box, row.label, row.amount.toFixed(2), row.tax.toFixed(2)])];
@@ -64,6 +100,7 @@ export default function TaxReturnWorkspace({ documents, taxes, parties, settings
         <div className="flex flex-wrap gap-2">
           <Button variant="outline" className="gap-2" onClick={exportCsv}><ArrowDownToLine size={15} />Export CSV</Button>
           <Button variant="outline" className="gap-2" onClick={() => window.print()}><Printer size={15} />Print / PDF</Button>
+          {filedForPeriod ? null : <Button className="gap-2" disabled={busy} onClick={markFiled}><BadgeCheck size={15} />Mark as filed</Button>}
         </div>
       </header>
 
@@ -141,6 +178,48 @@ export default function TaxReturnWorkspace({ documents, taxes, parties, settings
       {country === "PK" ? <p className="mt-3 text-xs text-muted-foreground">Buyers without an NTN or STRN on their customer record may attract further tax. File GST on FBR IRIS and provincial service tax with PRA, SRB, KPRA or BRA.</p> : null}
       {country === "SA" ? <p className="mt-3 text-xs text-muted-foreground">ZATCA also requires e-invoices (FATOORA) issued from an approved solution; this return covers the VAT figures only.</p> : null}
       {country === "US" ? <p className="mt-3 text-xs text-muted-foreground">Each state has its own return and due dates. Use the rows above for the taxable sales and tax collected per state rate.</p> : null}
+      <section className="mt-4 rounded-lg border border-border bg-card print:hidden">
+        <div className="border-b border-border px-4 py-2.5">
+          <h2 className="text-sm font-semibold">Filed returns ({filings.length})</h2>
+          <p className="text-xs text-muted-foreground">Record the payment of each return; changes to a filed period show in the Tax Exception report.</p>
+        </div>
+        {filings.length ? (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[640px] text-sm">
+              <thead><tr className="border-b border-border bg-muted/40 text-left text-xs font-medium text-muted-foreground"><th className="px-4 py-2.5">Period</th><th className="px-4 py-2.5">Return</th><th className="px-4 py-2.5">Filed</th><th className="px-4 py-2.5 text-right">Net tax</th><th className="px-4 py-2.5">Status</th><th className="px-4 py-2.5"><span className="sr-only">Actions</span></th></tr></thead>
+              <tbody>
+                {[...filings].sort((a, b) => (b.data.from ?? "").localeCompare(a.data.from ?? "")).map((filing) => (
+                  <tr key={filing.id} className="border-b border-border last:border-0">
+                    <td className="px-4 py-2.5 tabular-nums">{filing.data.from} to {filing.data.to}</td>
+                    <td className="px-4 py-2.5">{filing.data.returnName}</td>
+                    <td className="px-4 py-2.5 tabular-nums">{(filing.data.filedAt ?? "").slice(0, 10)}</td>
+                    <td className="px-4 py-2.5 text-right tabular-nums">{formatMoney(Number(filing.data.netTax || 0), currency)}</td>
+                    <td className="px-4 py-2.5">{filing.data.status === "Paid" ? `Paid ${filing.data.paymentDate} · ${filing.data.paymentAccountName}` : Number(filing.data.netTax || 0) === 0 ? "Filed, nothing to pay" : "Filed, not paid"}</td>
+                    <td className="px-4 py-2.5 text-right">
+                      <div className="flex justify-end gap-1">
+                        {filing.data.status !== "Paid" && Number(filing.data.netTax || 0) !== 0 ? <Button size="sm" variant="outline" disabled={busy} onClick={() => setPaying(filing)}>Record payment</Button> : null}
+                        <Button size="icon-sm" variant="ghost" aria-label={`Remove filed return ${filing.data.from} to ${filing.data.to}`} disabled={busy} onClick={() => { if (window.confirm("Remove this filed return and its payment?")) void run(() => deleteTaxFiling(filing.id), "Filed return removed."); }}><Trash2 size={14} /></Button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : <p className="px-4 py-6 text-sm text-muted-foreground">No returns marked as filed yet.</p>}
+      </section>
+
+      <PaymentDialog
+        open={Boolean(paying)}
+        onOpenChange={(open) => { if (!open) setPaying(null); }}
+        title="Record tax payment"
+        description={paying ? `${paying.data.returnName} ${paying.data.from} to ${paying.data.to} · ${formatMoney(Number(paying.data.netTax || 0), currency)}` : ""}
+        accountLabel="Paid from"
+        submitLabel="Record payment"
+        paymentAccounts={paymentAccounts}
+        pending={busy}
+        onSubmit={(date, accountId) => { const target = paying; setPaying(null); if (target) void run(() => recordTaxPayment(target.id, date, accountId), "Tax payment recorded."); }}
+      />
     </div>
   );
 }

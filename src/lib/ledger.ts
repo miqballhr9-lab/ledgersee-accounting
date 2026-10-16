@@ -34,6 +34,10 @@ export interface Posting {
   customer: string;
   /** Set on purchase-side postings, for reports grouped by supplier. */
   supplier: string;
+  /** QuickBooks' class, location and project of the transaction, for reports split by them. */
+  className?: string;
+  location?: string;
+  project?: string;
   memo: string;
   account: string;
   /** Debit is positive, credit is negative, in the business's base currency. */
@@ -152,6 +156,7 @@ export function buildLedger(allRecords: BookkeepingRecord[], method: AccountingM
   const settlementExpense = lazy(() => find((account) => account.category === "Expense" && /gratuity|final settlement|severance/i.test(account.name)) ?? ensure("Gratuity and final settlement", "Expense", "Expenses"));
   const employeeRecoveries = lazy(() => find((account) => account.category === "Income" && /fine|recover/i.test(account.name)) ?? ensure("Employee fines and recoveries", "Income", "Other income"));
 
+  const recordById = new Map(records.map((record) => [record.id, record]));
   const accountById = new Map(records.filter((record) => record.kind === "accounts").map((record) => [record.id, record.data.name?.trim() || record.data.code?.trim() || ""]));
   /** Money received with no account goes to undeposited funds; money paid out with no account to a clearly named cash account. */
   const paymentAccountName = (data: Record<string, string>, direction: "in" | "out" = "out") => {
@@ -181,7 +186,10 @@ export function buildLedger(allRecords: BookkeepingRecord[], method: AccountingM
       const [account, amount] = kept[kept.length - 1];
       kept[kept.length - 1] = [account, round(amount - difference)];
     }
-    for (const [account, amount] of kept) postings.push({ ...base, account, amount });
+    // Each posting carries its document's class, location and project.
+    const source = recordById.get(base.sourceId.split("#")[0])?.data;
+    const segment = source ? { className: source.className || "", location: source.location || "", project: source.project || "" } : {};
+    for (const [account, amount] of kept) postings.push({ ...base, ...segment, account, amount });
   };
   const post = postLines;
 
@@ -495,6 +503,18 @@ export function buildLedger(allRecords: BookkeepingRecord[], method: AccountingM
         { txnId: `pr-${record.id}`, date, type: "Payroll", number: data.reference ?? "", name: data.employeeName ?? "", customer: "", supplier: "", memo: data.month ? `Salary ${data.month}` : "Salary", sourceKind: "payroll", sourceId: record.id },
         [[salaries, gross], ...withheld(1), [paid ? paymentAccountName(data) : payrollLiabilities, -net]],
       );
+      continue;
+    }
+
+    if (record.kind === "tax-filings") {
+      // Paying a filed return clears the tax collected, less the tax claimed back on purchases.
+      if (data.status !== "Paid") continue;
+      const output = num(data.outputTax);
+      const input = num(data.inputTax);
+      const net = output - input;
+      const base = { txnId: `taxpay-${record.id}`, date: data.paymentDate || record.createdAt.slice(0, 10), type: "Tax payment", number: "", name: data.returnName ?? "", customer: "", supplier: "", memo: `${data.returnName || "Tax return"} ${data.from} to ${data.to}`, sourceKind: "tax-filings", sourceId: record.id };
+      const from = paymentAccountName(data);
+      post(base, inputTax === salesTax ? [[salesTax, net], [from, -net]] : [[salesTax, output], [inputTax, -input], [from, -net]]);
       continue;
     }
 
