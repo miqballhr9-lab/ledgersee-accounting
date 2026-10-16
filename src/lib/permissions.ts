@@ -63,12 +63,12 @@ export function areaForKind(kind: string): Area | "settings" {
 const borrowedReads: Partial<Record<Area, string[]>> = {
   crm: ["customers", "estimates", "invoices", "items", "team-members"],
   payroll: ["accounts", "team-members"],
-  hr: ["employees", "payroll", "team-members"],
+  hr: ["employees", "payroll", "team-members", "accounts"],
   inventory: ["items"],
   budgets: ["invoices", "bills", "expenses", "payroll", "accounts"],
   sales: ["accounts", "taxes"],
   purchases: ["accounts", "items", "taxes"],
-  accounting: ["customers", "vendors", "employees", "payroll", "invoices", "bills", "expenses"],
+  accounting: ["customers", "vendors", "employees", "payroll", "invoices", "bills", "expenses", "hr-loans", "hr-claims", "hr-settlements"],
 };
 
 export function canReadKind(role: Role, kind: string) {

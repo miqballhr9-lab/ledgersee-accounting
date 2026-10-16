@@ -157,6 +157,8 @@ export function applyHrRules(kind: string, data: Record<string, string>, existin
   if (kind === "hr-claims") {
     if (!data.status) data.status = "To Submit";
     if (!data.paidBy) data.paidBy = "Employee (to reimburse)";
+    if (data.status === "Paid" && existingData?.status !== "Paid") data.paidDate = new Date().toISOString().slice(0, 10);
+    if (data.status !== "Paid") data.paidDate = "";
   }
 
   if (kind === "hr-appraisals") {
@@ -188,6 +190,8 @@ export function applyHrRules(kind: string, data: Record<string, string>, existin
     data.grossPayable = fixed(gross);
     data.netPayable = fixed(gross - money(data.loanRecovery) - money(data.otherDeductions));
     if (!data.status) data.status = "Draft";
+    if (data.status === "Paid" && existingData?.status !== "Paid") data.paidDate = new Date().toISOString().slice(0, 10);
+    if (data.status !== "Paid") data.paidDate = "";
   }
 }
 
@@ -241,7 +245,15 @@ export async function afterHrSave(userId: string, kind: string, before: Record<s
     await db.update(bookkeepingRecord).set({ data: { ...data, hiredEmployeeId: employee.id } }).where(eq(bookkeepingRecord.id, after.id));
     return `${data.candidateName} added to Employees as ${employeeId}, with the onboarding plan's activities.`;
   }
-  if (kind === "hr-settlements" && data.status === "Approved" && before?.status !== "Approved" && data.employeeId) {
+  const settled = (status: string | undefined) => status === "Approved" || status === "Paid";
+  if (kind === "hr-settlements" && data.status === "Paid" && before?.status !== "Paid" && data.employeeId && money(data.loanRecovery) > 0) {
+    // The final pay recovered what was left on the employee's salary attachments, so they are done.
+    const loans = await db.select().from(bookkeepingRecord).where(and(eq(bookkeepingRecord.userId, userId), eq(bookkeepingRecord.kind, "hr-loans")));
+    for (const loan of loans.filter((row) => row.data.employeeId === data.employeeId && isRunningAttachment(row.data.status))) {
+      await db.update(bookkeepingRecord).set({ data: { ...loan.data, repaidAmount: fixed(money(loan.data.amount)), balance: "0.00", status: "Completed" }, updatedAt: new Date() }).where(eq(bookkeepingRecord.id, loan.id));
+    }
+  }
+  if (kind === "hr-settlements" && settled(data.status) && !settled(before?.status) && data.employeeId) {
     const [employee] = await db.select().from(bookkeepingRecord).where(and(eq(bookkeepingRecord.id, data.employeeId), eq(bookkeepingRecord.userId, userId))).limit(1);
     if (employee) {
       await db.update(bookkeepingRecord).set({ data: { ...employee.data, status: "Inactive", leavingDate: data.lastWorkingDay ?? "" }, updatedAt: new Date() }).where(eq(bookkeepingRecord.id, employee.id));
@@ -270,8 +282,12 @@ export function payrollAdjustments(month: string, employee: { id?: string; emplo
 export async function applyLoanRepayment(userId: string, payroll: Record<string, string>, direction: 1 | -1) {
   let remaining = money(payroll.loanDeduction);
   if (remaining <= 0) return;
+  // Payroll carries the employee code (EMP-001); attachments point at the employee record.
+  const employees = await db.select().from(bookkeepingRecord).where(and(eq(bookkeepingRecord.userId, userId), eq(bookkeepingRecord.kind, "employees")));
+  const employee = employees.find((row) => payroll.employeeId && row.data.employeeId === payroll.employeeId);
+  const isTheirs = (data: Record<string, string>) => (employee && data.employeeId ? data.employeeId === employee.id : data.employee === payroll.employeeName);
   const loans = (await db.select().from(bookkeepingRecord).where(and(eq(bookkeepingRecord.userId, userId), eq(bookkeepingRecord.kind, "hr-loans"))))
-    .filter((row) => (row.data.employee === payroll.employeeName) && (direction === 1 ? isRunningAttachment(row.data.status) : isRunningAttachment(row.data.status) || isCompletedAttachment(row.data.status)))
+    .filter((row) => isTheirs(row.data) && (direction === 1 ? isRunningAttachment(row.data.status) : isRunningAttachment(row.data.status) || isCompletedAttachment(row.data.status)))
     .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
   if (direction === -1) loans.reverse();
   for (const loan of loans) {

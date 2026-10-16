@@ -9,7 +9,7 @@ import { odooHrData } from "@/lib/hr-status";
 /** Everything the HR screens show, loaded in one query. */
 export async function loadHrData() {
   const me = await requireUser();
-  const groups = await listBookkeepingRecordGroups([...hrKinds, "employees", "payroll", "crm-notes", "team-members", "settings"]);
+  const groups = await listBookkeepingRecordGroups([...hrKinds, "employees", "payroll", "crm-notes", "team-members", "settings", "accounts"]);
   const store: Record<string, BookkeepingRecord[]> = {};
   for (const [kind, records] of Object.entries(groups)) {
     // Older records show their state under its Odoo name.

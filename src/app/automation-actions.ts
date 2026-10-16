@@ -251,24 +251,24 @@ async function runRecurringInvoices(userId: string) {
   return { items, errors, summary };
 }
 
-/** Marks unmatched bank transactions matched when an enabled bank rule fits their description. */
+/** Categorises bank transactions no rule has handled yet when an enabled bank rule fits their description. */
 async function runBankRules(userId: string) {
   const [transactions, rules] = await Promise.all([rowsOfKind(userId, "transactions"), rowsOfKind(userId, "bank-rules")]);
   const enabled = rules.filter((rule) => rule.data.enabled !== "false" && rule.data.contains?.trim());
   const items: AutomationItem[] = [];
   for (const transaction of transactions) {
-    if (transaction.data.matched === "true" || transaction.data.reconciled === "true") continue;
+    if (transaction.data.matched === "true" || transaction.data.ruleApplied || transaction.data.reconciled === "true") continue;
     const description = (transaction.data.description || "").toLowerCase();
     const rule = enabled.find((candidate) => description.includes(candidate.data.contains.trim().toLowerCase()));
     if (!rule) continue;
     const restore = { category: transaction.data.category || "", account: transaction.data.account || "", matched: transaction.data.matched || "false", ruleApplied: transaction.data.ruleApplied || "" };
     await db
       .update(bookkeepingRecord)
-      .set({ data: { ...transaction.data, category: transaction.data.category || rule.data.category || "", account: transaction.data.account || rule.data.account || "", matched: "true", ruleApplied: rule.data.name || "Bank rule" }, updatedAt: new Date() })
+      .set({ data: { ...transaction.data, category: transaction.data.category || rule.data.category || "", account: transaction.data.account || rule.data.account || "", ruleApplied: rule.data.name || "Bank rule" }, updatedAt: new Date() })
       .where(and(eq(bookkeepingRecord.id, transaction.id), eq(bookkeepingRecord.userId, userId)));
     items.push({ kind: "transactions", id: transaction.id, label: `${transaction.data.description || "Transaction"} · ${transaction.data.amount || ""} → ${rule.data.category || rule.data.name || "rule"}`, status: "Pending approval", onReject: "restore", restore });
   }
-  const summary = items.length ? `Matched ${items.length} bank ${items.length === 1 ? "transaction" : "transactions"} with bank rules.` : "No unmatched transaction fit a bank rule.";
+  const summary = items.length ? `Categorised ${items.length} bank ${items.length === 1 ? "transaction" : "transactions"} with bank rules.` : "No new transaction fit a bank rule.";
   return { items, errors: [] as string[], summary };
 }
 
@@ -376,6 +376,13 @@ async function executeRule(userId: string, rule: StoredRow, trigger: "Scheduled"
                     ? await runCaseEscalation(userId, ruleDays(rule))
                     : { items: [], errors: [`Unknown action ${action}.`], summary: "Nothing ran." };
   const items = result.items.map((item) => ({ ...item, status: item.status === "Done" ? "Done" : needsApproval ? "Pending approval" : "Done" }));
+  // What the rule created stays out of the books until someone approves it.
+  for (const item of items) {
+    if (item.status !== "Pending approval" || item.onReject || item.onApprove) continue;
+    await db.update(bookkeepingRecord)
+      .set({ data: sql`${bookkeepingRecord.data} || '{"awaitingApproval":"true"}'::jsonb` })
+      .where(and(eq(bookkeepingRecord.id, item.id), eq(bookkeepingRecord.userId, userId)));
+  }
   await db.insert(bookkeepingRecord).values({
     userId,
     kind: "automation-log",
@@ -450,6 +457,11 @@ async function updateLogItem(logId: string, recordId: string, status: Automation
   if (!item) throw new ActionError("That item is no longer in this run.");
   if (item.status !== "Pending approval") throw new ActionError("This item has already been handled.");
   if (status === "Approved" && item.onApprove === "sendReminder") await sendOverdueReminder(me.id, item.id);
+  if (status === "Approved") {
+    await db.update(bookkeepingRecord)
+      .set({ data: sql`${bookkeepingRecord.data} - 'awaitingApproval'` })
+      .where(and(eq(bookkeepingRecord.id, item.id), eq(bookkeepingRecord.userId, me.id)));
+  }
   if (status === "Rejected") {
     if (item.onReject === "restore" && item.restore) {
       const [record] = await db.select().from(bookkeepingRecord).where(and(eq(bookkeepingRecord.id, item.id), eq(bookkeepingRecord.userId, me.id))).limit(1);

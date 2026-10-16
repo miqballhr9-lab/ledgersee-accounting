@@ -21,7 +21,6 @@ import {
   undoInvoicePayments,
   refundSupplierCredit,
   generateRecurringInvoice,
-  markRecordPaid,
   recordInvoicePayment,
   sendCustomerDocumentRecord,
   sendInvoiceRecord,
@@ -668,7 +667,8 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
       }
       return;
     }
-    if (kind === "payment") {
+    // "Mark paid" records the full payment through the same dialog, so it lands in an account.
+    if (kind === "payment" || kind === "mark-paid") {
       const remaining = Math.max(0, Number(record.data.amount || 0) - Number(record.data.paidAmount || 0) - Number(record.data.creditApplied || 0));
       setPaymentRecord(record);
       setPaymentAmount(remaining.toFixed(2));
@@ -736,10 +736,6 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
       } else if (kind === "generate") {
         await generateRecurringInvoice(record.id);
         setActionMessage("Invoice created and the next billing date advanced.");
-      } else if (kind === "mark-paid") {
-        if (!window.confirm("Mark this bill as paid in full?")) return;
-        await markRecordPaid(module.kind, record.id);
-        setActionMessage("Bill marked as paid.");
       } else if (kind === "match") {
         await toggleTransactionMatch(record.id);
         setActionMessage(record.data.matched === "true" ? "Transaction marked as unmatched." : "Transaction matched.");

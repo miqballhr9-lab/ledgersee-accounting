@@ -9,6 +9,7 @@ import { saveBookkeepingRecord } from "@/app/actions";
 import { ActionError } from "@/lib/action-error";
 import { assertCanWrite, requireUser } from "@/lib/auth";
 import type { BookkeepingRecord, RecordKind } from "@/lib/bookkeeping-types";
+import { paymentAccountLabel, paymentAccountType } from "@/lib/payment-accounts";
 import { afterHrSave, applyHrRules } from "@/lib/hr-rules";
 import {
   crmKinds,
@@ -62,7 +63,7 @@ async function lookupContext(userId: string) {
     .from(bookkeepingRecord)
     .where(and(eq(bookkeepingRecord.userId, userId), inArray(bookkeepingRecord.kind, [
       "customers", "crm-leads", "crm-contacts", "crm-deals", "crm-campaigns", "crm-cases",
-      "employees", "hr-departments", "hr-leave-types", "hr-jobs", "hr-leaves", "hr-allocations", "hr-holidays", "hr-loans", "hr-attendance",
+      "employees", "hr-departments", "hr-leave-types", "hr-jobs", "hr-leaves", "hr-allocations", "hr-holidays", "hr-loans", "hr-attendance", "accounts",
     ])));
   const byKind = (kind: string) => rows.filter((row) => row.kind === kind);
   return { rows, byKind };
@@ -72,6 +73,7 @@ type LookupContext = Awaited<ReturnType<typeof lookupContext>>;
 function lookupName(kind: string, data: Record<string, string>) {
   if (kind === "customers") return data.name?.trim() || data.company?.trim() || "Customer";
   if (kind === "employees") return data.name?.trim() || "Employee";
+  if (kind === "accounts") return paymentAccountLabel({ kind: "accounts", data } as BookkeepingRecord);
   const mod = crmModuleByKind(kind);
   return mod ? crmTitle(mod, data) : "Record";
 }
@@ -85,11 +87,13 @@ const lookupKinds: Partial<Record<NonNullable<CrmField["type"]>, string>> = {
   department: "hr-departments",
   leaveType: "hr-leave-types",
   job: "hr-jobs",
+  paymentAccount: "accounts",
 };
 
 /** Resolves one lookup to an id and name that belong to this business, by id first and then by name (for imports). */
 function resolveLookup(context: LookupContext, kind: string, id: string | undefined, name: string | undefined) {
-  const candidates = context.byKind(kind);
+  // Only Cash, Bank and Credit card accounts can pay or receive money.
+  const candidates = kind === "accounts" ? context.byKind(kind).filter((row) => paymentAccountType({ kind: "accounts", data: row.data })) : context.byKind(kind);
   const byId = id ? candidates.find((row) => row.id === id) : undefined;
   if (byId) return { id: byId.id, name: lookupName(kind, byId.data) };
   const wanted = name?.trim().toLowerCase();

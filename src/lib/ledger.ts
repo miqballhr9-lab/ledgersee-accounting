@@ -103,7 +103,9 @@ interface DocPayment {
   id: string;
 }
 
-export function buildLedger(records: BookkeepingRecord[], method: AccountingMethod = "accrual"): Ledger {
+export function buildLedger(allRecords: BookkeepingRecord[], method: AccountingMethod = "accrual"): Ledger {
+  // Records an automation made that still wait for approval stay out of the books until approved.
+  const records = allRecords.filter((record) => record.data.awaitingApproval !== "true");
   const settings = records.find((record) => record.kind === "settings")?.data ?? {};
   const baseCurrency = settings.currency || "";
   const fiscalIndex = months.indexOf((settings.fiscalYear || "January").trim().toLowerCase());
@@ -141,6 +143,14 @@ export function buildLedger(records: BookkeepingRecord[], method: AccountingMeth
   const payrollLiabilities = find((account) => /payroll/i.test(`${account.name} ${account.detailType}`) && account.category === "Liability") ?? ensure("Payroll liabilities", "Liability", "Current liabilities");
   const salaries = find((account) => /salar|wages|payroll expense/i.test(`${account.name} ${account.detailType}`) && account.category === "Expense") ?? ensure("Salaries and wages", "Expense", "Expenses");
   const undeposited = find((account) => /undeposited/i.test(`${account.name} ${account.detailType}`)) ?? "Undeposited funds";
+  // Tax paid on purchases goes to the input tax account a tax pack adds (GST/VAT you can claim back);
+  // without one it is netted against the tax payable account, as QuickBooks' tax control account does.
+  const inputTax = find((account) => account.category === "Asset" && /input (sales )?tax|vat input|input vat|tax recoverable|tax reclaimable/i.test(`${account.name} ${account.detailType}`)) ?? salesTax;
+  const lazy = (make: () => string) => { let name = ""; return () => (name ||= make()); };
+  const employeeLoans = lazy(() => find((account) => account.category === "Asset" && /employee (loans|advances)|staff (loans|advances)|salary advance/i.test(account.name)) ?? ensure("Employee loans and advances", "Asset", "Current assets"));
+  const reimbursements = lazy(() => find((account) => account.category === "Liability" && /reimburse/i.test(account.name)) ?? ensure("Employee reimbursements payable", "Liability", "Current liabilities"));
+  const settlementExpense = lazy(() => find((account) => account.category === "Expense" && /gratuity|final settlement|severance/i.test(account.name)) ?? ensure("Gratuity and final settlement", "Expense", "Expenses"));
+  const employeeRecoveries = lazy(() => find((account) => account.category === "Income" && /fine|recover/i.test(account.name)) ?? ensure("Employee fines and recoveries", "Income", "Other income"));
 
   const accountById = new Map(records.filter((record) => record.kind === "accounts").map((record) => [record.id, record.data.name?.trim() || record.data.code?.trim() || ""]));
   /** Money received with no account goes to undeposited funds; money paid out with no account to a clearly named cash account. */
@@ -154,6 +164,14 @@ export function buildLedger(records: BookkeepingRecord[], method: AccountingMeth
   const expenseAccount = (name: string) => (name.trim() ? ensure(name.trim(), "Expense") : ensure("Uncategorised expense", "Expense"));
   const incomeAccount = (name: string) => (name.trim() ? ensure(name.trim(), "Income") : ensure("Uncategorised income", "Income"));
   const balanceAccount = (name: string) => (name.trim() ? accounts.get(key(name))?.name ?? ensure(name.trim(), "Expense") : ensure("Uncategorised", "Expense"));
+  // Accounts from Banking (bank, cash and card accounts) are balance sheet accounts, not expenses.
+  const bankAccounts = records.filter((record) => record.kind === "bank-accounts" && record.data.name?.trim());
+  for (const bank of bankAccounts) {
+    const card = /card/i.test(bank.data.accountType ?? "");
+    ensure(bank.data.name.trim(), card ? "Liability" : "Asset", card ? "Credit card" : "Cash and cash equivalents");
+  }
+  /** The account a bank line belongs to: a Banking account or a chart account by name, else a bank account. */
+  const bankAccountFor = (name: string) => (name.trim() ? accounts.get(key(name))?.name ?? ensure(name.trim(), "Asset", "Cash and cash equivalents") : ensure("Bank", "Asset", "Cash and cash equivalents"));
 
   const post = (base: Omit<Posting, "account" | "amount">, lines: Array<[string, number]>) => {
     const kept = lines.map(([account, amount]) => [account, round(amount)] as const).filter(([, amount]) => amount !== 0);
@@ -221,6 +239,19 @@ export function buildLedger(records: BookkeepingRecord[], method: AccountingMeth
     const amount = debitNormal ? opening : -opening;
     post(
       { txnId: `open-${record.id}`, date: record.data.openingBalanceDate || record.createdAt.slice(0, 10), type: "Opening balance", number: "", name: "", customer: "", supplier: "", memo: "Opening balance", sourceKind: "accounts", sourceId: record.id },
+      [[account.name, amount], [openingEquity, -amount]],
+    );
+  }
+
+  // Opening balances of Banking accounts that are not also in the chart of accounts (those post above).
+  const chartNames = new Set(records.filter((record) => record.kind === "accounts").map((record) => key(record.data.name?.trim() || record.data.code?.trim() || "")));
+  for (const bank of bankAccounts) {
+    const opening = num(bank.data.openingBalance);
+    if (!opening || chartNames.has(key(bank.data.name))) continue;
+    const account = accounts.get(key(bank.data.name))!;
+    const amount = account.category === "Liability" ? -opening : opening;
+    post(
+      { txnId: `open-bank-${bank.id}`, date: bank.data.openingBalanceDate || bank.createdAt.slice(0, 10), type: "Opening balance", number: "", name: "", customer: "", supplier: "", memo: "Opening balance", sourceKind: "bank-accounts", sourceId: bank.id },
       [[account.name, amount], [openingEquity, -amount]],
     );
   }
@@ -327,12 +358,12 @@ export function buildLedger(records: BookkeepingRecord[], method: AccountingMeth
         sourceId: record.id,
       };
       if (isCredit) {
-        if (method === "accrual") post({ ...base, txnId: `sc-${record.id}`, date }, [[ap, total], ...debitLines.map(([account, amount]) => [account, -amount] as [string, number]), [salesTax, -tax]]);
+        if (method === "accrual") post({ ...base, txnId: `sc-${record.id}`, date }, [[ap, total], ...debitLines.map(([account, amount]) => [account, -amount] as [string, number]), [inputTax, -tax]]);
         // A refunded credit is money back from the supplier.
         if (data.status === "Refunded") {
-          const refundTo = paymentAccountName(data, "in");
+          const refundTo = paymentAccountName({ paymentAccountId: data.refundAccountId || data.paymentAccountId || "", paymentAccountName: data.paymentAccountName || "" }, "in");
           if (method === "accrual") post({ ...base, type: "Supplier refund", txnId: `sr-${record.id}`, date }, [[refundTo, total], [ap, -total]]);
-          else post({ ...base, type: "Supplier refund", txnId: `sr-${record.id}`, date }, [[refundTo, total], ...debitLines.map(([account, amount]) => [account, -amount] as [string, number]), [salesTax, -tax]]);
+          else post({ ...base, type: "Supplier refund", txnId: `sr-${record.id}`, date }, [[refundTo, total], ...debitLines.map(([account, amount]) => [account, -amount] as [string, number]), [inputTax, -tax]]);
         }
         continue;
       }
@@ -340,12 +371,12 @@ export function buildLedger(records: BookkeepingRecord[], method: AccountingMeth
       if (!isBill && (paymentsFor.has(record.id) || num(data.paidAmount) > 0)) {
         const payments = docPayments(record, date);
         if (method === "accrual") {
-          post({ ...base, txnId: `exp-${record.id}`, date }, [...debitLines, [salesTax, tax], [ap, -total]]);
+          post({ ...base, txnId: `exp-${record.id}`, date }, [...debitLines, [inputTax, tax], [ap, -total]]);
           for (const payment of payments) post({ ...base, type: "Expense payment", txnId: `ep-${payment.id}-${record.id}`, date: payment.date }, [[ap, payment.amount * rate], [payment.account, -payment.amount * rate]]);
         } else if (total > 0) {
           for (const payment of payments) {
             const share = (payment.amount * rate) / total;
-            post({ ...base, type: "Expense payment", txnId: `ep-${payment.id}-${record.id}`, date: payment.date }, [...debitLines.map(([account, amount]) => [account, amount * share] as [string, number]), [salesTax, tax * share], [payment.account, -payment.amount * rate]]);
+            post({ ...base, type: "Expense payment", txnId: `ep-${payment.id}-${record.id}`, date: payment.date }, [...debitLines.map(([account, amount]) => [account, amount * share] as [string, number]), [inputTax, tax * share], [payment.account, -payment.amount * rate]]);
           }
         }
         continue;
@@ -354,18 +385,18 @@ export function buildLedger(records: BookkeepingRecord[], method: AccountingMeth
         const paid = data.status === "Paid" || Boolean(data.paymentAccountId) || (!data.status && Boolean(data.paymentAccount));
         if (method === "cash" && !paid) continue;
         const credit = paid ? paymentAccountName(data) : ap;
-        post({ ...base, txnId: `exp-${record.id}`, date: paid && method === "cash" ? data.paymentDate || date : date }, [...debitLines, [salesTax, tax], [credit, -total]]);
+        post({ ...base, txnId: `exp-${record.id}`, date: paid && method === "cash" ? data.paymentDate || date : date }, [...debitLines, [inputTax, tax], [credit, -total]]);
         continue;
       }
       if (method === "accrual") {
-        post({ ...base, txnId: `bill-${record.id}`, date }, [...debitLines, [salesTax, tax], [ap, -total]]);
+        post({ ...base, txnId: `bill-${record.id}`, date }, [...debitLines, [inputTax, tax], [ap, -total]]);
         for (const payment of docPayments(record, date)) {
           post({ ...base, type: "Bill payment", txnId: `bp-${payment.id}-${record.id}`, date: payment.date }, [[ap, payment.amount * rate], [payment.account, -payment.amount * rate]]);
         }
       } else if (total > 0) {
         for (const payment of docPayments(record, date)) {
           const share = (payment.amount * rate) / total;
-          post({ ...base, type: "Bill payment", txnId: `bp-${payment.id}-${record.id}`, date: payment.date }, [...debitLines.map(([account, amount]) => [account, amount * share] as [string, number]), [salesTax, tax * share], [payment.account, -payment.amount * rate]]);
+          post({ ...base, type: "Bill payment", txnId: `bp-${payment.id}-${record.id}`, date: payment.date }, [...debitLines.map(([account, amount]) => [account, amount * share] as [string, number]), [inputTax, tax * share], [payment.account, -payment.amount * rate]]);
         }
       }
       continue;
@@ -396,8 +427,10 @@ export function buildLedger(records: BookkeepingRecord[], method: AccountingMeth
 
     if (record.kind === "transactions") {
       // Matched bank lines are already counted through the invoice, bill or expense they match.
-      if (data.matched === "true" || !num(data.amount)) continue;
-      const bank = balanceAccount(data.account ?? "") || ensure("Bank", "Asset", "Cash and cash equivalents");
+      // A line only categorised by a bank rule (older automation also marked it matched) still counts.
+      const matched = data.matched === "true" && !(data.ruleApplied && data.matchedBy !== "user");
+      if (matched || !num(data.amount)) continue;
+      const bank = bankAccountFor(data.account ?? "");
       const inflow = (data.type ?? "").toLowerCase().startsWith("dep") || (data.type ?? "").toLowerCase() === "in" || (data.type ?? "").toLowerCase().includes("money in");
       const category = inflow ? (accounts.get(key(data.category ?? ""))?.name ?? incomeAccount(data.category ?? "")) : (accounts.get(key(data.category ?? ""))?.name ?? expenseAccount(data.category ?? ""));
       const amount = Math.abs(num(data.amount));
@@ -412,18 +445,25 @@ export function buildLedger(records: BookkeepingRecord[], method: AccountingMeth
       const gross = num(data.grossSalary);
       if (!gross) continue;
       const net = num(data.payableSalary);
+      // What was kept back from pay: loans and advances repay the employee's receivable, fines are income,
+      // and income tax and anything else is owed onwards (payroll liabilities).
+      const repaid = num(data.loanDeduction) + num(data.advanceDeduction);
+      const fines = num(data.fineDeduction);
+      const owed = gross - net - repaid - fines;
+      const recovered = (share: number): Array<[string, number]> => [...(repaid ? [[employeeLoans(), -repaid * share] as [string, number]] : []), ...(fines ? [[employeeRecoveries(), -fines * share] as [string, number]] : [])];
+      const withheld = (share: number): Array<[string, number]> => [...recovered(share), [payrollLiabilities, -owed * share]];
       const base = { number: data.reference ?? "", name: data.employeeName ?? "", customer: "", supplier: "", memo: data.month ? `Salary ${data.month}` : "Salary", sourceKind: "payroll", sourceId: record.id };
       const month = /^\d{4}-\d{2}$/.test(data.month ?? "") ? `${data.month}-28` : "";
       // Salaries paid in parts: owed for the month, then each payment.
       if (paymentsFor.has(record.id) || num(data.paidAmount) > 0) {
         const payments = docPayments(record, month || record.createdAt.slice(0, 10));
         if (method === "accrual") {
-          post({ ...base, type: "Payroll", txnId: `pr-${record.id}`, date: month || record.createdAt.slice(0, 10) }, [[salaries, gross], [payrollLiabilities, -gross]]);
+          post({ ...base, type: "Payroll", txnId: `pr-${record.id}`, date: month || record.createdAt.slice(0, 10) }, [[salaries, gross], ...recovered(1), [payrollLiabilities, -(gross - repaid - fines)]]);
           for (const payment of payments) post({ ...base, type: "Salary payment", txnId: `sp-${payment.id}-${record.id}`, date: payment.date }, [[payrollLiabilities, payment.amount], [payment.account, -payment.amount]]);
         } else if (net > 0) {
           for (const payment of payments) {
             const share = payment.amount / net;
-            post({ ...base, type: "Salary payment", txnId: `sp-${payment.id}-${record.id}`, date: payment.date }, [[salaries, gross * share], [payrollLiabilities, -(gross - net) * share], [payment.account, -payment.amount]]);
+            post({ ...base, type: "Salary payment", txnId: `sp-${payment.id}-${record.id}`, date: payment.date }, [[salaries, gross * share], ...withheld(share), [payment.account, -payment.amount]]);
           }
         }
         continue;
@@ -433,8 +473,64 @@ export function buildLedger(records: BookkeepingRecord[], method: AccountingMeth
       const date = (paid ? data.paidDate : "") || month || record.createdAt.slice(0, 10);
       post(
         { txnId: `pr-${record.id}`, date, type: "Payroll", number: data.reference ?? "", name: data.employeeName ?? "", customer: "", supplier: "", memo: data.month ? `Salary ${data.month}` : "Salary", sourceKind: "payroll", sourceId: record.id },
-        [[salaries, gross], [payrollLiabilities, -(gross - net)], [paid ? paymentAccountName(data) : payrollLiabilities, -net]],
+        [[salaries, gross], ...withheld(1), [paid ? paymentAccountName(data) : payrollLiabilities, -net]],
       );
+      continue;
+    }
+
+    if (record.kind === "hr-loans") {
+      // A loan or advance paid out to an employee is money they owe back, repaid through payroll.
+      const amount = num(data.amount);
+      if (!amount || !["Running", "Completed", "Approved", "Repaid"].includes(data.status ?? "")) continue;
+      post(
+        { txnId: `loan-${record.id}`, date: data.requestDate || record.createdAt.slice(0, 10), type: "Employee loan", number: "", name: data.employee ?? "", customer: "", supplier: "", memo: data.loanType || "Salary attachment", sourceKind: "hr-loans", sourceId: record.id },
+        [[employeeLoans(), amount], [paymentAccountName(data), -amount]],
+      );
+      continue;
+    }
+
+    if (record.kind === "hr-claims") {
+      const amount = num(data.amount);
+      if (!amount || !["Approved", "Paid"].includes(data.status ?? "")) continue;
+      const base = { number: data.reference ?? "", name: data.employee ?? "", customer: "", supplier: "", memo: data.description ?? "", sourceKind: "hr-claims", sourceId: record.id };
+      const expense = expenseAccount(data.category || "Employee expenses");
+      const date = data.date || record.createdAt.slice(0, 10);
+      if (data.paidBy === "Company") {
+        // Paid with company money: the expense and the payment happen together.
+        post({ ...base, type: "Employee expense", txnId: `claim-${record.id}`, date }, [[expense, amount], [paymentAccountName(data), -amount]]);
+        continue;
+      }
+      const paid = data.status === "Paid";
+      const paidDate = data.paidDate || date;
+      if (method === "accrual") {
+        post({ ...base, type: "Employee expense", txnId: `claim-${record.id}`, date }, [[expense, amount], [reimbursements(), -amount]]);
+        if (paid) post({ ...base, type: "Expense reimbursement", txnId: `claim-pay-${record.id}`, date: paidDate }, [[reimbursements(), amount], [paymentAccountName(data), -amount]]);
+      } else if (paid) {
+        post({ ...base, type: "Expense reimbursement", txnId: `claim-pay-${record.id}`, date: paidDate }, [[expense, amount], [paymentAccountName(data), -amount]]);
+      }
+      continue;
+    }
+
+    if (record.kind === "hr-settlements") {
+      // Final pay on departure: owed once approved, then paid out.
+      if (!["Approved", "Paid"].includes(data.status ?? "")) continue;
+      const gross = num(data.grossPayable);
+      if (!gross) continue;
+      const net = num(data.netPayable);
+      const salaryPart = Math.min(gross, (num(data.monthlySalary) / 30) * num(data.pendingSalaryDays));
+      const recovered = num(data.loanRecovery);
+      const other = num(data.otherDeductions);
+      const date = data.lastWorkingDay || record.createdAt.slice(0, 10);
+      const paidDate = data.paidDate || date;
+      const base = { number: "", name: data.employee ?? "", customer: "", supplier: "", memo: `Final settlement${data.reason ? ` · ${data.reason}` : ""}`, sourceKind: "hr-settlements", sourceId: record.id };
+      const dues: Array<[string, number]> = [[salaries, salaryPart], [settlementExpense(), gross - salaryPart], ...(recovered ? [[employeeLoans(), -recovered] as [string, number]] : []), ...(other ? [[employeeRecoveries(), -other] as [string, number]] : [])];
+      if (method === "accrual") {
+        post({ ...base, type: "Final settlement", txnId: `fs-${record.id}`, date }, [...dues, [payrollLiabilities, -net]]);
+        if (data.status === "Paid" && net > 0) post({ ...base, type: "Final settlement payment", txnId: `fs-pay-${record.id}`, date: paidDate }, [[payrollLiabilities, net], [paymentAccountName(data), -net]]);
+      } else if (data.status === "Paid") {
+        post({ ...base, type: "Final settlement payment", txnId: `fs-pay-${record.id}`, date: paidDate }, [...dues, [paymentAccountName(data), -net]]);
+      }
+      continue;
     }
   }
 

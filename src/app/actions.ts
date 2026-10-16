@@ -1522,26 +1522,6 @@ export async function refundSupplierCredit(id: string, refundDate: string, accou
   revalidatePath("/app", "layout");
 }
 
-export async function markRecordPaid(kind: string, id: string): Promise<void> {
-  const me = await requireUser();
-  assertCanWrite(me, kind);
-  if (kind !== "bills" && kind !== "invoices") throw new ActionError("That payment action isn’t available here.");
-  const [row] = await db
-    .select()
-    .from(bookkeepingRecord)
-    .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, kind)))
-    .limit(1);
-  if (!row) throw new ActionError("We couldn’t find that record. Refresh and try again.");
-  // Pay what is left after any supplier or customer credit already applied.
-  const due = Math.max(0, (Number(row.data.amount) || 0) - (Number(row.data.creditApplied) || 0));
-  const data = { ...row.data, paidAmount: due.toFixed(2), status: "Paid" };
-  await db
-    .update(bookkeepingRecord)
-    .set({ data, updatedAt: new Date() })
-    .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id)));
-  revalidatePath("/app", "layout");
-}
-
 export async function convertBookkeepingRecord(id: string, target?: string): Promise<void> {
   const me = await requireUser();
   await db.transaction(async (transaction) => {
@@ -1730,6 +1710,8 @@ export async function convertPurchaseOrderToExpense(
       memo: order.data.memo || `Recorded from ${order.data.poNumber || "purchase order"}`,
       sourcePurchaseOrderId: order.id,
       sourcePurchaseOrderNumber: order.data.poNumber || "",
+      // The ordered products, so stocked items reach inventory (or clear "received not billed").
+      purchaseLineItems: order.data.lineItems || "",
       ...paymentAccountData,
     }, "expenses");
     const [created] = await transaction.insert(bookkeepingRecord)
@@ -1998,7 +1980,7 @@ export async function toggleTransactionMatch(id: string): Promise<void> {
   await db
     .update(bookkeepingRecord)
     .set({
-      data: { ...transaction.data, matched: transaction.data.matched === "true" ? "false" : "true" },
+      data: { ...transaction.data, matched: transaction.data.matched === "true" ? "false" : "true", matchedBy: transaction.data.matched === "true" ? "" : "user" },
       updatedAt: new Date(),
     })
     .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id)));

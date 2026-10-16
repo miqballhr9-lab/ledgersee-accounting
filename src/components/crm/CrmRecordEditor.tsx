@@ -13,6 +13,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
+import { paymentAccountLabel, paymentAccountType } from "@/lib/payment-accounts";
 import { relatedKind, relatedTypes, stageProbability, type CrmField, type CrmModule, type RelatedType } from "@/lib/crm-config";
 import { errorText, formatMoney, recordTitle, today, type CrmContextValue } from "@/components/crm/crm-shared";
 
@@ -37,6 +38,7 @@ const lookupKind: Partial<Record<NonNullable<CrmField["type"]>, string>> = {
   department: "hr-departments",
   leaveType: "hr-leave-types",
   job: "hr-jobs",
+  paymentAccount: "accounts",
 };
 
 function plusDays(days: number) {
@@ -157,6 +159,11 @@ export default function CrmRecordEditor({ module, record, preset, open, onOpenCh
   const expected = module.kind === "crm-deals" ? (Number(values.amount || 0) * Number(values.probability || 0)) / 100 : 0;
 
   function optionsFor(kind: string) {
+    if (kind === "accounts") {
+      return (context.store.accounts ?? []).filter((account) => paymentAccountType(account))
+        .map((account) => ({ id: account.id, name: paymentAccountLabel(account) }))
+        .sort((a, b) => a.name.localeCompare(b.name));
+    }
     return (context.store[kind] ?? [])
       .filter((option) => option.id !== record?.id && !(kind === "crm-leads" && option.data.leadStatus === "Converted"))
       .map((option) => ({ id: option.id, name: recordTitle(option) }))

@@ -13,6 +13,8 @@ import { hrModules } from "@/lib/hr-config";
 export type CrmFieldType =
   | "text" | "email" | "phone" | "url" | "number" | "currency" | "percent" | "date" | "datetime"
   | "select" | "textarea" | "checkbox" | "owner"
+  /** A Cash, Bank or Credit card account from the chart of accounts, stored as paymentAccountId / paymentAccount. */
+  | "paymentAccount"
   /** Lookups store the record's id in `<key>Id` and its display name in `<key>`. */
   | "account" | "contact" | "deal" | "campaign"
   | "employee" | "department" | "leaveType" | "job"
