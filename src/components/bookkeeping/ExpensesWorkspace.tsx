@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowDownToLine, Ban, CalendarDays, CircleDollarSign, Undo2, Filter, MoreHorizontal, Pencil, Plus, Search, Trash2 } from "lucide-react";
+import { ArrowDownToLine, Ban, CalendarDays, CircleDollarSign, Undo2, Filter, MoreHorizontal, Pencil, Plus, Printer, Search, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { readableError } from "@/lib/action-error";
 
@@ -76,8 +76,10 @@ function escapeCsv(value: string) {
 }
 
 /** A check is an expense paid from a bank account, numbered like a cheque book. */
-function checkModule(module: ModuleDefinition | undefined, check: boolean): ModuleDefinition | undefined {
+function checkModule(module: ModuleDefinition | undefined, check: boolean | "card-credit"): ModuleDefinition | undefined {
   if (!module || !check) return module;
+  // A credit card credit is a refund to a credit card: it lowers the card balance and the expense.
+  if (check === "card-credit") return { ...module, label: "Credit card credit", plural: "Credit card credits", description: "A refund to a company credit card." };
   const labels: Record<string, string> = { expenseDate: "Payment date", referenceNumber: "Check no." };
   return { ...module, label: "Check", plural: "Checks", description: "Pay a supplier by check from a bank account.", fields: module.fields.map((field) => (labels[field.key] ? { ...field, label: labels[field.key] } : field)) };
 }
@@ -173,7 +175,7 @@ export default function ExpensesWorkspace({ expenses: initialExpenses, bills: in
 
   useEffect(() => setPage(1), [categoryFilter, customEnd, customStart, datePreset, search, statusFilter, typeFilter]);
 
-  function getEditorModule(kind: "bills" | "expenses", record: BookkeepingRecord | null, check = false) {
+  function getEditorModule(kind: "bills" | "expenses", record: BookkeepingRecord | null, check: boolean | "card-credit" = false) {
     const baseModule = checkModule(moduleBySlug(kind), check);
     if (!baseModule) return null;
     const categoryOptions = [...new Set([
@@ -205,12 +207,14 @@ export default function ExpensesWorkspace({ expenses: initialExpenses, bills: in
     };
   }
 
-  function openNewTransaction(kind: "bills" | "expenses", check = false) {
+  function openNewTransaction(kind: "bills" | "expenses", check: boolean | "card-credit" = false) {
     const module = getEditorModule(kind, null, check);
     if (!module) return;
     setEditorModule(module);
     setEditingRecord(null);
-    setEditorDefaults(check ? { ...createDefaults(kind, records, asOfDate), docType: "Check", referenceNumber: nextCheckNumber(records) } : createDefaults(kind, records, asOfDate));
+    setEditorDefaults(check === "card-credit"
+      ? { ...createDefaults(kind, records, asOfDate), docType: "Credit card credit" }
+      : check ? { ...createDefaults(kind, records, asOfDate), docType: "Check", referenceNumber: nextCheckNumber(records) } : createDefaults(kind, records, asOfDate));
     setActionMessage("");
   }
 
@@ -222,7 +226,7 @@ export default function ExpensesWorkspace({ expenses: initialExpenses, bills: in
 
   function openEditTransaction(record: BookkeepingRecord) {
     if (record.kind !== "bills" && record.kind !== "expenses") return;
-    const module = getEditorModule(record.kind, record, record.data.docType === "Check");
+    const module = getEditorModule(record.kind, record, record.data.docType === "Credit card credit" ? "card-credit" : record.data.docType === "Check");
     if (!module) return;
     setEditorModule(module);
     setEditingRecord(record);
@@ -252,8 +256,8 @@ export default function ExpensesWorkspace({ expenses: initialExpenses, bills: in
   const billDue = (record: BookkeepingRecord) => Math.max(0, Number(record.data.amount || 0) - Number(record.data.paidAmount || 0) - Number(record.data.creditApplied || 0));
 
   function isUnpaid(record: BookkeepingRecord) {
-    if (record.kind === "bills") return !["Paid", "Cancelled"].includes(record.data.status ?? "") && billDue(record) > 0;
-    return record.data.status !== "Paid" && (record.data.status === "Partially Paid" || !record.data.paymentAccount);
+    if (record.kind === "bills") return !["Paid", "Cancelled", "Void", "Pending approval"].includes(record.data.status ?? "") && billDue(record) > 0;
+    return !["Paid", "Void"].includes(record.data.status ?? "") && (record.data.status === "Partially Paid" || !record.data.paymentAccount);
   }
 
   /** Whether anything has been paid, so the payment can be undone. */
@@ -372,7 +376,7 @@ export default function ExpensesWorkspace({ expenses: initialExpenses, bills: in
     const headings = ["Date", "Type", "No. or description", "Payee", "Category", "Payment account", "Amount", "Status"];
     const rows = filteredRecords.map((record) => [
       getRecordDate(record),
-      record.kind === "bills" ? "Bill" : record.data.docType === "Check" ? "Check" : "Expense",
+      record.kind === "bills" ? "Bill" : record.data.docType === "Check" ? "Check" : record.data.docType === "Credit card credit" ? "Credit card credit" : "Expense",
       record.kind === "bills" ? record.data.billNumber || record.data.description || "" : record.data.description || "",
       record.kind === "bills" ? record.data.vendor || "" : record.data.payee || "",
       expenseCategoryLabel(record.data),
@@ -409,6 +413,7 @@ export default function ExpensesWorkspace({ expenses: initialExpenses, bills: in
               <DropdownMenuItem onClick={() => openNewTransaction("bills")}>Bill</DropdownMenuItem>
               <DropdownMenuItem onClick={() => openNewTransaction("expenses")}>Expense</DropdownMenuItem>
               <DropdownMenuItem onClick={() => openNewTransaction("expenses", true)}>Check</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => openNewTransaction("expenses", "card-credit")}>Credit card credit</DropdownMenuItem>
               <DropdownMenuItem onClick={() => setPayBillsOpen(true)}>Pay bills</DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -503,7 +508,7 @@ export default function ExpensesWorkspace({ expenses: initialExpenses, bills: in
                   <TableRow key={`${record.kind}-${record.id}`} className="cursor-pointer" onClick={(event) => { if (!(event.target as HTMLElement).closest("button, a, input, [role=checkbox], [role=menu]")) setDetailKey(`${record.kind}-${record.id}`); }} data-state={selectedIds.has(`${record.kind}-${record.id}`) ? "selected" : undefined}>
                     <TableCell className="w-10"><Checkbox aria-label={`Select ${title || (isBill ? "bill" : "expense")}`} checked={selectedIds.has(`${record.kind}-${record.id}`)} onCheckedChange={(checked) => toggleSelected(`${record.kind}-${record.id}`, checked === true)} /></TableCell>
                     <TableCell className="whitespace-nowrap text-[13px]">{formatDate(getRecordDate(record))}</TableCell>
-                    <TableCell className="text-[13px]">{isBill ? "Bill" : record.data.docType === "Check" ? "Check" : "Expense"}</TableCell>
+                    <TableCell className="text-[13px]">{isBill ? "Bill" : record.data.docType === "Check" ? "Check" : record.data.docType === "Credit card credit" ? "Credit card credit" : "Expense"}</TableCell>
                     <TableCell className="max-w-[240px] text-[13px] font-medium text-primary"><span className="block truncate" title={title || ""}>{title || "—"}</span></TableCell>
                     <TableCell className="max-w-[180px] text-[13px]"><span className="block truncate" title={payee || ""}>{payee || "—"}</span></TableCell>
                     <TableCell className="max-w-[200px] text-[13px]"><span className="block truncate" title={expenseCategoryLabel(record.data)}>{expenseCategoryLabel(record.data) || "—"}</span></TableCell>
@@ -521,6 +526,7 @@ export default function ExpensesWorkspace({ expenses: initialExpenses, bills: in
                             {isUnpaid(record) ? <DropdownMenuItem disabled={bulkPending} onClick={() => setPaymentTargets([record])}><CircleDollarSign size={14} />Record payment</DropdownMenuItem> : null}
                             {hasPayment(record) ? <DropdownMenuItem disabled={bulkPending} onClick={() => void undoPayment(record)}><Undo2 size={14} />Undo payment</DropdownMenuItem> : null}
                             <DropdownMenuSeparator />
+                            {record.data.docType === "Check" ? <DropdownMenuItem onClick={() => { const opened = window.open(`/app/documents/expenses/${record.id}/print`, "_blank"); if (opened) opened.opener = null; }}><Printer size={14} />Print check</DropdownMenuItem> : null}
                             {record.data.status !== "Void" && !hasPayment(record) ? <DropdownMenuItem disabled={pendingDelete === record.id} onClick={() => void handleVoid(record)}><Ban size={14} />Void</DropdownMenuItem> : null}
                             <DropdownMenuItem variant="destructive" disabled={pendingDelete === record.id} onClick={() => void handleDelete(record)}><Trash2 size={14} />Delete</DropdownMenuItem>
                           </DropdownMenuContent>

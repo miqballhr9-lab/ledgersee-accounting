@@ -340,8 +340,11 @@ export default function CompanySettings({ settings, workspaceName }: CompanySett
 
           {tab === "expenses" ? (
             section("bills", "Bills and expenses",
-              <Row label="Default bill payment terms" value={saved.billTerms} />,
-              <>{select("billTerms", "Default bill payment terms", terms, "Used for new bills.")}</>,
+              <><Row label="Default bill payment terms" value={saved.billTerms} /><Row label="Bill approval" value={saved.requireBillApproval || "Off"} /></>,
+              <>
+                {select("billTerms", "Default bill payment terms", terms, "Used for new bills.")}
+                {select("requireBillApproval", "Bill approval", ["Off", "On"], "When on, new bills wait for an Admin or a team member who can approve transactions before they count or can be paid.")}
+              </>,
             )
           ) : null}
 

@@ -70,7 +70,7 @@ export function pricedLines(data: Record<string, string>, raw = data.lineItems ?
   return lines.map((line: InvoiceLineData) => ({ ...line, qty: num(line.quantity), unit: num(line.rate) * scale * exchange(data) }));
 }
 
-const inactive = (status: string | undefined) => ["Draft", "Cancelled", "Void"].includes(status ?? "");
+const inactive = (status: string | undefined) => ["Draft", "Cancelled", "Void", "Pending approval"].includes(status ?? "");
 
 /** Whether a purchase order's items were received into stock (so its bill doesn't add them again). */
 function receivedOrder(order: BookkeepingRecord | undefined) {

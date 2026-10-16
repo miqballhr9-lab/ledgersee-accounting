@@ -69,7 +69,7 @@ const itemAccountKeys = new Set(["incomeAccountId", "expenseAccountId", "assetAc
 /** Which item fields show for each item type, as in QuickBooks' product/service forms. */
 function itemFieldVisible(key: string, itemType: string) {
   const type = itemType === "Product" || !itemType ? "Inventory" : itemType;
-  if (type === "Bundle") return ["name", "sku", "itemType", "bundleItems", "showComponents"].includes(key);
+  if (type === "Bundle") return ["name", "category", "sku", "itemType", "bundleItems", "showComponents"].includes(key);
   if (["bundleItems", "showComponents"].includes(key)) return false;
   if (type !== "Inventory" && ["openingQty", "openingDate", "reorderPoint", "assetAccountId"].includes(key)) return false;
   return true;
@@ -119,7 +119,7 @@ const categoryLineKinds = new Set(["expenses", "bills", "supplier-credits"]);
 
 // Sales and purchase transactions open as a full-page form, as in QuickBooks Online.
 const partyKeys = new Set(["customer", "vendor", "payee"]);
-const footnoteKeys = new Set(["notes", "memo", "reason", "attachment"]);
+const footnoteKeys = new Set(["notes", "memo", "reason", "tags", "attachment"]);
 const totalKeys = new Set(["taxRate", "discount"]);
 // QuickBooks reads across: address, terms, dates, then the rest.
 const headerOrder = ["billingAddress", "paymentTerms", "issueDate", "billDate", "date", "expenseDate", "dueDate", "expiryDate", "deliveryDate", "expectedDate", "shippingAddress"];
@@ -456,6 +456,10 @@ export default function RecordEditor({ module, record, customers, vendors, items
       setError("Choose the bank account this check is drawn on.");
       return;
     }
+    if (isCardCredit && !record && !savedRecordId && !values.payNowAccountId) {
+      setError("Choose the credit card the refund went to.");
+      return;
+    }
     if (isSalesReceipt && !record && (!values.paymentMethod || values.paymentMethod === "Credit")) {
       setError("Choose the account this sales receipt was deposited to.");
       return;
@@ -574,6 +578,7 @@ export default function RecordEditor({ module, record, customers, vendors, items
   const isTransactionForm = hasStructuredLines || categoryLineKinds.has(module.kind);
   const isSalesReceipt = module.kind === "invoices" && values.docType === "Sales receipt";
   const isCheck = module.kind === "expenses" && values.docType === "Check";
+  const isCardCredit = module.kind === "expenses" && values.docType === "Credit card credit";
   const documentLabel = isSalesReceipt ? "Sales receipt" : isCheck ? "Check" : module.label;
   const customerOptions = customers.filter((customer) => customer.data.name?.trim());
   const expenseAccounts = accounts.filter((account) =>
@@ -1162,15 +1167,15 @@ export default function RecordEditor({ module, record, customers, vendors, items
                     {partyFields.map((field) => fieldBlock(field))}
                     {module.kind === "expenses" && !record ? (
                       <div className="min-w-0 space-y-2">
-                        <Label htmlFor="field-payNowAccountId">{isCheck ? <>Bank account <span className="text-destructive">*</span></> : "Payment account"}</Label>
-                        <Select value={values.payNowAccountId || (isCheck ? null : "unpaid")} onValueChange={(next) => changeValue("payNowAccountId", next === "unpaid" ? "" : next ?? "")}>
-                          <SelectTrigger id="field-payNowAccountId" className="w-full" disabled={Boolean(savedRecordId)}><SelectValue placeholder="Choose a bank account" /></SelectTrigger>
+                        <Label htmlFor="field-payNowAccountId">{isCheck ? <>Bank account <span className="text-destructive">*</span></> : isCardCredit ? <>Credit card <span className="text-destructive">*</span></> : "Payment account"}</Label>
+                        <Select value={values.payNowAccountId || (isCheck || isCardCredit ? null : "unpaid")} onValueChange={(next) => changeValue("payNowAccountId", next === "unpaid" ? "" : next ?? "")}>
+                          <SelectTrigger id="field-payNowAccountId" className="w-full" disabled={Boolean(savedRecordId)}><SelectValue placeholder={isCardCredit ? "Choose a credit card" : "Choose a bank account"} /></SelectTrigger>
                           <SelectContent>
-                            {isCheck ? null : <SelectItem value="unpaid">Not paid yet</SelectItem>}
-                            {paymentAccounts.filter((account) => !isCheck || paymentAccountType(account) === "Bank").map((account) => <SelectItem key={account.id} value={account.id}>{paymentAccountLabel(account)}</SelectItem>)}
+                            {isCheck || isCardCredit ? null : <SelectItem value="unpaid">Not paid yet</SelectItem>}
+                            {paymentAccounts.filter((account) => (isCheck ? paymentAccountType(account) === "Bank" : isCardCredit ? paymentAccountType(account) === "Credit card" : true)).map((account) => <SelectItem key={account.id} value={account.id}>{paymentAccountLabel(account)}</SelectItem>)}
                           </SelectContent>
                         </Select>
-                        <p className="text-xs leading-5 text-muted-foreground">{isCheck ? "The bank account the check is drawn on." : "The Cash, Bank or Credit card account this was paid from, on the expense date."}</p>
+                        <p className="text-xs leading-5 text-muted-foreground">{isCheck ? "The bank account the check is drawn on." : isCardCredit ? "The credit card the supplier refunded to." : "The Cash, Bank or Credit card account this was paid from, on the expense date."}</p>
                       </div>
                     ) : null}
                     {selectedCustomer && partyFields.some((field) => field.key === "customer") ? (

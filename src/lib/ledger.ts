@@ -173,7 +173,7 @@ export function buildLedger(allRecords: BookkeepingRecord[], method: AccountingM
   /** The account a bank line belongs to: a Banking account or a chart account by name, else a bank account. */
   const bankAccountFor = (name: string) => (name.trim() ? accounts.get(key(name))?.name ?? ensure(name.trim(), "Asset", "Cash and cash equivalents") : ensure("Bank", "Asset", "Cash and cash equivalents"));
 
-  const post = (base: Omit<Posting, "account" | "amount">, lines: Array<[string, number]>) => {
+  const postLines = (base: Omit<Posting, "account" | "amount">, lines: Array<[string, number]>) => {
     const kept = lines.map(([account, amount]) => [account, round(amount)] as const).filter(([, amount]) => amount !== 0);
     const difference = round(kept.reduce((sum, [, amount]) => sum + amount, 0));
     // Rounding from currency conversion or line scaling is kept inside the transaction so it always balances.
@@ -183,6 +183,7 @@ export function buildLedger(allRecords: BookkeepingRecord[], method: AccountingM
     }
     for (const [account, amount] of kept) postings.push({ ...base, account, amount });
   };
+  const post = postLines;
 
   /** A sale's income split by each line's item income account; lines without one go to Sales. */
   function splitIncome(data: Record<string, string>, income: number): Array<[string, number]> {
@@ -306,16 +307,25 @@ export function buildLedger(allRecords: BookkeepingRecord[], method: AccountingM
       if (["Draft", "Void", "Cancelled"].includes(data.status ?? "")) continue;
       const total = num(data.amount) * rate;
       const tax = num(data.taxAmount) * rate;
-      if (!total || method === "cash") continue;
-      post(
-        { txnId: `cn-${record.id}`, date: data.date || record.createdAt.slice(0, 10), type: "Credit note", number: data.creditNumber ?? "", name: data.customer ?? "", customer: data.customer ?? "", supplier: "", memo: data.reason ?? "", sourceKind: "credit-notes", sourceId: record.id },
-        [...splitIncome(data, total - tax), [salesTax, tax], [ar, -total]],
-      );
+      if (!total) continue;
+      const base = { number: data.creditNumber ?? "", name: data.customer ?? "", customer: data.customer ?? "", supplier: "", memo: data.reason ?? "", sourceKind: "credit-notes", sourceId: record.id };
+      // A refunded credit is paid back to the customer from a bank or cash account.
+      const refundFrom = data.status === "Refunded" ? paymentAccountName({ paymentAccountId: data.refundAccountId || "", paymentAccountName: data.refundAccountName || "" }) : "";
+      if (method === "accrual") {
+        post({ ...base, type: "Credit note", txnId: `cn-${record.id}`, date: data.date || record.createdAt.slice(0, 10) }, [...splitIncome(data, total - tax), [salesTax, tax], [ar, -total]]);
+        if (refundFrom) post({ ...base, type: "Refund", txnId: `cr-${record.id}`, date: data.refundDate || data.date || record.createdAt.slice(0, 10) }, [[ar, total], [refundFrom, -total]]);
+      } else if (refundFrom) {
+        post({ ...base, type: "Refund", txnId: `cr-${record.id}`, date: data.refundDate || data.date || record.createdAt.slice(0, 10) }, [...splitIncome(data, total - tax), [salesTax, tax], [refundFrom, -total]]);
+      }
       continue;
     }
 
     if (record.kind === "bills" || record.kind === "expenses" || record.kind === "supplier-credits") {
-      if (["Cancelled", "Void", "Draft"].includes(data.status ?? "")) continue;
+      if (["Cancelled", "Void", "Draft", "Pending approval"].includes(data.status ?? "")) continue;
+      // A credit card credit runs the other way: the card balance and the expense both go down.
+      const post = data.docType === "Credit card credit" && record.kind === "expenses"
+        ? (base: Omit<Posting, "account" | "amount">, lines: Array<[string, number]>) => postLines(base, lines.map(([account, amount]) => [account, -amount] as [string, number]))
+        : postLines;
       const isBill = record.kind === "bills";
       const isCredit = record.kind === "supplier-credits";
       const date = (isBill ? data.billDate : isCredit ? data.date : data.expenseDate) || record.createdAt.slice(0, 10);

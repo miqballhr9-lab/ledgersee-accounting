@@ -25,7 +25,7 @@ const pct = (key: string, label: string): Col => ({ key, label, kind: "pct" });
 /** Counts and days: summed like amounts, shown without currency formatting. */
 const count = (key: string, label: string): Col => ({ key, label, kind: "count" });
 
-const openStatuses = (status: string | undefined) => !["Draft", "Cancelled", "Void"].includes(status ?? "");
+const openStatuses = (status: string | undefined) => !["Draft", "Cancelled", "Void", "Pending approval"].includes(status ?? "");
 
 function rate(data: Record<string, string>) {
   const value = Number(data.exchangeRate);
@@ -451,6 +451,41 @@ export function buildListReport(key: string, records: BookkeepingRecord[], ledge
         ? grouped(columns, groupBy(payments, (record) => record.data.method || "Not specified").map(([label, items]) => ({ label, rows: items.map(rowOf) })))
         : grouped(columns, groupBy(payments, (record) => record.data.paymentAccountName || "Not specified").map(([label, items]) => ({ label, rows: items.map(rowOf) })));
       return periodResult(columns, lines, options, incoming ? "No payments received in this period." : "No bill payments in this period.");
+    }
+
+    case "deposit-detail": {
+      const columns = [text("date", "Date"), text("type", "Transaction type"), text("no", "No."), text("name", "Customer"), text("memo", "Memo"), amount("amount", "Amount")];
+      const paymentsById = new Map(records.filter((record) => record.kind === "payments").map((record) => [record.id, record]));
+      const deposits = records.filter((record) => record.kind === "deposits" && inPeriod(record.data.date || "", options))
+        .sort((a, b) => (a.data.date ?? "").localeCompare(b.data.date ?? ""));
+      const lines = grouped(columns, groupBy(deposits, (record) => record.data.accountName || "Bank").map(([label, items]) => ({
+        label,
+        rows: items.flatMap((deposit): Row[] => {
+          let ids: string[] = [];
+          let others: Array<Record<string, string>> = [];
+          try { ids = JSON.parse(deposit.data.paymentIds || "[]") as string[]; } catch { ids = []; }
+          try { others = JSON.parse(deposit.data.lines || "[]") as Array<Record<string, string>>; } catch { others = []; }
+          const head: Row = { values: [deposit.data.date ?? "", "Deposit", deposit.data.reference ?? "", "", deposit.data.memo ?? "", num(deposit.data.amount)], source: { kind: "deposits", id: deposit.id } };
+          const parts: Row[] = ids.flatMap((id) => {
+            const payment = paymentsById.get(id);
+            return payment ? [{ values: [payment.data.paymentDate ?? "", "  Payment", payment.data.invoiceNumber ?? "", payment.data.customer ?? "", payment.data.referenceNumber ?? "", num(payment.data.amount)], source: { kind: "invoices", id: payment.data.invoiceId ?? "" } }] : [];
+          });
+          const extra: Row[] = others.map((line) => ({ values: [deposit.data.date ?? "", "  Other funds", "", line.account ?? "", line.description ?? "", num(line.amount)], source: { kind: "deposits", id: deposit.id } }));
+          return [head, ...parts, ...extra];
+        }),
+      })));
+      return periodResult(columns, lines, options, "No bank deposits in this period.");
+    }
+
+    case "check-detail": {
+      const columns = [text("date", "Date"), text("no", "Check no."), text("name", "Payee"), text("memo", "Memo"), text("status", "Status"), amount("amount", "Amount")];
+      const checks = records.filter((record) => record.kind === "expenses" && record.data.docType === "Check" && inPeriod(record.data.expenseDate || "", options))
+        .sort((a, b) => (a.data.expenseDate ?? "").localeCompare(b.data.expenseDate ?? "") || (a.data.referenceNumber ?? "").localeCompare(b.data.referenceNumber ?? ""));
+      const lines = grouped(columns, groupBy(checks, (record) => record.data.paymentAccountName || record.data.paymentAccount || "Bank").map(([label, items]) => ({
+        label,
+        rows: items.map((record): Row => ({ values: [record.data.expenseDate ?? "", record.data.referenceNumber ?? "", record.data.payee ?? "", record.data.memo || record.data.description || "", record.data.status || "Paid", record.data.status === "Void" ? 0 : num(record.data.amount) * rate(record.data)], source: src(record) })),
+      })));
+      return periodResult(columns, lines, options, "No checks written in this period.");
     }
 
     case "customer-contact-list":

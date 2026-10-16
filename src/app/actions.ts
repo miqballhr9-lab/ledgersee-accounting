@@ -100,7 +100,7 @@ function serializeRow(row: StoredRow): BookkeepingRecord {
 
 function sanitizePayload(input: Record<string, string>): Record<string, string> {
   const entries = Object.entries(input);
-  if (entries.length > 60) throw new ActionError("This record has too many fields.");
+  if (entries.length > 120) throw new ActionError("This record has too many fields.");
 
   return Object.fromEntries(
     entries.map(([key, value]) => {
@@ -364,7 +364,7 @@ async function saveRecord(
   if (kind === "purchase-orders" && !id) data = { ...data, status: "Draft" };
   if (kind === "recurring-transactions") data = recurringTemplateData(me, data);
   // A check is an expense paid from a bank account, with a check number.
-  if (kind === "expenses" && data.docType && data.docType !== "Check") data = { ...data, docType: "" };
+  if (kind === "expenses" && data.docType && !["Check", "Credit card credit"].includes(data.docType)) data = { ...data, docType: "" };
   if (kind === "items") {
     if (data.itemType === "Product") data.itemType = "Inventory";
     if (!["Inventory", "Non-inventory", "Service", "Bundle"].includes(data.itemType || "Inventory")) throw new ActionError("Choose Inventory, Non-inventory, Service or Bundle.");
@@ -469,6 +469,14 @@ async function saveRecord(
     data = { ...data, paymentTerms, dueDate: calculatedDueDate };
   }
   if (!id && (kind === "bills" || kind === "supplier-credits") && !data.status) data = { ...data, status: "Open" };
+  // A bill waiting for approval stays that way until someone who can approve it does.
+  if (id && kind === "bills" && current?.data.status === "Pending approval" && data.status !== "Pending approval" && !(await canApproveTransactions(me))) {
+    data = { ...data, status: "Pending approval" };
+  }
+  // With bill approval on (Settings > Expenses), a new bill waits for someone who can approve it.
+  if (!id && kind === "bills" && data.status === "Open" && (await settingsOf(me.id)).requireBillApproval === "On" && !(await canApproveTransactions(me))) {
+    data = { ...data, status: "Pending approval" };
+  }
   if (!id && (kind === "invoices" || kind === "bills")) {
     const selectedAccountId = data.paymentMethod || "Credit";
     let paymentMethod = "Credit";
@@ -1396,6 +1404,7 @@ export async function recordBillPayment(id: string, paymentDate: string, account
       .limit(1);
     if (!bill) throw new ActionError("We couldn’t find that bill. Refresh and try again.");
     if (bill.data.status === "Cancelled") throw new ActionError(`${bill.data.billNumber || "This bill"} is cancelled.`);
+    if (bill.data.status === "Pending approval") throw new ActionError(`${bill.data.billNumber || "This bill"} is waiting for approval and can’t be paid yet.`);
     const paid = Number(bill.data.paidAmount) || 0;
     const due = (Number(bill.data.amount) || 0) - paid - (Number(bill.data.creditApplied) || 0);
     if (due <= 0.005) throw new ActionError(`${bill.data.billNumber || "This bill"} is already paid.`);
@@ -1631,7 +1640,44 @@ export async function voidBookkeepingRecord(kind: string, id: string): Promise<v
   revalidatePath("/app", "layout");
 }
 
-export async function convertBookkeepingRecord(id: string, target?: string): Promise<void> {
+async function settingsOf(userId: string) {
+  const [settings] = await db.select().from(bookkeepingRecord).where(and(eq(bookkeepingRecord.userId, userId), eq(bookkeepingRecord.kind, "settings"))).limit(1);
+  return settings?.data ?? {};
+}
+
+/** Admins, and team members marked "Can approve transactions", approve bills. */
+async function canApproveTransactions(me: Awaited<ReturnType<typeof requireUser>>) {
+  if (me.role === "Admin") return true;
+  const members = await db.select().from(bookkeepingRecord).where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "team-members")));
+  const email = (me.email ?? "").trim().toLowerCase();
+  return members.some((member) => member.data.email?.trim().toLowerCase() === email && member.data.canApprove === "true" && member.data.enabled !== "false");
+}
+
+/** Approves a bill waiting for approval, so it counts in the books and can be paid. */
+export async function approveBill(id: string): Promise<void> {
+  const me = await requireUser();
+  assertCanWrite(me, "bills");
+  if (!(await canApproveTransactions(me))) throw new ActionError("Only an Admin or a team member who can approve transactions can approve bills.");
+  const [bill] = await db.select().from(bookkeepingRecord).where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "bills"))).limit(1);
+  if (!bill) throw new ActionError("We couldn’t find that bill. Refresh and try again.");
+  if (bill.data.status !== "Pending approval") throw new ActionError("This bill isn’t waiting for approval.");
+  await assertBooksOpen(me.id, bill.data.billDate);
+  const data = { ...bill.data, status: "Open", approvedBy: me.name ?? "", approvedAt: new Date().toISOString().slice(0, 10) };
+  await db.update(bookkeepingRecord).set({ data, updatedAt: new Date() }).where(eq(bookkeepingRecord.id, bill.id));
+  await recordAudit(me, "Approved", "bills", bill.id, data);
+  revalidatePath("/app", "layout");
+}
+
+/** The next number in a series, e.g. INV-0012 → INV-0013, so converted documents follow on. */
+async function nextDocumentNumber(executor: Pick<typeof db, "select">, userId: string, kind: RecordKind, key: string, prefix: string) {
+  const rows = await executor.select().from(bookkeepingRecord).where(and(eq(bookkeepingRecord.userId, userId), eq(bookkeepingRecord.kind, kind)));
+  // Up to six digits: older documents numbered from a timestamp don't push the series to huge numbers.
+  const pattern = new RegExp(`^${prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(\\d{1,6})$`);
+  const highest = rows.reduce((max, row) => Math.max(max, Number(pattern.exec(row.data[key] ?? "")?.[1] ?? 0)), 0);
+  return `${prefix}${String(highest + 1).padStart(4, "0")}`;
+}
+
+export async function convertBookkeepingRecord(id: string, target?: string, percent?: number): Promise<void> {
   const me = await requireUser();
   await db.transaction(async (transaction) => {
     const [source] = await transaction
@@ -1651,6 +1697,13 @@ export async function convertBookkeepingRecord(id: string, target?: string): Pro
     if (sourceKind !== "purchase-orders" && source.data.status === "Converted") {
       throw new ActionError(`${source.data.orderNumber || source.data.estimateNumber || "This record"} has already been converted.`);
     }
+    // Progress invoicing (QuickBooks): invoice part of an estimate now and the rest later.
+    const alreadyInvoiced = Number(source.data.invoicedPercent || 0);
+    const progress = percent === undefined ? 0 : Number(percent);
+    if (percent !== undefined) {
+      if (sourceKind !== "estimates" || targetKind !== "invoices") throw new ActionError("Only an estimate can be invoiced in parts.");
+      if (!Number.isFinite(progress) || progress <= 0 || progress > 100 - alreadyInvoiced + 0.001) throw new ActionError(`Choose a percent between 1 and ${Math.max(0, 100 - alreadyInvoiced)}.`);
+    }
     const targetCount = targetKind === "estimates" || targetKind === "sales-orders"
       ? (await transaction.select({ id: bookkeepingRecord.id }).from(bookkeepingRecord)
         .where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, targetKind)))).length
@@ -1665,12 +1718,20 @@ export async function convertBookkeepingRecord(id: string, target?: string): Pro
     }
 
     const today = new Date().toISOString().slice(0, 10);
-    const sourceData = source.data;
+    const sourceData = progress
+      ? {
+          ...source.data,
+          lineItems: JSON.stringify(parseInvoiceLines(source.data.lineItems || "").map((line) => ({ ...line, rate: ((Number(line.rate) || 0) * progress / 100).toFixed(2) }))),
+          discount: source.data.discount ? ((Number(source.data.discount) || 0) * progress / 100).toFixed(2) : source.data.discount,
+          progressPercent: String(progress),
+          memo: `${progress}% of estimate ${source.data.estimateNumber || ""}`.trim(),
+        }
+      : source.data;
     let targetData = amountFromLineItems({
       ...sourceData,
       ...(targetKind === "invoices"
         ? {
-            invoiceNumber: `INV-${Date.now()}`,
+            invoiceNumber: await nextDocumentNumber(transaction, me.id, "invoices", "invoiceNumber", "INV-"),
             issueDate: today,
             paymentTerms: "30 days",
             dueDate: dueDateForTerms(today, "30 days"),
@@ -1694,7 +1755,7 @@ export async function convertBookkeepingRecord(id: string, target?: string): Pro
             sourceEstimateNumber: sourceData.estimateNumber || "",
           }
         : {
-            billNumber: `BILL-${Date.now()}`,
+            billNumber: await nextDocumentNumber(transaction, me.id, "bills", "billNumber", "BILL-"),
             billDate: today,
             dueDate: "",
             paidAmount: "0",
@@ -1738,7 +1799,9 @@ export async function convertBookkeepingRecord(id: string, target?: string): Pro
       .returning({ id: bookkeepingRecord.id });
     const updatedSourceData = sourceKind === "purchase-orders"
       ? { ...sourceData, convertedKind: targetKind, convertedRecordId: created.id, convertedAt: new Date().toISOString() }
-      : { ...sourceData, status: "Converted" };
+      : progress
+        ? { ...source.data, invoicedPercent: String(Math.min(100, Math.round((alreadyInvoiced + progress) * 100) / 100)), status: alreadyInvoiced + progress >= 99.999 ? "Converted" : source.data.status === "Draft" || source.data.status === "Sent" ? "Accepted" : source.data.status }
+        : { ...sourceData, status: "Converted" };
     await transaction
       .update(bookkeepingRecord)
       .set({ data: updatedSourceData, updatedAt: new Date() })

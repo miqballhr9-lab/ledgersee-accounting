@@ -11,7 +11,7 @@ import type { ModuleDefinition } from "@/lib/bookkeeping-config";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
 import { formatCustomerAddress } from "@/lib/customer-utils";
 
-export type RecordActionKind = "void" | "convert" | "convert-expense" | "payment" | "send" | "send-rfq" | "confirm-order" | "receive-order" | "cancel-order" | "mark-paid" | "match" | "apply-credit" | "generate" | "duplicate" | "share" | "print" | "undo-payment";
+export type RecordActionKind = "refund" | "remind" | "progress" | "statement" | "void" | "convert" | "convert-expense" | "payment" | "send" | "send-rfq" | "confirm-order" | "receive-order" | "cancel-order" | "mark-paid" | "match" | "apply-credit" | "generate" | "duplicate" | "share" | "print" | "undo-payment";
 
 interface RecordTableProps {
   module: ModuleDefinition;
@@ -189,7 +189,14 @@ export function recordActions(
   if (module.kind === "invoices") add("send", "Send invoice", Mail, true);
   if (["estimates", "sales-orders", "credit-notes"].includes(module.kind)) add("send", `Send ${module.label.toLowerCase()}`, Mail, true);
   if (module.kind === "bills" && record.data.status !== "Paid") add("mark-paid", "Mark paid", Check, true);
-  if (module.kind === "credit-notes" && !["Applied", "Refunded"].includes(record.data.status ?? "")) add("apply-credit", "Apply credit", BadgeCheck, true);
+  if (module.kind === "credit-notes" && !["Applied", "Refunded", "Void"].includes(record.data.status ?? "")) {
+    add("apply-credit", "Apply credit", BadgeCheck, true);
+    add("refund", "Refund to customer", CircleDollarSign);
+  }
+  const openBalance = Number(record.data.amount || 0) - Number(record.data.paidAmount || 0) - Number(record.data.creditApplied || 0);
+  if (module.kind === "invoices" && openBalance > 0.004 && !["Draft", "Void", "Cancelled", "Paid"].includes(record.data.status ?? "")) add("remind", "Send reminder", Mail);
+  if (module.kind === "estimates" && !["Converted", "Declined"].includes(record.data.status ?? "")) add("progress", "Progress invoice (part)", ArrowRightLeft);
+  if (module.kind === "customers") add("statement", "Send statement", Mail);
   if (module.kind === "recurring-invoices") add("generate", "Generate invoice", Play, true);
   if (module.kind === "transactions") add("match", record.data.matched === "true" ? "Mark unmatched" : "Match transaction", Check, true);
   actions.push({ key: "edit", label: "Edit", icon: Pencil, run: row.onEdit, primary: true });

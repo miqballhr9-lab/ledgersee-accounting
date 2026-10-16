@@ -139,6 +139,8 @@ export const reportCategories: ReportCategory[] = [
       { key: "transaction-list-by-date", label: "Transaction List by Date", description: "All transactions in date order.", ready: true, engine: "list" },
       { key: "recent-transactions", label: "Recent Transactions", description: "Transactions added in the last few days.", ready: true, engine: "list" },
       { key: "reconciliation-reports", label: "Reconciliation Reports", description: "Completed bank reconciliations.", ready: true, engine: "list" },
+      { key: "deposit-detail", label: "Deposit Detail", description: "Bank deposits in a period, with the payments in each.", ready: true, engine: "list" },
+      { key: "check-detail", label: "Check Detail", description: "Checks written in a period, by bank account.", ready: true, engine: "list" },
     ],
   },
   {

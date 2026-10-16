@@ -46,7 +46,7 @@ const sourceSlug: Record<string, string> = {
   invoices: "invoices", bills: "bills", expenses: "expenses", "credit-notes": "credit-notes", "supplier-credits": "supplier-credits",
   journals: "journals", transactions: "transactions", accounts: "accounts", payroll: "payroll",
   customers: "customers", vendors: "vendors", estimates: "estimates", "sales-orders": "sales-orders", "purchase-orders": "purchase-orders", items: "items",
-  employees: "employees", "recurring-transactions": "recurring", "inventory-movements": "inventory",
+  employees: "employees", "recurring-transactions": "recurring", "inventory-movements": "inventory", deposits: "deposits",
 };
 
 const asOfEngines = new Set(["bs", "trial-balance", "ar-ageing", "ap-ageing"]);

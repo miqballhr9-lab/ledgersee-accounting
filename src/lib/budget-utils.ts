@@ -88,7 +88,7 @@ export function payrollBudgetHead(name: string) {
 
 /** Documents that are not in the books: drafts, voided or cancelled ones, opening balances and unapproved automation. */
 function outsideBooks(record: BookkeepingRecord) {
-  return ["Draft", "Cancelled", "Void"].includes(record.data.status ?? "") || record.data.docType === "Opening balance" || record.data.awaitingApproval === "true";
+  return ["Draft", "Cancelled", "Void", "Pending approval"].includes(record.data.status ?? "") || record.data.docType === "Opening balance" || record.data.awaitingApproval === "true";
 }
 
 export function budgetActualRecords(line: BudgetLine, allRecords: BookkeepingRecord[]) {

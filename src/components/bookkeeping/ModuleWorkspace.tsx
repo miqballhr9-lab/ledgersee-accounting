@@ -27,6 +27,7 @@ import {
   sendInvoiceRecord,
   toggleTransactionMatch,
 } from "@/app/actions";
+import { refundCustomerCredit, sendCustomerStatement, sendInvoiceReminder } from "@/app/sales-actions";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -519,7 +520,7 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
       : module.kind === "invoices"
         ? { label: "Actions", items: [{ action: "pay", label: "Record payment" }, { action: "undo-payment", label: "Undo payment" }] }
         : module.kind === "credit-notes"
-          ? { label: "Actions", items: [{ action: "apply-credit", label: "Apply credit" }] }
+          ? { label: "Actions", items: [{ action: "apply-credit", label: "Apply credit" }, { action: "refund", label: "Refund to customer" }] }
           : module.kind === "supplier-credits"
             ? { label: "Actions", items: [{ action: "refund", label: "Record refund" }] }
             : module.kind === "journals"
@@ -537,7 +538,8 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
     let done = 0;
     for (const record of targets) {
       try {
-        await refundSupplierCredit(record.id, date, accountId);
+        if (module.kind === "credit-notes") await refundCustomerCredit(record.id, date, accountId);
+        else await refundSupplierCredit(record.id, date, accountId);
         done += 1;
       } catch (error) {
         failed.push(error instanceof Error ? readableError(error) : `${record.data.creditNumber || "Credit note"} couldn’t be refunded.`);
@@ -679,6 +681,21 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
       setPaymentError("");
       return;
     }
+    if (kind === "refund") {
+      setRefundTargets([record]);
+      return;
+    }
+    let progressPercent = 0;
+    if (kind === "progress") {
+      const invoiced = Number(record.data.invoicedPercent || 0);
+      const answer = window.prompt(`What percent of ${record.data.estimateNumber || "this estimate"} do you want to invoice now? ${invoiced ? `${invoiced}% is already invoiced.` : ""}`.trim(), String(Math.max(0, 100 - invoiced)));
+      if (answer === null) return;
+      progressPercent = Number(answer);
+      if (!Number.isFinite(progressPercent) || progressPercent <= 0 || progressPercent > 100 - invoiced + 0.001) {
+        toast.error(`Enter a percent between 1 and ${Math.max(0, 100 - invoiced)}.`);
+        return;
+      }
+    }
     if (kind === "cancel-order" && !window.confirm(`Cancel purchase order ${record.data.poNumber || ""}?`)) return;
 
     setPendingAction(true);
@@ -738,6 +755,15 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
       } else if (kind === "generate") {
         await generateRecurringInvoice(record.id);
         setActionMessage("Invoice created and the next billing date advanced.");
+      } else if (kind === "remind") {
+        await sendInvoiceReminder(record.id);
+        toast.success(`Reminder sent for ${record.data.invoiceNumber || "the invoice"}.`);
+      } else if (kind === "statement") {
+        const result = await sendCustomerStatement(record.id);
+        toast.success(`Statement sent: ${result.invoices} open ${result.invoices === 1 ? "invoice" : "invoices"}, ${formatCurrency(result.balance, currency)} due.`);
+      } else if (kind === "progress") {
+        await convertBookkeepingRecord(record.id, "invoices", progressPercent);
+        setActionMessage(`Draft invoice created for ${progressPercent}% of the estimate.`);
       } else if (kind === "void") {
         if (!window.confirm(`Void ${record.data.invoiceNumber || record.data.creditNumber || `this ${module.label.toLowerCase()}`}? It stays on file but no longer counts in your books.`)) return;
         await voidBookkeepingRecord(module.kind, record.id);
@@ -1064,9 +1090,9 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
       <PaymentDialog
         open={Boolean(refundTargets)}
         onOpenChange={(open) => { if (!open) setRefundTargets(null); }}
-        title="Record supplier refund"
-        description={`${refundTargets?.length ?? 0} ${refundTargets?.length === 1 ? "credit note" : "credit notes"} · ${formatCurrency((refundTargets ?? []).reduce((sum, record) => sum + Number(record.data.amount || 0), 0), currency)} refunded to you`}
-        accountLabel="Refund received into"
+        title={module.kind === "credit-notes" ? "Refund to customer" : "Record supplier refund"}
+        description={`${refundTargets?.length ?? 0} ${refundTargets?.length === 1 ? "credit note" : "credit notes"} · ${formatCurrency((refundTargets ?? []).reduce((sum, record) => sum + Number(record.data.amount || 0), 0), currency)} ${module.kind === "credit-notes" ? "paid back to the customer" : "refunded to you"}`}
+        accountLabel={module.kind === "credit-notes" ? "Refund paid from" : "Refund received into"}
         submitLabel="Record refund"
         paymentAccounts={paymentAccounts}
         pending={bulkPending}

@@ -36,7 +36,7 @@ const ALL = "__all__";
 /** Pay bills, as in QuickBooks: tick the bills to pay, from one account on one date. */
 export default function PayBillsDialog({ open, onOpenChange, bills, accounts, currency, asOfDate, onDone }: PayBillsDialogProps) {
   const openBills = useMemo(() => bills
-    .filter((bill) => !["Paid", "Cancelled", "Draft", "Void"].includes(bill.data.status ?? "") && billBalance(bill) > 0.005)
+    .filter((bill) => !["Paid", "Cancelled", "Draft", "Void", "Pending approval"].includes(bill.data.status ?? "") && billBalance(bill) > 0.005)
     .sort((left, right) => (left.data.dueDate || left.data.billDate || "").localeCompare(right.data.dueDate || right.data.billDate || "")), [bills]);
   const [accountId, setAccountId] = useState("");
   const [date, setDate] = useState(asOfDate);
