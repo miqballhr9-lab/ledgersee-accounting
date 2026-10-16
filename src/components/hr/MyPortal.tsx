@@ -40,7 +40,7 @@ export default function MyPortal({ portal, name, email, currency, canRequest }: 
   const [request, setRequest] = useState<RequestKind | null>(null);
   const [form, setForm] = useState<Record<string, string>>({});
 
-  async function act(key: string, work: () => Promise<void>, done: string) {
+  async function act(key: string, work: () => Promise<unknown>, done: string) {
     setBusy(key);
     try {
       await work();

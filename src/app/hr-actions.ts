@@ -133,15 +133,15 @@ async function nowTime(userId: string) {
   return { date: `${part("year")}-${part("month")}-${part("day")}`, time: `${part("hour")}:${part("minute")}` };
 }
 
-/** Check in or out for today. */
-export async function selfCheck(direction: "in" | "out"): Promise<void> {
-  const { me, employee } = await myEmployee(true);
-  if (!employee) throw new ActionError("Your email isn’t linked to an employee yet. Ask HR to add it to your employee profile.");
+/** Checks an employee in or out for today, in the business's time zone. */
+async function checkEmployee(me: Awaited<ReturnType<typeof requireUser>>, employee: StoredRow, direction: "in" | "out", self: boolean) {
   const { date, time } = await nowTime(me.id);
   const all = await rows(me.id, ["hr-attendance", "hr-holidays"]);
   const byKind = (kind: string) => all.filter((row) => row.kind === kind);
   const existing = byKind("hr-attendance").find((row) => row.data.employeeId === employee.id && row.data.date === date);
-  if (direction === "in" && existing?.data.checkIn) throw new ActionError(`You already checked in at ${existing.data.checkIn}.`);
+  const who = self ? "You" : employee.data.name || "This employee";
+  if (direction === "in" && existing?.data.checkIn && !existing.data.checkOut) throw new ActionError(`${who} already checked in at ${existing.data.checkIn}.`);
+  if (direction === "in" && existing?.data.checkOut) throw new ActionError(`${who} already checked out today at ${existing.data.checkOut}.`);
   if (direction === "out" && !existing?.data.checkIn) throw new ActionError("Check in first.");
   const data: Record<string, string> = {
     ...(existing?.data ?? { employee: employee.data.name ?? "", employeeId: employee.id, date, status: "Present" }),
@@ -151,6 +151,24 @@ export async function selfCheck(direction: "in" | "out"): Promise<void> {
   if (existing) await db.update(bookkeepingRecord).set({ data, updatedAt: new Date() }).where(eq(bookkeepingRecord.id, existing.id));
   else await db.insert(bookkeepingRecord).values({ userId: me.id, kind: "hr-attendance", data });
   revalidatePath("/app", "layout");
+  return time;
+}
+
+/** Check in or out for today. */
+export async function selfCheck(direction: "in" | "out"): Promise<string> {
+  const { me, employee } = await myEmployee(true);
+  if (!employee) throw new ActionError("Your email isn’t linked to an employee yet. Ask HR to add it to your employee profile.");
+  return checkEmployee(me, employee, direction, true);
+}
+
+/** Kiosk mode in Attendances: HR checks any employee in or out. Returns the time recorded. */
+export async function kioskCheck(employeeId: string, direction: "in" | "out"): Promise<string> {
+  const me = await requireUser();
+  assertCanWrite(me, "hr-attendance");
+  if (direction !== "in" && direction !== "out") throw new ActionError("Choose check in or check out.");
+  const [employee] = (await rows(me.id, ["employees"])).filter((row) => row.id === employeeId && row.data.status !== "Inactive");
+  if (!employee) throw new ActionError("We couldn’t find that employee. Refresh and try again.");
+  return checkEmployee(me, employee, direction, false);
 }
 
 /** An employee asks for leave, a loan or an expense back; HR approves it from the HR pages. */

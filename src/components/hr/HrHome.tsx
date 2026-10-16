@@ -1,232 +1,56 @@
 import Link from "next/link";
-import { Banknote, BriefcaseBusiness, CalendarDays, Check, Clock, FileWarning, HandCoins, Plus, Users } from "lucide-react";
+import {
+  Banknote, BriefcaseBusiness, CalendarDays, CalendarCheck, Clock, FileBadge, HandCoins, ListChecks, LogOut, Network, PartyPopper, ReceiptText, Star, Users,
+} from "lucide-react";
 
-import { Button } from "@/components/ui/button";
-import { formatMoney, StatusBadge, type CrmStore } from "@/components/crm/crm-shared";
+import type { CrmStore } from "@/components/crm/crm-shared";
 
-function Panel({ title, href, children }: { title: string; href?: string; children: React.ReactNode }) {
-  return (
-    <section className="rounded-lg border border-border bg-card">
-      <div className="flex items-center justify-between border-b border-border px-4 py-3">
-        <h2 className="text-sm font-semibold">{title}</h2>
-        {href ? <Link href={href} className="text-xs font-medium text-primary underline-offset-4 hover:underline">View all</Link> : null}
-      </div>
-      <div className="p-4">{children}</div>
-    </section>
-  );
+interface App {
+  label: string;
+  href: string;
+  icon: typeof Users;
+  colour: string;
+  /** Things waiting on HR, shown as a badge like Odoo's activity counter. */
+  waiting?: number;
 }
 
-function Empty({ text }: { text: string }) {
-  return <p className="py-4 text-center text-sm text-muted-foreground">{text}</p>;
-}
-
-function addDays(date: string, days: number) {
-  const value = new Date(`${date}T12:00:00Z`);
-  value.setUTCDate(value.getUTCDate() + days);
-  return value.toISOString().slice(0, 10);
-}
-
-export default function HrHome({ store, currency, asOfDate }: { store: CrmStore; currency: string; asOfDate: string }) {
-  const employees = (store.employees ?? []).filter((employee) => employee.data.status !== "Inactive");
-  const attendanceToday = (store["hr-attendance"] ?? []).filter((row) => row.data.date === asOfDate);
-  const present = attendanceToday.filter((row) => ["Present", "Late", "Half day"].includes(row.data.status ?? "")).length;
-  const leaves = store["hr-leaves"] ?? [];
-  const onLeave = leaves.filter((leave) => leave.data.status === "Approved" && leave.data.fromDate <= asOfDate && leave.data.toDate >= asOfDate);
-  const pendingLeaves = leaves.filter((leave) => leave.data.status === "To Approve");
-  const pendingLoans = (store["hr-loans"] ?? []).filter((loan) => loan.data.status === "To Approve");
-  const pendingClaims = (store["hr-claims"] ?? []).filter((claim) => claim.data.status === "Submitted");
-  const loanBalance = (store["hr-loans"] ?? []).filter((loan) => loan.data.status === "Running").reduce((sum, loan) => sum + Number(loan.data.balance || 0), 0);
-  const expiring = (store["hr-documents"] ?? []).filter((doc) => doc.data.expiryDate && doc.data.expiryDate <= addDays(asOfDate, 30)).sort((a, b) => a.data.expiryDate.localeCompare(b.data.expiryDate));
-  const holidays = (store["hr-holidays"] ?? []).filter((holiday) => (holiday.data.date ?? "") >= asOfDate).sort((a, b) => a.data.date.localeCompare(b.data.date)).slice(0, 6);
-  const openJobs = (store["hr-jobs"] ?? []).filter((job) => job.data.status === "Recruiting");
-  const candidates = store["hr-candidates"] ?? [];
-  const stages = ["New", "Initial Qualification", "First Interview", "Second Interview", "Contract Proposal", "Contract Signed"].map((stage) => ({ stage, count: candidates.filter((candidate) => candidate.data.stage === stage).length }));
-  const maxStage = Math.max(1, ...stages.map((item) => item.count));
-  const departments = Object.entries(employees.reduce<Record<string, number>>((counts, employee) => {
-    const name = employee.data.department || "No department";
-    counts[name] = (counts[name] ?? 0) + 1;
-    return counts;
-  }, {})).sort((a, b) => b[1] - a[1]);
-  const maxDept = Math.max(1, ...departments.map(([, count]) => count));
-  const joiners = employees.filter((employee) => (employee.data.joiningDate ?? "").startsWith(asOfDate.slice(0, 7)));
-  const waiting = [...pendingLeaves.map((row) => ({ row, kind: "Time off", href: "/app/hr/time-off", text: `${row.data.leaveType} · ${row.data.fromDate} → ${row.data.toDate} (${row.data.days} days)` })),
-    ...pendingLoans.map((row) => ({ row, kind: "Salary attachment", href: "/app/hr/salary-attachments", text: `${row.data.loanType} · ${formatMoney(row.data.amount, currency)}` })),
-    ...pendingClaims.map((row) => ({ row, kind: "Expense", href: "/app/hr/expenses", text: `${row.data.category} · ${formatMoney(row.data.amount, currency)}` }))];
-
-  const month = asOfDate.slice(0, 7);
-  const monthName = new Date(`${month}-01T12:00:00Z`).toLocaleDateString("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
-  const monthPayroll = (store.payroll ?? []).filter((row) => row.data.month === month);
-  const paidCount = monthPayroll.filter((row) => row.data.status === "Paid").length;
-  const markedDays = new Set((store["hr-attendance"] ?? []).filter((row) => (row.data.date ?? "").startsWith(month)).map((row) => row.data.date)).size;
-  const unpaidLeaveDays = leaves
-    .filter((leave) => leave.data.status === "Approved" && leave.data.paid === "false" && (leave.data.fromDate ?? "").startsWith(month))
-    .reduce((sum, leave) => sum + Number(leave.data.days || 0), 0);
-  const activeLoans = (store["hr-loans"] ?? []).filter((loan) => loan.data.status === "Running" && (!loan.data.startMonth || loan.data.startMonth <= month)).length;
-  const payrollGross = monthPayroll.length
-    ? monthPayroll.reduce((sum, row) => sum + Number(row.data.grossSalary || 0), 0)
-    : employees.reduce((sum, employee) => sum + Number(employee.data.baseSalary || 0), 0);
-  const payrollDeductions = monthPayroll.reduce((sum, row) => sum + Number(row.data.totalDeductions || 0), 0);
-  const payrollNet = monthPayroll.reduce((sum, row) => sum + Number(row.data.payableSalary || 0), 0);
-  const sheetReady = monthPayroll.length > 0 && monthPayroll.length >= employees.length;
-  const allPaid = monthPayroll.length > 0 && paidCount === monthPayroll.length;
-  const steps = [
-    { title: "Attendance", note: markedDays ? `${markedDays} ${markedDays === 1 ? "day" : "days"} marked this month` : "No days marked yet", done: markedDays > 0, current: false },
-    { title: "Time off & attachments", note: `${unpaidLeaveDays} unpaid time off ${unpaidLeaveDays === 1 ? "day" : "days"} · ${activeLoans} salary ${activeLoans === 1 ? "attachment" : "attachments"}`, done: pendingLeaves.length === 0 && pendingLoans.length === 0, current: false },
-    { title: "Salary sheet", note: monthPayroll.length ? `${monthPayroll.length} of ${employees.length} prepared` : "Not prepared yet", done: sheetReady, current: !sheetReady },
-    { title: "Pay & payslips", note: monthPayroll.length ? `${paidCount} of ${monthPayroll.length} paid` : "Waiting for the salary sheet", done: allPaid, current: sheetReady && !allPaid },
-  ];
-  const nextStep = !sheetReady
-    ? { label: monthPayroll.length ? "Continue salary sheet" : "Prepare salary sheet", href: "/app/payroll?new=1" }
-    : !allPaid ? { label: "Pay salaries", href: "/app/payroll" } : { label: "View payslips", href: "/app/payroll" };
-
-  const kpis = [
-    { label: "Active employees", value: String(employees.length), note: joiners.length ? `${joiners.length} joined this month` : "No new joiners this month", icon: Users },
-    { label: "Present today", value: attendanceToday.length ? `${present} / ${employees.length}` : "—", note: attendanceToday.length ? `${attendanceToday.length} marked` : "Not marked yet", icon: Clock },
-    { label: "Time off today", value: String(onLeave.length), note: `${pendingLeaves.length} requests waiting`, icon: CalendarDays },
-    { label: "Salary attachments", value: formatMoney(loanBalance, currency), note: `${pendingLoans.length} requests waiting`, icon: HandCoins },
-    { label: "Job positions", value: String(openJobs.length), note: `${candidates.filter((candidate) => !["Contract Signed", "Refused"].includes(candidate.data.stage ?? "")).length} applications in progress`, icon: BriefcaseBusiness },
+/** HRM home in Odoo's style: the apps menu, one tile per HR app. */
+export default function HrHome({ store }: { store: CrmStore; currency?: string; asOfDate?: string }) {
+  const count = (kind: string, test: (data: Record<string, string>) => boolean) => (store[kind] ?? []).filter((record) => test(record.data)).length;
+  const apps: App[] = [
+    { label: "Employees", href: "/app/employees", icon: Users, colour: "#714B67" },
+    { label: "Departments", href: "/app/hr/departments", icon: Network, colour: "#5B899E" },
+    { label: "Attendances", href: "/app/hr/check-in", icon: Clock, colour: "#017E84" },
+    { label: "Time Off", href: "/app/hr/my-time-off", icon: CalendarDays, colour: "#21B799", waiting: count("hr-leaves", (data) => data.status === "To Approve") + count("hr-allocations", (data) => data.status === "To Approve") },
+    { label: "Recruitment", href: "/app/hr/job-positions", icon: BriefcaseBusiness, colour: "#E46F78", waiting: count("hr-candidates", (data) => (data.stage || "New") === "New") },
+    { label: "Appraisals", href: "/app/hr/appraisals", icon: Star, colour: "#E4A900", waiting: count("hr-appraisals", (data) => data.status === "To Confirm") },
+    { label: "Expenses", href: "/app/hr/expenses", icon: ReceiptText, colour: "#8F5FD8", waiting: count("hr-claims", (data) => data.status === "Submitted") },
+    { label: "Payroll", href: "/app/payroll", icon: Banknote, colour: "#1F7A4D" },
+    { label: "Salary Attachments", href: "/app/hr/salary-attachments", icon: HandCoins, colour: "#B5651D", waiting: count("hr-loans", (data) => data.status === "To Approve") },
+    { label: "Onboarding", href: "/app/hr/onboarding", icon: ListChecks, colour: "#3C6FB4", waiting: count("hr-onboarding", (data) => data.status === "To Do") },
+    { label: "Departures", href: "/app/hr/departures", icon: LogOut, colour: "#9A4A4A" },
+    { label: "Documents", href: "/app/hr/documents", icon: FileBadge, colour: "#4F6D7A" },
+    { label: "Allocations", href: "/app/hr/allocations", icon: CalendarCheck, colour: "#2E8B7A" },
+    { label: "Public Holidays", href: "/app/hr/public-holidays", icon: PartyPopper, colour: "#C2577A" },
   ];
 
   return (
-    <div className="mx-auto w-full max-w-[1440px] px-4 py-6 sm:px-7 sm:py-8">
-      <header className="flex flex-wrap items-end justify-between gap-4">
-        <div className="min-w-0">
-          <p className="text-xs font-medium uppercase tracking-[0.12em] text-primary">HRM / Home</p>
-          <h1 className="mt-1 text-[26px] font-semibold tracking-tight sm:text-3xl">People</h1>
-          <p className="mt-1.5 max-w-2xl text-sm text-muted-foreground">Today&apos;s attendance, who is away, this month&apos;s payroll, what is waiting for approval, and your hiring at a glance.</p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Button variant="outline" className="gap-2" nativeButton={false} render={<Link href="/app/hr/attendances" />}><Clock size={15} />Attendance</Button>
-          <Button variant="outline" className="gap-2" nativeButton={false} render={<Link href="/app/hr/time-off?new=1" />}><Plus size={15} />Time off</Button>
-          <Button variant="outline" className="gap-2 border-primary text-primary" nativeButton={false} render={<Link href="/app/payroll" />}><Banknote size={15} />Run payroll</Button>
-          <Button className="gap-2" nativeButton={false} render={<Link href="/app/employees?new=1" />}><Plus size={15} />Add employee</Button>
-        </div>
-      </header>
-
-      <section aria-labelledby="payroll-month" className="mt-6 overflow-hidden rounded-lg border border-primary bg-card">
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-primary/5 px-5 py-4">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.1em] text-primary">Payroll</p>
-            <h2 id="payroll-month" className="mt-0.5 text-lg font-semibold">{monthName} salaries</h2>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <Button variant="outline" nativeButton={false} render={<Link href="/app/payroll" />}>Open salary register</Button>
-            <Button nativeButton={false} render={<Link href={nextStep.href} />}>{nextStep.label}</Button>
-          </div>
-        </div>
-        <ol className="grid gap-4 px-5 py-4 sm:grid-cols-2 xl:grid-cols-4">
-          {steps.map((step, index) => (
-            <li key={step.title} className="flex items-start gap-2.5">
-              <span className={`grid size-7 shrink-0 place-items-center rounded-full text-xs font-bold ${step.done ? "bg-accent text-accent-foreground" : step.current ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"}`}>
-                {step.done ? <Check size={14} aria-label="Done" /> : index + 1}
-              </span>
-              <div><p className="text-sm font-semibold">{step.title}</p><p className="text-xs text-muted-foreground">{step.note}</p></div>
+    <div className="min-h-full bg-gradient-to-b from-[#714B67]/10 via-background to-background">
+      <div className="mx-auto w-full max-w-4xl px-4 py-10 sm:py-14">
+        <h1 className="sr-only">HRM apps</h1>
+        <ul className="grid grid-cols-3 gap-x-4 gap-y-8 sm:grid-cols-4 md:grid-cols-5">
+          {apps.map((app) => (
+            <li key={app.label}>
+              <Link href={app.href} className="group flex flex-col items-center gap-2 rounded-lg p-2 text-center outline-none focus-visible:ring-2 focus-visible:ring-primary">
+                <span className="relative grid size-16 place-items-center rounded-xl text-white shadow-sm transition group-hover:-translate-y-0.5 group-hover:shadow-md sm:size-[72px]" style={{ background: app.colour }}>
+                  <app.icon size={30} strokeWidth={1.75} aria-hidden />
+                  {app.waiting ? <span className="absolute -top-1.5 -right-1.5 min-w-5 rounded-full bg-[#E46F78] px-1.5 text-xs font-semibold leading-5 text-white ring-2 ring-background" aria-label={`${app.waiting} waiting`}>{app.waiting}</span> : null}
+                </span>
+                <span className="text-sm font-medium text-foreground">{app.label}</span>
+              </Link>
             </li>
           ))}
-        </ol>
-        <div className="grid border-t border-border sm:grid-cols-2 xl:grid-cols-4">
-          {[
-            ["Employees on payroll", String(employees.length)],
-            [monthPayroll.length ? "Gross" : "Gross (estimate)", formatMoney(payrollGross, currency)],
-            ["Tax & deductions", monthPayroll.length ? formatMoney(payrollDeductions, currency) : "—"],
-            ["Net payable", monthPayroll.length ? formatMoney(payrollNet, currency) : "—"],
-          ].map(([label, value], index) => (
-            <div key={label} className={`px-5 py-3.5 ${index ? "border-t border-border sm:border-t-0 sm:border-l" : ""}`}>
-              <p className="text-xs text-muted-foreground">{label}</p>
-              <p className={`mt-1 text-xl font-semibold tabular-nums ${label === "Net payable" ? "text-primary" : ""}`}>{value}</p>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      <section className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-        {kpis.map((kpi) => (
-          <div key={kpi.label} className="rounded-lg border border-border bg-card px-4 py-3.5">
-            <div className="flex items-center justify-between gap-2 text-muted-foreground"><p className="text-xs">{kpi.label}</p><kpi.icon size={15} /></div>
-            <p className="mt-1.5 text-xl font-semibold tabular-nums">{kpi.value}</p>
-            <p className="mt-0.5 text-xs text-muted-foreground">{kpi.note}</p>
-          </div>
-        ))}
-      </section>
-
-      <div className="mt-4 grid gap-4 lg:grid-cols-2">
-        <Panel title="Waiting for approval">
-          {waiting.length ? (
-            <ul className="divide-y divide-border">
-              {waiting.slice(0, 10).map(({ row, kind, href, text }) => (
-                <li key={row.id} className="flex items-center justify-between gap-3 py-2">
-                  <div className="min-w-0">
-                    <Link href={`${href}?open=${row.id}`} className="font-medium hover:underline">{row.data.employee}</Link>
-                    <p className="truncate text-xs text-muted-foreground">{kind}: {text}</p>
-                  </div>
-                  <StatusBadge value={row.data.status} />
-                </li>
-              ))}
-            </ul>
-          ) : <Empty text="Nothing is waiting for approval." />}
-        </Panel>
-
-        <Panel title="Away today" href="/app/hr/time-off">
-          {onLeave.length ? (
-            <ul className="divide-y divide-border">
-              {onLeave.map((leave) => (
-                <li key={leave.id} className="flex items-center justify-between gap-3 py-2">
-                  <span className="font-medium">{leave.data.employee}</span>
-                  <span className="text-xs text-muted-foreground">{leave.data.leaveType} · until {leave.data.toDate}</span>
-                </li>
-              ))}
-            </ul>
-          ) : <Empty text="Everyone is in today." />}
-        </Panel>
-
-        <Panel title="Headcount by department" href="/app/hr/departments">
-          {departments.length ? (
-            <ul className="space-y-3">
-              {departments.map(([name, count]) => (
-                <li key={name}>
-                  <div className="flex items-center justify-between text-sm"><span>{name}</span><span className="tabular-nums">{count}</span></div>
-                  <div className="mt-1 h-2 rounded-full bg-muted"><div className="h-2 rounded-full bg-primary" style={{ width: `${(count / maxDept) * 100}%` }} /></div>
-                </li>
-              ))}
-            </ul>
-          ) : <Empty text="No employees yet." />}
-        </Panel>
-
-        <Panel title="Hiring pipeline" href="/app/hr/applications">
-          {candidates.length ? (
-            <ul className="space-y-3">
-              {stages.map((item) => (
-                <li key={item.stage}>
-                  <div className="flex items-center justify-between text-sm"><span>{item.stage}</span><span className="tabular-nums">{item.count}</span></div>
-                  <div className="mt-1 h-2 rounded-full bg-muted"><div className="h-2 rounded-full bg-chart-2" style={{ width: `${(item.count / maxStage) * 100}%` }} /></div>
-                </li>
-              ))}
-            </ul>
-          ) : <Empty text="No candidates yet." />}
-        </Panel>
-
-        <Panel title="Documents expiring within 30 days" href="/app/hr/documents">
-          {expiring.length ? (
-            <ul className="divide-y divide-border">
-              {expiring.slice(0, 8).map((doc) => (
-                <li key={doc.id} className="flex items-center justify-between gap-3 py-2">
-                  <div className="min-w-0"><p className="font-medium">{doc.data.employee}</p><p className="truncate text-xs text-muted-foreground">{doc.data.documentType} · {doc.data.documentName}</p></div>
-                  <span className={`flex shrink-0 items-center gap-1 text-xs ${doc.data.expiryDate < asOfDate ? "font-medium text-destructive" : "text-muted-foreground"}`}><FileWarning size={13} />{doc.data.expiryDate < asOfDate ? "Expired " : ""}{doc.data.expiryDate}</span>
-                </li>
-              ))}
-            </ul>
-          ) : <Empty text="No documents expire in the next 30 days." />}
-        </Panel>
-
-        <Panel title="Upcoming holidays" href="/app/hr/public-holidays">
-          {holidays.length ? (
-            <ul className="divide-y divide-border">
-              {holidays.map((holiday) => (
-                <li key={holiday.id} className="flex items-center justify-between gap-3 py-2"><span className="font-medium">{holiday.data.holidayName}</span><span className="text-xs tabular-nums text-muted-foreground">{holiday.data.date}</span></li>
-              ))}
-            </ul>
-          ) : <Empty text="No holidays added. Add this year's public holidays in HR → Holidays." />}
-        </Panel>
+        </ul>
       </div>
     </div>
   );

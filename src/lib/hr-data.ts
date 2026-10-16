@@ -24,5 +24,15 @@ export async function loadHrData() {
     me: me.name,
     owners: [...new Set([me.workspaceName, me.name, ...teamNames])],
     currency: groups.settings?.[0]?.data.currency || "USD",
+    today: businessToday(groups.settings?.[0]?.data.timeZone),
   };
+}
+
+/** Today's date in the business's time zone (Settings), Pakistan time by default. */
+function businessToday(timeZone: string | undefined) {
+  try {
+    return new Intl.DateTimeFormat("en-CA", { timeZone: timeZone || "Asia/Karachi", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+  } catch {
+    return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Karachi", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+  }
 }

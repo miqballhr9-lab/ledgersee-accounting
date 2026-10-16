@@ -46,6 +46,8 @@ interface CrmWorkspaceProps {
   owners: string[];
   /** Record to open on arrival, from links like /app/crm/deals?open=<id>. */
   openId?: string;
+  /** Applications only: show one job position's pipeline (Odoo's "New applications" on a job). */
+  jobFilter?: string;
 }
 
 const pageInfo: Record<string, { title: string; description: string }> = {
@@ -100,7 +102,7 @@ function dueDateOf(record: BookkeepingRecord) {
   return (record.data.dueDate || record.data.closingDate || record.data.from || record.data.startTime || "").slice(0, 10);
 }
 
-export default function CrmWorkspace({ page, initialStore, currency, me, owners, openId }: CrmWorkspaceProps) {
+export default function CrmWorkspace({ page, initialStore, currency, me, owners, openId, jobFilter }: CrmWorkspaceProps) {
   const router = useRouter();
   const [store, setStore] = useState<CrmStore>(initialStore);
   const [lastInitial, setLastInitial] = useState(initialStore);
@@ -110,7 +112,7 @@ export default function CrmWorkspace({ page, initialStore, currency, me, owners,
   }
   const [activityKey, setActivityKey] = useState<CrmModuleKey>("tasks");
   const mod = page === "accounts" ? null : crmModule(page === "activities" ? activityKey : page)!;
-  const [view, setView] = useState<"list" | "kanban" | "balances">(page === "deals" || page === "candidates" ? "kanban" : "list");
+  const [view, setView] = useState<"list" | "kanban" | "balances">(page === "deals" || page === "applications" || page === "job-positions" ? "kanban" : "list");
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<ViewFilter>("all");
   const [statusFilter, setStatusFilter] = useState("");
@@ -161,7 +163,7 @@ export default function CrmWorkspace({ page, initialStore, currency, me, owners,
     params.delete("open");
     window.history.replaceState(null, "", `${window.location.pathname}${params.size ? `?${params}` : ""}`);
   }, [openId]);
-  useNewRecordParam(() => openNew());
+  useNewRecordParam(() => openNew(jobPreset));
 
   const records = useMemo(() => (mod ? store[mod.kind] ?? [] : store.customers ?? []), [mod, store]);
   const todayText = new Date().toISOString().slice(0, 10);
@@ -170,6 +172,7 @@ export default function CrmWorkspace({ page, initialStore, currency, me, owners,
     return records.filter((record) => {
       if (term && !Object.values(record.data).some((value) => value?.toLowerCase().includes(term))) return false;
       if (!mod) return true;
+      if (jobFilter && mod.kind === "hr-candidates" && record.data.job !== jobFilter) return false;
       if (statusFilter && mod.statusKey && record.data[mod.statusKey] !== statusFilter) return false;
       if (filter === "mine" && record.data.owner !== me) return false;
       if (filter === "open" && isClosed(mod, record)) return false;
@@ -178,9 +181,10 @@ export default function CrmWorkspace({ page, initialStore, currency, me, owners,
       if (filter === "overdue" && !(dueDateOf(record) && dueDateOf(record) < todayText && !isClosed(mod, record))) return false;
       return true;
     });
-  }, [records, search, mod, statusFilter, filter, me, todayText]);
+  }, [jobFilter, records, search, mod, statusFilter, filter, me, todayText]);
 
 
+  const jobPreset = jobFilter && mod?.kind === "hr-candidates" ? { job: jobFilter } : undefined;
   function openNew(preset?: Record<string, string>) {
     // Attendance is entered for many employees at once, on the attendance sheet.
     if (mod?.kind === "hr-attendance" && !preset) {
@@ -335,7 +339,7 @@ export default function CrmWorkspace({ page, initialStore, currency, me, owners,
             </DropdownMenu>
           ) : null}
           <input ref={fileInput} type="file" accept=".csv,text/csv" className="hidden" onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) void importFile(file); }} />
-          {mod ? <Button type="button" className="gap-2" onClick={() => openNew()}><Plus size={15} />Create {mod.label}</Button>
+          {mod ? <Button type="button" className="gap-2" onClick={() => openNew(jobPreset)}><Plus size={15} />Create {mod.label}</Button>
             : <Button className="gap-2" nativeButton={false} render={<Link href="/app/customers?new=1" />}><Plus size={15} />Create account</Button>}
         </div>
       </header>
@@ -371,6 +375,12 @@ export default function CrmWorkspace({ page, initialStore, currency, me, owners,
           <Search size={15} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
           <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={`Search ${info.title.toLowerCase()}`} className="pl-8" aria-label={`Search ${info.title.toLowerCase()}`} />
         </div>
+        {jobFilter && mod?.kind === "hr-candidates" ? (
+          <span className="inline-flex items-center gap-1.5 rounded-md border border-primary/40 bg-primary/5 px-2 py-1 text-sm">
+            <span className="text-muted-foreground">Job position:</span><span className="font-medium">{jobFilter}</span>
+            <Link href="/app/hr/applications" className="ml-1 rounded px-1 text-muted-foreground hover:bg-muted hover:text-foreground" aria-label="Show all job positions">×</Link>
+          </span>
+        ) : null}
         {mod ? (
           <>
             <Select value={filter} onValueChange={(value) => setFilter((value ?? "all") as ViewFilter)}>
@@ -396,7 +406,7 @@ export default function CrmWorkspace({ page, initialStore, currency, me, owners,
           </>
         ) : null}
         <div className="ml-auto flex flex-wrap gap-2">
-          {mod?.kanbanKey ? (
+          {mod?.kanbanKey || mod?.kind === "hr-jobs" ? (
             <div className="flex rounded-md border border-border p-0.5">
               <Button type="button" size="sm" variant={view === "list" ? "secondary" : "ghost"} className="gap-1.5" onClick={() => setView("list")}><List size={14} />List</Button>
               <Button type="button" size="sm" variant={view === "kanban" ? "secondary" : "ghost"} className="gap-1.5" onClick={() => setView("kanban")}><KanbanSquare size={14} />Kanban</Button>
@@ -476,6 +486,51 @@ export default function CrmWorkspace({ page, initialStore, currency, me, owners,
 
       {mod?.kind === "hr-leaves" && view === "balances" ? <LeaveBalances employees={store.employees ?? []} leaveTypes={store["hr-leave-types"] ?? []} leaves={store["hr-leaves"] ?? []} allocations={store["hr-allocations"] ?? []} /> : null}
 
+      {mod?.kind === "hr-jobs" && view === "kanban" ? (
+        <section className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+          {filtered.map((job) => {
+            const title = job.data.jobTitle || "Job position";
+            const applications = (store["hr-candidates"] ?? []).filter((application) => application.data.job === title);
+            const fresh = applications.filter((application) => (application.data.stage || "New") === "New").length;
+            const ongoing = applications.filter((application) => !["Contract Signed", "Refused"].includes(application.data.stage ?? "")).length;
+            const hired = applications.filter((application) => application.data.stage === "Contract Signed").length;
+            const recruiting = job.data.status !== "Not recruiting";
+            const href = `/app/hr/applications?job=${encodeURIComponent(title)}`;
+            return (
+              <article key={job.id} className={`flex flex-col rounded-lg border bg-card p-4 shadow-xs ${recruiting ? "border-border" : "border-dashed border-border opacity-80"}`}>
+                <div className="flex items-start justify-between gap-2">
+                  <button type="button" onClick={() => setDetail(job)} className="min-w-0 text-left">
+                    <h3 className="truncate text-base font-semibold hover:underline">{title}</h3>
+                    <p className="truncate text-xs text-muted-foreground">{[job.data.department, job.data.location].filter(Boolean).join(" · ") || "No department"}</p>
+                  </button>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger render={<Button type="button" variant="ghost" size="icon-sm" aria-label={`${title} options`}><Ellipsis size={15} /></Button>} />
+                    <DropdownMenuContent align="end" className="min-w-44">
+                      <DropdownMenuItem onClick={() => setEditor({ mod, record: job })}><Pencil size={14} />Configuration</DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => run(async () => { upsert(await updateCrmField(mod.kind, [job.id], "status", recruiting ? "Not recruiting" : "Recruiting")); })}>
+                        <UserCheck size={14} />{recruiting ? "Stop recruiting" : "Start recruiting"}
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
+                <div className="mt-4 flex items-end justify-between gap-3">
+                  <Button size="sm" nativeButton={false} render={<Link href={href} />}>{fresh} New {fresh === 1 ? "Application" : "Applications"}</Button>
+                  <div className="text-right text-xs text-muted-foreground">
+                    {Number(job.data.openings || 0) ? <p><span className="font-semibold text-foreground">{job.data.openings}</span> To recruit</p> : null}
+                    <p><Link href={href} className="hover:underline">{ongoing} In progress</Link>{hired ? ` · ${hired} Hired` : ""}</p>
+                  </div>
+                </div>
+                <div className="mt-3 flex items-center justify-between border-t border-border pt-2 text-xs text-muted-foreground">
+                  <span>{job.data.owner || "No recruiter"}</span>
+                  <span className={`rounded-full px-2 py-0.5 font-medium ${recruiting ? "bg-[#21B799]/15 text-[#13866f]" : "bg-muted"}`}>{recruiting ? "Recruiting" : "Not recruiting"}</span>
+                </div>
+              </article>
+            );
+          })}
+          {!filtered.length ? <p className="col-span-full rounded-lg border border-dashed border-border py-10 text-center text-sm text-muted-foreground">No job positions yet. Create one to start recruiting.</p> : null}
+        </section>
+      ) : null}
+
       {mod && view === "kanban" && mod.kanbanKey ? (
         <section className="mt-4 flex gap-3 overflow-x-auto pb-3">
           {kanbanColumns.map((column) => {
@@ -507,7 +562,8 @@ export default function CrmWorkspace({ page, initialStore, currency, me, owners,
                       className={`rounded-md border border-border bg-card p-3 text-left shadow-xs transition-shadow hover:shadow-sm ${dragging === card.id ? "opacity-50" : ""}`}
                     >
                       <p className="font-medium">{recordTitle(card)}</p>
-                      <p className="mt-0.5 truncate text-xs text-muted-foreground">{card.data.account || card.data.company || card.data.related || card.data.email || ""}</p>
+                      <p className="mt-0.5 truncate text-xs text-muted-foreground">{card.data.job || card.data.account || card.data.company || card.data.related || card.data.email || ""}</p>
+                      {mod.kind === "hr-candidates" && card.data.rating ? <p className="mt-1 text-sm leading-none text-[#E4A900]" aria-label={`Evaluation: ${card.data.rating}`}>{"★".repeat(["Good", "Very Good", "Excellent"].indexOf(card.data.rating) + 1)}<span className="text-muted-foreground/40">{"★".repeat(3 - ["Good", "Very Good", "Excellent"].indexOf(card.data.rating) - 1)}</span></p> : null}
                       <div className="mt-2 flex flex-wrap items-center justify-between gap-1 text-xs text-muted-foreground">
                         {mod.kanbanAmountKey ? <span className="font-medium text-foreground tabular-nums">{formatMoney(card.data[mod.kanbanAmountKey], currency)}</span> : <span>{card.data.priority || card.data.leadSource || ""}</span>}
                         <span>{card.data.closingDate || card.data.dueDate || ""}</span>
