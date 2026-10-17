@@ -15,7 +15,7 @@ import { applyLoanRepayment } from "@/lib/hr-rules";
 import { sendEmailOrThrow } from "@/lib/email";
 import { createUploadUrl } from "@/lib/storage";
 import { dueDateForTerms, invoiceTax, parseInvoiceLines, serialList } from "@/lib/invoice-utils";
-import { stockByWarehouse } from "@/lib/warehouses";
+import { defaultWarehouse, lotRegister, stockByWarehouse } from "@/lib/warehouses";
 import { buildInventory, inventoryKinds, isInventoryItem } from "@/lib/inventory";
 import { siteUrl } from "@/lib/site";
 import { isRecordKind, type BookkeepingRecord, type RecordKind } from "@/lib/bookkeeping-types";
@@ -386,7 +386,7 @@ async function saveRecord(
     // Invoiced charges stay closed; anything else waits for the next invoice.
     data = { ...data, chargeType: data.chargeType === "Credit" ? "Credit" : "Charge", quantity: String(quantity), amount: (quantity * rate).toFixed(2), status: current?.data.status === "Closed" || data.status === "Closed" ? "Closed" : "Open" };
   }
-  if (kind === "warehouses" || kind === "stock-transfers" || data.warehouse?.trim() || data.lineItems?.includes("\"serials\"")) data = await checkStockPlaces(me.id, kind, data, id);
+  if (["warehouses", "stock-transfers", "invoices", "supplier-credits"].includes(kind) || data.warehouse?.trim() || data.lineItems?.includes("\"serials\"")) data = await checkStockPlaces(me.id, kind, data, id);
   if (kind === "recurring-transactions") data = recurringTemplateData(me, data);
   // A check is an expense paid from a bank account, with a check number.
   if (kind === "expenses" && data.docType && !["Check", "Credit card credit"].includes(data.docType)) data = { ...data, docType: "" };
@@ -1433,7 +1433,9 @@ function paymentRate(document: Record<string, string>, exchangeRate: string): Re
  * exist, a transfer moves stock that is there, and serial numbers match the quantity.
  */
 async function checkStockPlaces(userId: string, kind: string, data: Record<string, string>, id?: string): Promise<Record<string, string>> {
-  const rows = await db.select().from(bookkeepingRecord).where(and(eq(bookkeepingRecord.userId, userId), inArray(bookkeepingRecord.kind, ["warehouses", "items", ...(kind === "stock-transfers" ? [...inventoryKinds, "stock-transfers"] : [])])));
+  // Stock leaving a warehouse (transfers, sales, returns to suppliers) needs the whole stock picture.
+  const outgoing = ["stock-transfers", "invoices", "supplier-credits"].includes(kind);
+  const rows = await db.select().from(bookkeepingRecord).where(and(eq(bookkeepingRecord.userId, userId), inArray(bookkeepingRecord.kind, ["warehouses", "items", ...(outgoing ? [...inventoryKinds, "stock-transfers"] : [])])));
   const records = rows.map(serializeRow);
   const warehouses = records.filter((row) => row.kind === "warehouses" && row.data.name?.trim());
   const known = (name: string | undefined) => warehouses.some((row) => row.data.name.trim().toLowerCase() === (name ?? "").trim().toLowerCase());
@@ -1449,6 +1451,32 @@ async function checkStockPlaces(userId: string, kind: string, data: Record<strin
       if (item?.data.tracking !== "Serial number" || !line.serials) continue;
       const count = serialList(line.serials).length;
       if (count !== Number(line.quantity)) throw new ActionError(`${item.data.name}: enter ${Number(line.quantity)} serial ${Number(line.quantity) === 1 ? "number" : "numbers"}, one per unit (${count} given).`);
+    }
+    // With warehouses, a sale or a return to a supplier can only take what that warehouse holds,
+    // and only serial numbers that are in stock there. Drafts don't move stock, so they aren't checked.
+    if (outgoing && warehouses.length && !["Draft", "Cancelled", "Void", "Pending approval"].includes(data.status ?? "")) {
+      const others = records.filter((row) => row.id !== id);
+      const place = data.warehouse?.trim() || defaultWarehouse(others);
+      const date = (kind === "invoices" ? data.issueDate : data.date) || "9999-12-31";
+      const stock = stockByWarehouse(others, date);
+      const lots = lotRegister(others);
+      const wanted = new Map<string, number>();
+      for (const line of parseInvoiceLines(data.lineItems ?? "")) {
+        const item = items.find((row) => row.id === line.itemId);
+        if (!item || !isInventoryItem(item) || item.data.itemType === "Bundle") continue;
+        wanted.set(item.id, (wanted.get(item.id) ?? 0) + (Number(line.quantity) || 0));
+        if (item.data.tracking === "Serial number") {
+          for (const serial of serialList(line.serials)) {
+            const lot = lots.find((entry) => entry.itemId === item.id && entry.number.toLowerCase() === serial.toLowerCase());
+            if (!lot || lot.onHand <= 0) throw new ActionError(`${item.data.name}: serial number ${serial} isn't in stock.`);
+            if (lot.warehouse.toLowerCase() !== place.toLowerCase()) throw new ActionError(`${item.data.name}: serial number ${serial} is in ${lot.warehouse}, not ${place}.`);
+          }
+        }
+      }
+      for (const [itemId, quantity] of wanted) {
+        const available = stock.get(itemId)?.get(place) ?? 0;
+        if (quantity > available + 1e-9) throw new ActionError(`Only ${available} of ${items.find((row) => row.id === itemId)?.data.name ?? "this item"} ${available === 1 ? "is" : "are"} in ${place}. Choose another warehouse, transfer stock, or save as a draft.`);
+      }
     }
     return data;
   }

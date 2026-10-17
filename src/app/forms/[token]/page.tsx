@@ -15,5 +15,6 @@ export default async function WebFormPage({ params }: { params: Promise<{ token:
   const [settings] = await db.select().from(bookkeepingRecord)
     .where(and(eq(bookkeepingRecord.kind, "settings"), sql`${bookkeepingRecord.data}->>'webFormToken' = ${token}`)).limit(1);
   if (!settings) notFound();
-  return <WebLeadForm token={token} company={settings.data.companyName || "Us"} />;
+  const territories = (settings.data.crmTerritories ?? "").split("\n").map((line) => (line.includes(":") ? line.split(":")[0].trim() : "")).filter(Boolean);
+  return <WebLeadForm token={token} company={settings.data.companyName || "Us"} territories={territories} />;
 }

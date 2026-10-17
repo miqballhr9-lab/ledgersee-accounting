@@ -7,12 +7,13 @@ import { submitWebLead } from "@/app/webform-actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 
-const blank = { firstName: "", lastName: "", company: "", email: "", phone: "", message: "", website: "" };
+const blank = { firstName: "", lastName: "", company: "", email: "", phone: "", territory: "", message: "", website: "" };
 
 /** A simple "Contact us" form whose answers arrive in the CRM as new leads. */
-export default function WebLeadForm({ token, company }: { token: string; company: string }) {
+export default function WebLeadForm({ token, company, territories = [] }: { token: string; company: string; territories?: string[] }) {
   const [form, setForm] = useState(blank);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -49,6 +50,15 @@ export default function WebLeadForm({ token, company }: { token: string; company
           {field("company", "Company")}
           {field("phone", "Phone")}
           <div className="sm:col-span-2">{field("email", "Email", { type: "email", required: true })}</div>
+          {territories.length ? (
+            <div className="grid gap-1.5 sm:col-span-2">
+              <Label htmlFor="lead-territory">Region</Label>
+              <Select value={form.territory || null} onValueChange={(value) => setForm({ ...form, territory: String(value ?? "") })}>
+                <SelectTrigger id="lead-territory" className="w-full"><SelectValue placeholder="Choose your region" /></SelectTrigger>
+                <SelectContent>{territories.map((name) => <SelectItem key={name} value={name}>{name}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+          ) : null}
           <div className="grid gap-1.5 sm:col-span-2"><Label htmlFor="lead-message">How can we help?</Label><Textarea id="lead-message" rows={4} value={form.message} onChange={(event) => setForm({ ...form, message: event.target.value })} /></div>
           <input tabIndex={-1} autoComplete="off" aria-hidden="true" className="hidden" value={form.website} onChange={(event) => setForm({ ...form, website: event.target.value })} />
           {error ? <p className="text-sm text-destructive sm:col-span-2" role="alert">{error}</p> : null}

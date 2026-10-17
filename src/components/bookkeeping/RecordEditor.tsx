@@ -96,6 +96,7 @@ interface ExpenseEntryLine {
   category: string;
   description: string;
   amount: string;
+  taxRate?: string;
 }
 
 /** An "Item details" line on a bill, expense or supplier credit: what was bought, how many, at what cost. */
@@ -107,12 +108,13 @@ interface PurchaseItemLine {
   quantity: string;
   rate: string;
   serials?: string;
+  taxRate?: string;
 }
 
 function readPurchaseItemLines(record: BookkeepingRecord | null): PurchaseItemLine[] {
   return parseInvoiceLines(record?.data.lineItems ?? "")
     .filter((line) => line.itemId)
-    .map((line, index) => ({ id: `saved-item-${index}`, itemId: line.itemId, name: line.name, description: line.description, quantity: line.quantity, rate: line.rate, ...(line.serials ? { serials: line.serials } : {}) }));
+    .map((line, index) => ({ id: `saved-item-${index}`, itemId: line.itemId, name: line.name, description: line.description, quantity: line.quantity, rate: line.rate, ...(line.serials ? { serials: line.serials } : {}), ...(line.taxRate ? { taxRate: line.taxRate } : {}) }));
 }
 
 /** Items tracked by lot or serial number ask for them on each line. */
@@ -211,8 +213,8 @@ function readExpenseEditorLines(record: BookkeepingRecord | null): ExpenseEntryL
   // Item lines are edited under Item details; the rest are categories.
   const parsed = parseInvoiceLines(record?.data.lineItems ?? "");
   const savedLines = parsed.some((line) => line.itemId)
-    ? parsed.filter((line) => !line.itemId).map((line) => ({ category: line.name, description: line.description, amount: (Number(line.quantity) || 0) * (Number(line.rate) || 0) }))
-    : record ? expenseLinesFromData(record.data) : [];
+    ? parsed.filter((line) => !line.itemId).map((line) => ({ category: line.name, description: line.description, amount: (Number(line.quantity) || 0) * (Number(line.rate) || 0), taxRate: line.taxRate }))
+    : record ? expenseLinesFromData(record.data).map((line, index) => ({ ...line, taxRate: parsed.filter((entry) => !entry.itemId)[index]?.taxRate })) : [];
   if (!savedLines.length && parsed.some((line) => line.itemId)) return [];
   return savedLines.length
     ? savedLines.map((line, index) => ({
@@ -220,6 +222,7 @@ function readExpenseEditorLines(record: BookkeepingRecord | null): ExpenseEntryL
         category: line.category,
         description: line.description,
         amount: line.amount ? String(line.amount) : "",
+        ...(line.taxRate ? { taxRate: line.taxRate } : {}),
       }))
     : [{ id: "new-expense-line", category: "", description: "", amount: "" }];
 }
@@ -235,10 +238,11 @@ function serializeExpenseEditorLines(lines: ExpenseEntryLine[], itemLines: Purch
         description: line.description.trim(),
         quantity: "1",
         rate: line.amount.trim(),
+        ...(line.taxRate ? { taxRate: line.taxRate } : {}),
       })),
     ...itemLines
       .filter((line) => line.itemId)
-      .map((line) => ({ itemId: line.itemId, name: line.name.trim(), description: line.description.trim(), quantity: line.quantity.trim() || "1", rate: line.rate.trim(), ...(line.serials?.trim() ? { serials: line.serials.trim() } : {}) })),
+      .map((line) => ({ itemId: line.itemId, name: line.name.trim(), description: line.description.trim(), quantity: line.quantity.trim() || "1", rate: line.rate.trim(), ...(line.taxRate ? { taxRate: line.taxRate } : {}), ...(line.serials?.trim() ? { serials: line.serials.trim() } : {}) })),
   ]);
 }
 
@@ -597,7 +601,10 @@ export default function RecordEditor({ module, record, customers, vendors, items
   const invoiceTotal = Math.max(0, subtotal + taxAmount - discount);
   const expenseTotal = expenseLines.reduce((sum, line) => sum + (Number(line.amount) || 0), 0)
     + purchaseItems.reduce((sum, line) => sum + (line.itemId ? (Number(line.quantity) || 0) * (Number(line.rate) || 0) : 0), 0);
-  const expenseTaxAmount = expenseTotal * (Math.max(0, Number(values.taxRate) || 0) / 100);
+  const expenseTaxAmount = invoiceTax([
+    ...expenseLines.map((line) => ({ quantity: "1", rate: line.amount, taxRate: line.taxRate })),
+    ...purchaseItems.filter((line) => line.itemId).map((line) => ({ quantity: line.quantity, rate: line.rate, taxRate: line.taxRate })),
+  ], values.taxRate);
   const expenseGrandTotal = Math.max(0, expenseTotal + expenseTaxAmount - discount);
   const linesCurrency = values.currency || defaultCurrency || "USD";
   const hasStructuredLines = structuredLineKinds.has(module.kind);
@@ -936,6 +943,19 @@ export default function RecordEditor({ module, record, customers, vendors, items
   }
 
   const updateInvoiceLine = (lineId: string, patch: Partial<InvoiceLine>) => setInvoiceLines((current) => current.map((line) => (line.id === lineId ? { ...line, ...patch } : line)));
+  /** Each line can carry its own tax, as a mix of standard, reduced and exempt goods needs. */
+  const lineTaxSelect = (taxRate: string | undefined, onChange: (taxRate: string) => void, line: number) => (
+    <Select value={taxRate ? `rate:${taxRate}` : "default"} onValueChange={(next) => onChange(next && next !== "default" ? next.slice(5) : "")}>
+      <SelectTrigger aria-label={`Tax for line ${line}`} className={`${cellInput} !h-10 justify-between`}>
+        <SelectValue>{taxRate ? (Number(taxRate) === 0 ? "No tax" : `${taxOptions.find((tax) => Number(tax.data.rate) === Number(taxRate))?.data.name ?? "Tax"} · ${taxRate}%`) : `Default${values.taxRate ? ` · ${values.taxRate}%` : ""}`}</SelectValue>
+      </SelectTrigger>
+      <SelectContent className="min-w-56">
+        <SelectItem value="default">Default (document tax)</SelectItem>
+        <SelectItem value="rate:0">No tax</SelectItem>
+        {taxOptions.filter((tax) => Number(tax.data.rate) > 0).map((tax) => <SelectItem key={tax.id} value={`rate:${Number(tax.data.rate)}`}>{tax.data.name} · {tax.data.rate}%</SelectItem>)}
+      </SelectContent>
+    </Select>
+  );
   const updateExpenseLine = (lineId: string, patch: Partial<ExpenseEntryLine>) => setExpenseLines((current) => current.map((line) => (line.id === lineId ? { ...line, ...patch } : line)));
   const updatePurchaseItem = (lineId: string, patch: Partial<PurchaseItemLine>) => setPurchaseItems((current) => current.map((line) => (line.id === lineId ? { ...line, ...patch } : line)));
   const blankInvoiceLine = (): InvoiceLine => ({ id: crypto.randomUUID(), itemId: "", name: "", description: "", quantity: "", rate: "" });
@@ -1026,7 +1046,7 @@ export default function RecordEditor({ module, record, customers, vendors, items
                       </Select>
                       <SerialInput tracking={trackingOf(picked)} value={line.serials ?? ""} line={index + 1} onChange={(serials) => updateInvoiceLine(line.id, { serials })} />
                       {line.bundleId ? <p className="px-2.5 pb-2 text-xs text-primary">Part of bundle: {line.bundleName}</p> : null}
-                      {short ? <p className="px-2.5 pb-2 text-xs text-amber-700 dark:text-amber-400">Only {onHand?.toLocaleString()} on hand. You can still save; stock will show below zero until you receive more.</p> : null}
+                      {short ? <p className="px-2.5 pb-2 text-xs text-amber-700 dark:text-amber-400">Only {onHand?.toLocaleString()} on hand. {module.fields.some((field) => field.key === "warehouse" && field.options?.length) ? "With warehouses, a sale can only take what its warehouse holds; save it as a draft until stock arrives." : "You can still save; stock will show below zero until you receive more."}</p> : null}
                     </td>
                     <td className={`p-0 ${cellBorder}`}>
                       <Input id={`invoice-description-${line.id}`} aria-label={`Description for line ${index + 1}`} value={line.description} onChange={(event) => updateInvoiceLine(line.id, { description: event.target.value })} className={cellInput} />
@@ -1040,17 +1060,7 @@ export default function RecordEditor({ module, record, customers, vendors, items
                     <td className={`px-2.5 py-2.5 text-right font-medium tabular-nums ${cellBorder}`}>{currencyAmount((Number(line.quantity) || 0) * (Number(line.rate) || 0), moneyCurrency)}</td>
                     {hasTaxField ? (
                       <td className={`p-0 ${cellBorder}`}>
-                        {/* Each line can carry its own tax, as a mix of standard, reduced and exempt goods needs. */}
-                        <Select value={line.taxRate ? `rate:${line.taxRate}` : "default"} onValueChange={(next) => updateInvoiceLine(line.id, { taxRate: next && next !== "default" ? next.slice(5) : "" })}>
-                          <SelectTrigger aria-label={`Tax for line ${index + 1}`} className={`${cellInput} !h-10 justify-between`}>
-                            <SelectValue>{line.taxRate ? (Number(line.taxRate) === 0 ? "No tax" : `${taxOptions.find((tax) => Number(tax.data.rate) === Number(line.taxRate))?.data.name ?? "Tax"} · ${line.taxRate}%`) : `Default${values.taxRate ? ` · ${values.taxRate}%` : ""}`}</SelectValue>
-                          </SelectTrigger>
-                          <SelectContent className="min-w-56">
-                            <SelectItem value="default">Default (document tax)</SelectItem>
-                            <SelectItem value="rate:0">No tax</SelectItem>
-                            {taxOptions.filter((tax) => Number(tax.data.rate) > 0).map((tax) => <SelectItem key={tax.id} value={`rate:${Number(tax.data.rate)}`}>{tax.data.name} · {tax.data.rate}%</SelectItem>)}
-                          </SelectContent>
-                        </Select>
+                        {lineTaxSelect(line.taxRate, (taxRate) => updateInvoiceLine(line.id, { taxRate }), index + 1)}
                       </td>
                     ) : null}
                     <td className="px-1 py-1 text-center">
@@ -1081,6 +1091,7 @@ export default function RecordEditor({ module, record, customers, vendors, items
                 <th className={`min-w-60 text-left ${headCell} ${cellBorder}`}>Category</th>
                 <th className={`min-w-72 text-left ${headCell} ${cellBorder}`}>Description</th>
                 <th className={`w-40 text-right ${headCell} ${cellBorder}`}>Amount</th>
+                {hasTaxField ? <th className={`w-40 text-left ${headCell} ${cellBorder}`}>Tax</th> : null}
                 <th className="w-12"><span className="sr-only">Remove</span></th>
               </tr>
             </thead>
@@ -1109,6 +1120,7 @@ export default function RecordEditor({ module, record, customers, vendors, items
                     <td className={`p-0 ${cellBorder}`}>
                       <Input id={`expense-amount-${line.id}`} aria-label={`Amount for line ${index + 1}`} type="number" min="0.01" step="any" inputMode="decimal" value={line.amount} onChange={(event) => updateExpenseLine(line.id, { amount: event.target.value })} className={`${cellInput} text-right tabular-nums`} />
                     </td>
+                    {hasTaxField ? <td className={`p-0 ${cellBorder}`}>{lineTaxSelect(line.taxRate, (taxRate) => updateExpenseLine(line.id, { taxRate }), index + 1)}</td> : null}
                     <td className="px-1 py-1 text-center">
                       <Button type="button" variant="ghost" size="icon-sm" aria-label={`Remove expense line ${index + 1}`} className="text-muted-foreground hover:text-destructive" onClick={() => setExpenseLines((current) => current.filter((entry) => entry.id !== line.id))}><Trash2 size={14} /></Button>
                     </td>
@@ -1143,6 +1155,7 @@ export default function RecordEditor({ module, record, customers, vendors, items
                   <th className={`w-24 text-right ${headCell} ${cellBorder}`}>Qty</th>
                   <th className={`w-32 text-right ${headCell} ${cellBorder}`}>Rate</th>
                   <th className={`w-36 text-right ${headCell} ${cellBorder}`}>Amount</th>
+                  {hasTaxField ? <th className={`w-40 text-left ${headCell} ${cellBorder}`}>Tax</th> : null}
                   <th className="w-12"><span className="sr-only">Remove</span></th>
                 </tr>
               </thead>
@@ -1172,6 +1185,7 @@ export default function RecordEditor({ module, record, customers, vendors, items
                       <td className={`p-0 ${cellBorder}`}><Input id={`purchase-qty-${line.id}`} aria-label={`Quantity for item line ${index + 1}`} type="number" min="0.001" step="any" inputMode="decimal" value={line.quantity} onChange={(event) => updatePurchaseItem(line.id, { quantity: event.target.value })} className={`${cellInput} text-right tabular-nums`} /></td>
                       <td className={`p-0 ${cellBorder}`}><Input id={`purchase-rate-${line.id}`} aria-label={`Rate for item line ${index + 1}`} type="number" min="0.01" step="any" inputMode="decimal" value={line.rate} onChange={(event) => updatePurchaseItem(line.id, { rate: event.target.value })} className={`${cellInput} text-right tabular-nums`} /></td>
                       <td className={`px-2.5 py-2.5 text-right font-medium tabular-nums ${cellBorder}`}>{currencyAmount((Number(line.quantity) || 0) * (Number(line.rate) || 0), linesCurrency)}</td>
+                      {hasTaxField ? <td className={`p-0 ${cellBorder}`}>{lineTaxSelect(line.taxRate, (taxRate) => updatePurchaseItem(line.id, { taxRate }), index + 1)}</td> : null}
                       <td className="px-1 py-1 text-center"><Button type="button" variant="ghost" size="icon-sm" aria-label={`Remove item line ${index + 1}`} className="text-muted-foreground hover:text-destructive" onClick={() => setPurchaseItems((current) => current.filter((entry) => entry.id !== line.id))}><Trash2 size={14} /></Button></td>
                     </tr>
                   );

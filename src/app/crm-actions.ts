@@ -221,6 +221,12 @@ function dealRules(mod: CrmModule, data: Record<string, string>, existing: Recor
   const needsApproval = threshold > 0 && money(data.amount) >= threshold;
   if (!needsApproval && (!data.approvalStatus || data.approvalStatus === "Pending approval")) data.approvalStatus = "Not needed";
   if (needsApproval && (!data.approvalStatus || data.approvalStatus === "Not needed")) data.approvalStatus = "Pending approval";
+  // Raising the amount of an approved deal sends it back for approval.
+  if (needsApproval && existing?.approvalStatus === "Approved" && data.approvalStatus === "Approved" && money(data.amount) > money(existing.amount)) data.approvalStatus = "Pending approval";
+  // Only the approvers named in Settings may approve or reject, as Zoho's approval process.
+  const approvers = (settings.dealApprovers ?? "").split(",").map((name) => name.trim().toLowerCase()).filter(Boolean);
+  const deciding = ["Approved", "Rejected"].includes(data.approvalStatus ?? "") && data.approvalStatus !== existing?.approvalStatus;
+  if (deciding && approvers.length && !approvers.includes(actor.trim().toLowerCase())) throw new ActionError(`Only ${settings.dealApprovers} can approve or reject deals.`);
   if (data.approvalStatus === "Approved" && existing?.approvalStatus !== "Approved") data.approvedBy = actor;
   if (data.approvalStatus !== "Approved") data.approvedBy = "";
   const stageChanged = existing?.stage !== data.stage;

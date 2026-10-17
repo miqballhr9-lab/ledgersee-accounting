@@ -381,7 +381,7 @@ export default function CompanySettings({ settings, workspaceName }: CompanySett
                   <Row label="Web-to-lead form" value={saved.webFormToken ? `/forms/${saved.webFormToken}` : "Off"} />
                   <Row label="Lead assignment" value={saved.leadAssignment || "The person who adds the lead"} />
                   <Row label="Territories" value={saved.crmTerritories ? `${saved.crmTerritories.split("\n").filter(Boolean).length} territories` : "None"} />
-                  <Row label="Deal approval" value={saved.dealApprovalAmount ? `Deals of ${saved.dealApprovalAmount} or more` : "Off"} />
+                  <Row label="Deal approval" value={saved.dealApprovalAmount ? `Deals of ${saved.dealApprovalAmount} or more${saved.dealApprovers ? `, approved by ${saved.dealApprovers}` : ""}` : "Off"} />
                   <Row label="Blueprint" value={saved.dealBlueprint ? `${saved.dealBlueprint.split("\n").filter(Boolean).length} stage rules` : "Off"} />
                 </>,
                 <>
@@ -392,6 +392,7 @@ export default function CompanySettings({ settings, workspaceName }: CompanySett
                   {text("leadAssignment", "Lead assignment (round robin)", { placeholder: "e.g. Ali, Sara, Usman", help: "New leads go to whichever of these people has the fewest open leads.", wide: true })}
                   {textArea("crmTerritories", "Territories", "One per line, with its people: Punjab: Ali, Sara. A new lead in that territory goes to whichever of them has the fewest open leads.")}
                   {text("dealApprovalAmount", "Deal approval amount", { type: "number", help: "Deals of this amount or more must be approved before they're won. Leave empty for no approval.", wide: true })}
+                  {text("dealApprovers", "Deal approvers", { placeholder: "e.g. Ali, Sara", help: "Only these people can approve or reject deals. Leave empty to let anyone who can edit deals do it.", wide: true })}
                   {textArea("dealBlueprint", "Blueprint (fields needed per stage)", "One stage per line: Negotiation/Review: Next step, Amount. A deal can't move into the stage until those fields are filled in.")}
                 </>,
               )}

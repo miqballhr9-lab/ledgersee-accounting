@@ -13,6 +13,8 @@ export interface WebLeadInput {
   email: string;
   phone?: string;
   message?: string;
+  /** One of the territories in Settings, when the form offers them. */
+  territory?: string;
   /** Left empty by people; filled by bots. */
   website?: string;
 }
@@ -42,8 +44,11 @@ export async function submitWebLead(token: string, input: WebLeadInput): Promise
     await db.insert(bookkeepingRecord).values({ userId, kind: "crm-notes", data: { parentKind: "crm-leads", parentId: existing.id, title: "Web form sent again", content: message || "(no message)", author: "Web form", createdOn: now } });
     return;
   }
-  // The assignment rule in Settings decides the owner, else the business itself.
-  const people = (settings.data.leadAssignment ?? "").split(",").map((name) => name.trim()).filter(Boolean);
+  // The territory's people, else the assignment rule in Settings, decide the owner; else the business itself.
+  const territoryLines = (settings.data.crmTerritories ?? "").split("\n").filter((line) => line.includes(":"));
+  const territoryLine = territoryLines.find((line) => line.split(":")[0].trim().toLowerCase() === String(input.territory ?? "").trim().toLowerCase());
+  const territory = territoryLine?.split(":")[0].trim() ?? "";
+  const people = (territoryLine?.split(":")[1] ?? settings.data.leadAssignment ?? "").split(",").map((name) => name.trim()).filter(Boolean);
   const openCount = (name: string) => leads.filter((row) => row.data.owner === name && !["Converted", "Junk Lead", "Lost Lead", "Not Qualified"].includes(row.data.leadStatus ?? "")).length;
   const owner = people.length ? people.reduce((best, name) => (openCount(name) < openCount(best) ? name : best), people[0]) : settings.data.companyName || "";
   const phone = String(input.phone ?? "").trim().slice(0, 40);
@@ -56,7 +61,7 @@ export async function submitWebLead(token: string, input: WebLeadInput): Promise
     kind: "crm-leads",
     data: {
       firstName, lastName, fullName: [firstName, lastName].filter(Boolean).join(" "), company, email, phone,
-      leadSource: "Web Form", leadStatus: "Not Contacted", owner, description: message, leadScore: String(score),
+      leadSource: "Web Form", leadStatus: "Not Contacted", owner, ...(territory ? { territory } : {}), description: message, leadScore: String(score),
       history: JSON.stringify([{ at: now, by: "Web form", text: "Lead created from the web form" }]),
     },
   });
