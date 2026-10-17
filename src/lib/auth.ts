@@ -26,6 +26,8 @@ import { ActionError } from "@/lib/action-error";
 import { currentScheduledUser } from "@/lib/run-as-user";
 import { currentRoleOverride } from "@/lib/role-override";
 import { canAccess, canReadKind, canWriteKind, isRole, type Role } from "@/lib/permissions";
+import { billingAccess, type BillingAccess } from "@/lib/billing";
+import { featureForKind, featureLabels, planFor } from "@/lib/plans";
 
 /**
  * Which origin this app answers on — resolved PER REQUEST, not pinned at build.
@@ -316,6 +318,8 @@ export interface WorkspaceUser extends SignedInUser {
   isOwner: boolean;
   /** The owner's name, for "Business workspace" and document headers. */
   workspaceName: string;
+  /** What the workspace's plan allows right now. */
+  access: BillingAccess;
 }
 
 /** The active membership of a signed-in person in someone else's workspace, if any. */
@@ -331,14 +335,14 @@ const membershipFor = cache(async function membershipFor(userId: string) {
     ))
     .limit(1);
   if (!membership || membership.userId === userId) return null;
-  const [owner] = await db.select({ name: schema.user.name }).from(schema.user).where(eq(schema.user.id, membership.userId)).limit(1);
-  return { ownerId: membership.userId, role: isRole(membership.data.role) ? membership.data.role : "Viewer" as Role, ownerName: owner?.name ?? "Business" };
+  const [owner] = await db.select({ name: schema.user.name, email: schema.user.email }).from(schema.user).where(eq(schema.user.id, membership.userId)).limit(1);
+  return { ownerId: membership.userId, role: isRole(membership.data.role) ? membership.data.role : "Viewer" as Role, ownerName: owner?.name ?? "Business", ownerEmail: owner?.email ?? "" };
 });
 
 async function asWorkspaceUser(signedIn: SignedInUser): Promise<WorkspaceUser> {
   const membership = await membershipFor(signedIn.id);
-  if (!membership) return { ...signedIn, actorId: signedIn.id, ownerId: signedIn.id, role: "Admin", isOwner: true, workspaceName: signedIn.name };
-  return { ...signedIn, id: membership.ownerId, actorId: signedIn.id, ownerId: membership.ownerId, role: membership.role, isOwner: false, workspaceName: membership.ownerName };
+  if (!membership) return { ...signedIn, actorId: signedIn.id, ownerId: signedIn.id, role: "Admin", isOwner: true, workspaceName: signedIn.name, access: await billingAccess(signedIn.id, signedIn.email) };
+  return { ...signedIn, id: membership.ownerId, actorId: signedIn.id, ownerId: membership.ownerId, role: membership.role, isOwner: false, workspaceName: membership.ownerName, access: await billingAccess(membership.ownerId, membership.ownerEmail) };
 }
 
 /** The signed-in person in their workspace, or null. For layouts and pages that redirect. */
@@ -359,7 +363,7 @@ export async function getWorkspaceUser(): Promise<WorkspaceUser | null> {
 export async function requireUser(): Promise<WorkspaceUser> {
   // Set only inside the scheduled automation job; never for a browser request.
   const scheduled = currentScheduledUser();
-  if (scheduled) return { ...scheduled, actorId: scheduled.id, ownerId: scheduled.id, role: "Admin", isOwner: true, workspaceName: scheduled.name };
+  if (scheduled) return { ...scheduled, actorId: scheduled.id, ownerId: scheduled.id, role: "Admin", isOwner: true, workspaceName: scheduled.name, access: await billingAccess(scheduled.id, scheduled.email) };
   const user = await getUser();
   // The message is already a sentence worth showing, because it will be: a server
   // action's thrown message is what reaches the browser. Keep it that way — a code
@@ -373,6 +377,14 @@ export async function requireUser(): Promise<WorkspaceUser> {
 /** Throws unless the signed-in person's role may change records of this kind. */
 export function assertCanWrite(me: WorkspaceUser, kind: string) {
   if (!canWriteKind(me.role, kind)) throw new ActionError("Your role doesn’t allow changing this. Ask an Admin in your business.");
+  assertPlanAllows(me, kind);
+}
+
+/** Throws when the plan has run out (records are read-only) or doesn't include this part of the product. */
+export function assertPlanAllows(me: WorkspaceUser, kind: string) {
+  if (me.access.locked) throw new ActionError(me.access.status === "trial_ended" ? "Your free trial has ended. Choose a plan in Billing to keep adding and changing records." : "Your subscription isn’t active. Update it in Billing to keep adding and changing records.");
+  const feature = featureForKind(kind);
+  if (!me.access.features.includes(feature)) throw new ActionError(`${featureLabels[feature]} isn’t in your plan. Upgrade to ${planFor(feature).name} in Billing to use it.`);
 }
 
 /** Throws unless the signed-in person's role may open records of this kind. */

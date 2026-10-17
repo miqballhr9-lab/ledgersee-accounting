@@ -289,7 +289,8 @@ export async function listAllBookkeepingRecords(): Promise<BookkeepingRecord[]> 
     .where(eq(bookkeepingRecord.userId, me.id))
     .orderBy(desc(bookkeepingRecord.updatedAt));
 
-  return rows.filter((row) => canReadKind(me.role, row.kind)).map(serializeRow);
+  // Only record kinds the app knows; the billing record stays out of reports and exports.
+  return rows.filter((row) => isRecordKind(row.kind) && canReadKind(me.role, row.kind)).map(serializeRow);
 }
 
 /** Logs a payment against an invoice, bill, expense or salary, with the amount of the payment just recorded. */

@@ -5,6 +5,7 @@ import { db } from "@/db";
 import { bookkeepingRecord } from "@/db/schema";
 import InvoicePrintButton from "@/components/bookkeeping/InvoicePrintButton";
 import { requireUser } from "@/lib/auth";
+import { requireFeature } from "@/lib/plan-gate";
 
 interface PayrollSlipPageProps {
   params: Promise<{ id: string }>;
@@ -19,6 +20,7 @@ function formatAmount(value: string | undefined, currency: string) {
 }
 
 export default async function PayrollSlipPage({ params }: PayrollSlipPageProps) {
+  await requireFeature("hr");
   const me = await requireUser();
   const { id } = await params;
   const [records, settings] = await Promise.all([

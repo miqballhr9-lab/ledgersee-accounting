@@ -700,6 +700,7 @@ export const navigationGroups: NavigationGroup[] = [
     items: [
       { slug: "team-members", label: "Users & roles", icon: "ShieldCheck" },
       { slug: "automation", label: "Automation", icon: "Bot" },
+      { slug: "billing", label: "Plan and billing", icon: "CreditCard" },
       { slug: "settings", label: "Settings", icon: "Settings2" },
     ],
   },

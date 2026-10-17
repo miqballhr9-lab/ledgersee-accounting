@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import CrmWorkspace from "@/components/crm/CrmWorkspace";
 import { crmPages, type CrmPage } from "@/lib/crm-config";
 import { loadCrmData } from "@/lib/crm-data";
+import { requireFeature } from "@/lib/plan-gate";
 
 interface CrmPageProps {
   params: Promise<{ page: string }>;
@@ -20,6 +21,7 @@ export async function generateMetadata({ params }: CrmPageProps): Promise<Metada
 }
 
 export default async function CrmSectionPage({ params, searchParams }: CrmPageProps) {
+  await requireFeature("crm");
   const { page } = await params;
   if (!isCrmPage(page)) notFound();
   const { open } = await searchParams;

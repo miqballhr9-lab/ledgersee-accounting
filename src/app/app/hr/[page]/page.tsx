@@ -11,6 +11,7 @@ import { loadHrData } from "@/lib/hr-data";
 import { leaveUsed, timeOffAllowance, type HrContext } from "@/lib/hr-rules";
 import { isToApprove } from "@/lib/hr-status";
 import { canWriteKind } from "@/lib/permissions";
+import { requireFeature } from "@/lib/plan-gate";
 
 interface HrPageProps {
   params: Promise<{ page: string }>;
@@ -30,6 +31,7 @@ const renamed: Record<string, string> = {
 };
 
 export default async function HrSectionPage({ params, searchParams }: HrPageProps) {
+  await requireFeature("hr");
   const { page } = await params;
   if (renamed[page]) redirect(`/app/hr/${renamed[page]}`);
   if (page === "my-time-off") return <MyTimeOffPage />;
