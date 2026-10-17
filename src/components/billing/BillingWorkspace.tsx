@@ -116,7 +116,7 @@ export default function BillingWorkspace({ enabled, paymentsReady, canManage, ac
         <div className="inline-flex rounded-md border border-border bg-card p-0.5" role="group" aria-label="Billing period">
           {(["month", "year"] as const).map((value) => (
             <Button key={value} type="button" size="sm" variant={interval === value ? "secondary" : "ghost"} aria-pressed={interval === value} onClick={() => setInterval(value)}>
-              {value === "month" ? "Monthly" : "Yearly · 2 months free"}
+              {value === "month" ? "Monthly" : "Yearly"}
             </Button>
           ))}
         </div>
@@ -132,6 +132,7 @@ export default function BillingWorkspace({ enabled, paymentsReady, canManage, ac
                 </div>
                 <p className="mt-1 text-sm text-muted-foreground">{plan.description}</p>
                 <p className="mt-4"><span className="text-3xl font-semibold tabular-nums">${planPrice(plan, interval)}</span><span className="text-sm text-muted-foreground"> / {interval === "year" ? "year" : "month"}</span></p>
+                {interval === "year" && plan.monthly * 12 > plan.yearly ? <p className="text-xs font-medium text-primary">Save ${plan.monthly * 12 - plan.yearly} a year</p> : null}
                 <ul className="mt-4 flex-1 space-y-2 text-sm">
                   {plan.highlights.map((line) => <li key={line} className="flex gap-2"><Check size={16} className="mt-0.5 shrink-0 text-primary" />{line}</li>)}
                 </ul>

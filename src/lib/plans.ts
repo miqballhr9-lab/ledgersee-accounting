@@ -1,6 +1,5 @@
 /**
- * Subscription plans. Prices are in US dollars; yearly is ten months' price
- * (two months free). Change them here: Stripe Checkout charges whatever this
+ * Subscription plans. Prices are in US dollars, monthly and yearly. Change them here: Stripe Checkout charges whatever this
  * file says, so no prices need setting up in Stripe.
  */
 
@@ -27,29 +26,29 @@ export const plans: Plan[] = [
   {
     key: "starter",
     name: "Starter",
-    description: "Bookkeeping for one person running the business.",
-    monthly: 9,
-    yearly: 90,
-    users: 1,
+    description: "Bookkeeping for a small business.",
+    monthly: 5,
+    yearly: 70,
+    users: 3,
     features: ["accounting"],
-    highlights: ["Sales, purchases and banking", "Chart of accounts and journals", "Tax returns and all accounting reports", "1 user"],
+    highlights: ["Sales, purchases and banking", "Chart of accounts and journals", "Tax returns and all accounting reports", "Up to 3 users"],
   },
   {
     key: "business",
     name: "Business",
     description: "For a growing team that sells products.",
-    monthly: 29,
-    yearly: 290,
-    users: 5,
+    monthly: 15,
+    yearly: 239,
+    users: 6,
     features: ["accounting", "inventory", "crm"],
-    highlights: ["Everything in Starter", "Inventory, warehouses, lots and serial numbers", "CRM: leads, deals, campaigns and cases", "Up to 5 users"],
+    highlights: ["Everything in Starter", "Inventory, warehouses, lots and serial numbers", "CRM: leads, deals, campaigns and cases", "Up to 6 users"],
   },
   {
     key: "enterprise",
     name: "Enterprise",
     description: "The whole ERP, with HR and payroll.",
-    monthly: 79,
-    yearly: 790,
+    monthly: 69,
+    yearly: 690,
     users: Number.POSITIVE_INFINITY,
     features: ["accounting", "inventory", "crm", "hr"],
     highlights: ["Everything in Business", "HRM: employees, time off, attendance, recruitment", "Payroll with salary slips", "Unlimited users"],
