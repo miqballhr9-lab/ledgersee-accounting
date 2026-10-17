@@ -99,7 +99,6 @@ export async function inviteMember(input: InviteInput): Promise<{ member: Bookke
   const existing = rows.find((row) => row.data.email?.trim().toLowerCase() === email);
   if (existing?.data.status === "Active") throw new ActionError(`${existing.data.name || email} is already a member. Change their role from the list.`);
   // The plan sets how many people can sign in, the owner included.
-  if (me.access.locked) throw new ActionError("Your subscription isn’t active. Choose a plan in Billing before inviting people.");
   const seats = rows.filter((row) => row.id !== existing?.id && row.data.enabled !== "false" && ["Active", "Invited"].includes(row.data.status ?? "")).length + 1;
   if (seats + 1 > me.access.users) throw new ActionError(`Your ${planByKey(me.access.plan)?.name ?? ""} plan includes ${me.access.users} ${me.access.users === 1 ? "user" : "users"}. Upgrade in Billing to invite more people.`);
   const token = randomBytes(24).toString("base64url");

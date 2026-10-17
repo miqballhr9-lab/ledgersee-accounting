@@ -71,7 +71,7 @@ export default function BillingWorkspace({ enabled, paymentsReady, canManage, ac
       <section>
         <p className="text-xs font-medium uppercase tracking-[0.12em] text-primary">Organization / Billing</p>
         <h1 className="mt-1 text-[26px] font-semibold tracking-tight sm:text-3xl">Plan and billing</h1>
-        <p className="mt-1.5 max-w-2xl text-sm text-muted-foreground">Choose the plan for your business. Every business starts with {TRIAL_MONTHS} months free, with everything included, and you can change or cancel at any time.</p>
+        <p className="mt-1.5 max-w-2xl text-sm text-muted-foreground">Choose the plan for your business. Every business starts with {TRIAL_MONTHS} months free with everything included, then keeps the Free plan for ever unless it upgrades. Change or cancel at any time.</p>
       </section>
 
       {notice === "success" ? <p role="status" className="rounded-lg border border-primary/30 bg-primary/5 px-4 py-3 text-sm">Thank you! Your payment went through. Your plan updates here within a minute.</p> : null}
@@ -88,12 +88,12 @@ export default function BillingWorkspace({ enabled, paymentsReady, canManage, ac
           <div>
             <p className="text-xs text-muted-foreground">Current plan</p>
             <p className="mt-1 flex items-center gap-2 text-lg font-semibold">
-              {access.status === "trial_ended" ? "Free trial" : access.status === "trialing" && !subscribed ? "Free trial (all features)" : plans.find((plan) => plan.key === access.plan)?.name}
-              <Badge variant={access.locked ? "destructive" : "secondary"}>{statusText[access.status]}</Badge>
+              {access.status === "trialing" && !subscribed ? "Free trial (all features)" : plans.find((plan) => plan.key === access.plan)?.name}
+              <Badge variant={access.locked ? "destructive" : "secondary"}>{access.plan === "free" ? "Free for ever" : statusText[access.status]}</Badge>
             </p>
             <p className="mt-1 text-sm text-muted-foreground">
               {access.status === "trialing" ? `${daysLeft} ${daysLeft === 1 ? "day" : "days"} left, until ${formatDate(access.trialEndsAt)}.`
-                : access.locked ? "Your records are read-only. Choose a plan to keep working; nothing has been deleted."
+                : access.plan === "free" ? "Accounting for one user. Upgrade for inventory, CRM, HR and payroll, and for your team; nothing has been deleted."
                 : access.status === "past_due" ? "The last payment didn't go through. Update your card to keep your plan."
                 : access.cancelAtPeriodEnd ? `Cancelled; it stays active until ${formatDate(access.currentPeriodEnd)}.`
                 : access.currentPeriodEnd ? `Renews on ${formatDate(access.currentPeriodEnd)}, billed ${access.interval === "year" ? "yearly" : "monthly"}.` : ""}
@@ -120,9 +120,10 @@ export default function BillingWorkspace({ enabled, paymentsReady, canManage, ac
             </Button>
           ))}
         </div>
-        <div className="grid gap-4 lg:grid-cols-3">
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           {plans.map((plan) => {
-            const current = enabled && subscribed && access.plan === plan.key && access.interval === interval;
+            const isFree = plan.monthly <= 0;
+            const current = enabled && (isFree ? access.plan === "free" : subscribed && access.plan === plan.key && access.interval === interval);
             const highlight = upgrade ? planFor(upgrade).key === plan.key : plan.key === "business";
             return (
               <article key={plan.key} className={`flex flex-col rounded-lg border bg-card p-5 ${highlight ? "border-primary shadow-sm" : "border-border"}`}>
@@ -131,11 +132,22 @@ export default function BillingWorkspace({ enabled, paymentsReady, canManage, ac
                   {highlight ? <Badge>{upgrade ? "Needed" : "Most popular"}</Badge> : null}
                 </div>
                 <p className="mt-1 text-sm text-muted-foreground">{plan.description}</p>
-                <p className="mt-4"><span className="text-3xl font-semibold tabular-nums">${formatPlanPrice(planPrice(plan, interval))}</span><span className="text-sm text-muted-foreground"> / {interval === "year" ? "year" : "month"}</span></p>
-                {interval === "year" && plan.monthly * 12 > plan.yearly ? <p className="text-xs font-medium text-primary">Save ${formatPlanPrice(plan.monthly * 12 - plan.yearly)} a year</p> : null}
+                <p className="mt-4"><span className="text-3xl font-semibold tabular-nums">${formatPlanPrice(planPrice(plan, interval))}</span><span className="text-sm text-muted-foreground">{isFree ? " for ever" : ` / ${interval === "year" ? "year" : "month"}`}</span></p>
+                {!isFree && interval === "year" && plan.monthly * 12 > plan.yearly ? <p className="text-xs font-medium text-primary">Save ${formatPlanPrice(plan.monthly * 12 - plan.yearly)} a year</p> : null}
                 <ul className="mt-4 flex-1 space-y-2 text-sm">
                   {plan.highlights.map((line) => <li key={line} className="flex gap-2"><Check size={16} className="mt-0.5 shrink-0 text-primary" />{line}</li>)}
                 </ul>
+                {isFree ? (
+                  <Button
+                    type="button"
+                    className="mt-5 w-full"
+                    variant="outline"
+                    disabled={!enabled || !canManage || current || !subscribed || access.cancelAtPeriodEnd || Boolean(busy)}
+                    onClick={() => { if (window.confirm("Move to the Free plan? Your paid plan stays until the end of the period you've paid for, then only accounting for one user is included.")) void run("cancel", cancelSubscription, "You'll move to the Free plan at the end of this period."); }}
+                  >
+                    {current ? "Your plan" : subscribed && !access.cancelAtPeriodEnd ? "Switch to Free" : "Included after the trial"}
+                  </Button>
+                ) : (
                 <Button
                   type="button"
                   className="mt-5 w-full"
@@ -146,6 +158,7 @@ export default function BillingWorkspace({ enabled, paymentsReady, canManage, ac
                 >
                   {busy === plan.key ? "Opening…" : current ? "Your plan" : subscribed ? `Switch to ${plan.name}` : `Choose ${plan.name}`}
                 </Button>
+                )}
               </article>
             );
           })}

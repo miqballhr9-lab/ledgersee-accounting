@@ -5,7 +5,7 @@
  */
 
 export type Feature = "accounting" | "inventory" | "crm" | "hr";
-export type PlanKey = "starter" | "business" | "enterprise";
+export type PlanKey = "free" | "starter" | "business" | "enterprise";
 export type BillingInterval = "month" | "year";
 
 export interface Plan {
@@ -25,6 +25,16 @@ export const TRIAL_MONTHS = 6;
 export const BILLING_CURRENCY = "usd";
 
 export const plans: Plan[] = [
+  {
+    key: "free",
+    name: "Free",
+    description: "Accounting for one person, free for ever.",
+    monthly: 0,
+    yearly: 0,
+    users: 1,
+    features: ["accounting"],
+    highlights: ["Sales, purchases and banking", "Chart of accounts and journals", "Tax returns and all accounting reports", "1 user (the owner)"],
+  },
   {
     key: "starter",
     name: "Starter",
@@ -61,8 +71,11 @@ export const planByKey = (key: string | undefined) => plans.find((plan) => plan.
 
 export const featureLabels: Record<Feature, string> = { accounting: "Accounting", inventory: "Inventory", crm: "CRM", hr: "HR and payroll" };
 
-/** The cheapest plan that includes a feature, for "upgrade to …" messages. */
-export const planFor = (feature: Feature) => plans.find((plan) => plan.features.includes(feature)) ?? plans[plans.length - 1];
+/** The cheapest paid plan that includes a feature, for "upgrade to …" messages. */
+export const planFor = (feature: Feature) => plans.find((plan) => plan.monthly > 0 && plan.features.includes(feature)) ?? plans[plans.length - 1];
+
+/** Plans that are paid for through Stripe. */
+export const paidPlans = plans.filter((plan) => plan.monthly > 0);
 
 /** Which part of the product a kind of record belongs to. */
 export function featureForKind(kind: string): Feature {

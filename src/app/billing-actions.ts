@@ -24,6 +24,8 @@ export async function choosePlan(planKey: string, interval: BillingInterval): Pr
   const me = await owner();
   const plan = planByKey(planKey);
   if (!plan || !["month", "year"].includes(interval)) throw new ActionError("Choose a plan.");
+  // The Free plan needs no payment: cancelling a paid plan moves the business to it at the end of the period.
+  if (plan.monthly <= 0) throw new ActionError("The Free plan needs no payment. Cancel your subscription to move to it at the end of the period.");
   const row = await subscriptionFor(me.ownerId);
   const data = row.data;
   const product = await ensureStripeProduct(plan.key);

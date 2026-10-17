@@ -342,7 +342,9 @@ const membershipFor = cache(async function membershipFor(userId: string) {
 async function asWorkspaceUser(signedIn: SignedInUser): Promise<WorkspaceUser> {
   const membership = await membershipFor(signedIn.id);
   if (!membership) return { ...signedIn, actorId: signedIn.id, ownerId: signedIn.id, role: "Admin", isOwner: true, workspaceName: signedIn.name, access: await billingAccess(signedIn.id, signedIn.email) };
-  return { ...signedIn, id: membership.ownerId, actorId: signedIn.id, ownerId: membership.ownerId, role: membership.role, isOwner: false, workspaceName: membership.ownerName, access: await billingAccess(membership.ownerId, membership.ownerEmail) };
+  // The Free plan is for the owner alone; team members can still look, not change anything.
+  const access = await billingAccess(membership.ownerId, membership.ownerEmail);
+  return { ...signedIn, id: membership.ownerId, actorId: signedIn.id, ownerId: membership.ownerId, role: membership.role, isOwner: false, workspaceName: membership.ownerName, access: access.enabled && access.plan === "free" ? { ...access, locked: true } : access };
 }
 
 /** The signed-in person in their workspace, or null. For layouts and pages that redirect. */
@@ -382,7 +384,7 @@ export function assertCanWrite(me: WorkspaceUser, kind: string) {
 
 /** Throws when the plan has run out (records are read-only) or doesn't include this part of the product. */
 export function assertPlanAllows(me: WorkspaceUser, kind: string) {
-  if (me.access.locked) throw new ActionError(me.access.status === "trial_ended" ? "Your free trial has ended. Choose a plan in Billing to keep adding and changing records." : "Your subscription isn’t active. Update it in Billing to keep adding and changing records.");
+  if (me.access.locked) throw new ActionError("Your business is on the Free plan, which is for the owner only. Ask the owner to upgrade so the team can make changes.");
   const feature = featureForKind(kind);
   if (!me.access.features.includes(feature)) throw new ActionError(`${featureLabels[feature]} isn’t in your plan. Upgrade to ${planFor(feature).name} in Billing to use it.`);
 }

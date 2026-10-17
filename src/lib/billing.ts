@@ -25,7 +25,7 @@ export const billingEnabled = () => Boolean(process.env.STRIPE_SECRET_KEY);
 export interface BillingAccess {
   /** False when Stripe isn't set up, or the workspace is on the free list. */
   enabled: boolean;
-  /** The trial or subscription has run out: records can be read and exported, not changed. */
+  /** Records can be read and exported, not changed: a team member's workspace is on the owner-only Free plan. */
   locked: boolean;
   plan: PlanKey;
   status: "trialing" | "active" | "past_due" | "canceled" | "trial_ended" | "free";
@@ -70,18 +70,20 @@ export const billingAccess = cache(async function billingAccess(ownerId: string,
   const plan = planByKey(data.plan) ?? plans[plans.length - 1];
   const base = { ...open, enabled: true, plan: plan.key, trialEndsAt: data.trialEndsAt ?? "", currentPeriodEnd: data.currentPeriodEnd ?? "", cancelAtPeriodEnd: data.cancelAtPeriodEnd === "true", interval: data.interval ?? "" };
   const paidUp = { ...base, features: plan.features, users: plan.users };
-  const locked = { ...base, locked: true, features: [] as Feature[], users: plan.users };
+  // When a trial or paid plan runs out, the business carries on with the Free plan; nothing is locked or deleted.
+  const free = planByKey("free")!;
+  const onFree = { ...base, plan: free.key, features: free.features, users: free.users, cancelAtPeriodEnd: false, interval: "" };
   const before = (date: string | undefined, extraDays = 0) => Boolean(date) && now < Date.parse(date!) + extraDays * 86_400_000;
   switch (data.status) {
     case "active":
       return { ...paidUp, status: "active" };
     case "trialing":
       // A trial started at checkout is on the chosen plan; the free trial is everything.
-      return before(data.trialEndsAt) ? { ...(data.stripeSubscriptionId ? paidUp : { ...base, features: allFeatures }), status: "trialing" } : { ...locked, status: "trial_ended" };
+      return before(data.trialEndsAt) ? { ...(data.stripeSubscriptionId ? paidUp : { ...base, features: allFeatures }), status: "trialing" } : { ...onFree, status: "trial_ended" };
     case "past_due":
-      return before(data.pastDueSince, GRACE_DAYS) ? { ...paidUp, status: "past_due" } : { ...locked, status: "past_due" };
+      return before(data.pastDueSince, GRACE_DAYS) ? { ...paidUp, status: "past_due" } : { ...onFree, status: "past_due" };
     default:
-      return before(data.currentPeriodEnd) ? { ...paidUp, status: "canceled" } : { ...locked, status: data.status === "canceled" ? "canceled" : "trial_ended" };
+      return before(data.currentPeriodEnd) ? { ...paidUp, status: "canceled" } : { ...onFree, status: data.status === "canceled" ? "canceled" : "trial_ended" };
   }
 });
 
