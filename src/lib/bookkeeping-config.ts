@@ -71,6 +71,7 @@ export const modules: readonly ModuleDefinition[] = [
       { key: "shippingCountry", label: "Country" },
       { key: "taxId", label: "Tax ID", section: "Tax and payment" },
       { key: "paymentTerms", label: "Payment terms", type: "select", options: ["Due on receipt", "15 days", "30 days", "60 days"] },
+      { key: "priceAdjustment", label: "Price rule (%)", type: "number", help: "Changes every product and service price for this customer, e.g. -10 for 10% off (wholesale) or 5 for 5% more." },
       { key: "openingBalance", label: "Opening balance", type: "number", section: "Opening balance", placeholder: "0.00" },
       { key: "openingBalanceDate", label: "As of", type: "date" },
       { key: "notes", label: "Notes", type: "textarea", section: "Notes and attachments" },
@@ -645,4 +646,22 @@ export function salesReceiptModule(): ModuleDefinition | undefined {
 
 export function moduleBySlug(slug: string): ModuleDefinition | undefined {
   return modules.find((module) => module.slug === slug);
+}
+
+/** Kinds that take custom fields (Settings > Advanced), as in QuickBooks. */
+export const customFieldKinds = ["customers", "vendors", "items", "invoices", "estimates", "sales-orders", "credit-notes", "purchase-orders"] as const;
+
+/** The settings key holding a kind's custom field names, comma separated. */
+export function customFieldSettingKey(kind: string) {
+  return `customFields${kind.split("-").map((part) => part[0].toUpperCase() + part.slice(1)).join("")}`;
+}
+
+/** A module with the business's custom fields added after its own fields. */
+export function withCustomFields(module: ModuleDefinition, settings: Record<string, string> | undefined): ModuleDefinition {
+  if (!customFieldKinds.includes(module.kind as (typeof customFieldKinds)[number])) return module;
+  const names = (settings?.[customFieldSettingKey(module.kind)] ?? "").split(",").map((name) => name.trim()).filter(Boolean).slice(0, 10);
+  if (!names.length) return module;
+  const extra: FormField[] = names.map((label) => ({ key: `cf${label.replace(/[^a-zA-Z0-9]+/g, " ").trim().split(/\s+/).map((word) => word[0].toUpperCase() + word.slice(1)).join("").slice(0, 40) || "Field"}`, label, help: "Custom field" }));
+  const known = new Set(module.fields.map((field) => field.key));
+  return { ...module, fields: [...module.fields, ...extra.filter((field) => !known.has(field.key))] };
 }

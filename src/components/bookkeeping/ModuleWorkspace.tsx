@@ -37,7 +37,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { navigationGroups, type ModuleDefinition } from "@/lib/bookkeeping-config";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
 import { formatCustomerAddress } from "@/lib/customer-utils";
-import { dueDateForTerms } from "@/lib/invoice-utils";
+import { currencyAmount, dueDateForTerms } from "@/lib/invoice-utils";
 import { paymentAccountLabel, paymentAccountType, receivingAccountType } from "@/lib/payment-accounts";
 import { budgetActualRecords, recordsWithinBudgetDates, type BudgetLine } from "@/lib/budget-utils";
 import JournalEntryEditor from "@/components/bookkeeping/JournalEntryEditor";
@@ -60,6 +60,8 @@ interface ModuleWorkspaceProps {
   items: BookkeepingRecord[];
   defaultCurrency: string;
   sourceFilter?: { startDate: string; endDate: string; budgetHead: string };
+  /** A customer's or supplier's documents and payments, for their page. */
+  related?: BookkeepingRecord[];
 }
 
 const DEFAULT_PAGE_SIZE = 10;
@@ -266,7 +268,57 @@ function formatCurrency(value: number, currency: string) {
   }
 }
 
-export default function ModuleWorkspace({ module, records: initialRecords, customers, vendors, employeeNames = [], accounts, items, defaultCurrency, sourceFilter }: ModuleWorkspaceProps) {
+/** QuickBooks' customer and supplier centre: balances and every transaction with them. */
+function partyCentre(kind: "customers" | "vendors", party: BookkeepingRecord, related: BookkeepingRecord[], currency: string) {
+  const name = (party.data.name ?? "").trim().toLowerCase();
+  const isTheirs = (data: Record<string, string>) => {
+    const value = (kind === "customers" ? data.customer : data.vendor || data.payee) ?? "";
+    return data.customerId === party.id || data.vendorId === party.id || data.openingBalanceFor === party.id || (Boolean(name) && value.trim().toLowerCase() === name);
+  };
+  const today = new Date().toISOString().slice(0, 10);
+  const docs = related.filter((record) => record.kind !== "payments" && isTheirs(record.data));
+  const docIds = new Set(docs.map((doc) => doc.id));
+  const payments = related.filter((record) => record.kind === "payments" && docIds.has(record.data.invoiceId || record.data.billId || record.data.expenseId || ""));
+  const balance = (data: Record<string, string>) => Math.max(0, Number(data.amount || 0) - Number(data.paidAmount || 0) - Number(data.creditApplied || 0));
+  const openDocs = docs.filter((doc) => (doc.kind === "invoices" || doc.kind === "bills") && !["Draft", "Void", "Cancelled", "Paid", "Pending approval"].includes(doc.data.status ?? ""));
+  const open = openDocs.reduce((sum, doc) => sum + balance(doc.data), 0);
+  const overdue = openDocs.filter((doc) => doc.data.dueDate && doc.data.dueDate < today).reduce((sum, doc) => sum + balance(doc.data), 0);
+  const typeOf = (record: BookkeepingRecord) => ({ invoices: record.data.docType || "Invoice", "credit-notes": "Credit note", estimates: "Estimate", bills: "Bill", expenses: record.data.docType || "Expense", "supplier-credits": "Supplier credit", payments: kind === "customers" ? "Payment" : "Bill payment" } as Record<string, string>)[record.kind] ?? record.kind;
+  const dateOf = (data: Record<string, string>) => data.issueDate || data.billDate || data.expenseDate || data.paymentDate || data.date || "";
+  const numberOf = (data: Record<string, string>) => data.invoiceNumber || data.billNumber || data.creditNumber || data.estimateNumber || data.referenceNumber || "";
+  const rows = [...docs, ...payments].sort((a, b) => dateOf(b.data).localeCompare(dateOf(a.data))).slice(0, 50);
+  const money = (value: number) => currencyAmount(value, currency);
+  const page = (record: BookkeepingRecord) => (record.kind === "payments" ? (kind === "customers" ? `/app/invoices?open=${record.data.invoiceId}` : `/app/bills?open=${record.data.billId || record.data.expenseId}`) : `/app/${record.kind}?open=${record.id}`);
+  return {
+    stats: [["Open balance", money(open)], ["Overdue", money(overdue)], ["Transactions", String(docs.length + payments.length)]] as Array<[string, string]>,
+    children: (
+      <section className="rounded-lg border border-border">
+        <h3 className="border-b border-border px-4 py-2.5 text-sm font-semibold">Transactions</h3>
+        {rows.length ? (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[520px] text-sm">
+              <thead><tr className="border-b border-border text-left text-xs text-muted-foreground"><th className="px-4 py-2 font-medium">Date</th><th className="px-4 py-2 font-medium">Type</th><th className="px-4 py-2 font-medium">No.</th><th className="px-4 py-2 text-right font-medium">Amount</th><th className="px-4 py-2 text-right font-medium">Open</th><th className="px-4 py-2 font-medium">Status</th></tr></thead>
+              <tbody>
+                {rows.map((record) => (
+                  <tr key={record.id} className="border-b border-border last:border-0">
+                    <td className="px-4 py-2 tabular-nums">{dateOf(record.data)}</td>
+                    <td className="px-4 py-2"><a href={page(record)} className="text-primary hover:underline">{typeOf(record)}</a></td>
+                    <td className="px-4 py-2">{numberOf(record.data)}</td>
+                    <td className="px-4 py-2 text-right tabular-nums">{money(Number(record.data.amount || 0))}</td>
+                    <td className="px-4 py-2 text-right tabular-nums">{record.kind === "invoices" || record.kind === "bills" ? money(balance(record.data)) : "—"}</td>
+                    <td className="px-4 py-2">{record.kind === "payments" ? "Received" : record.data.status || "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : <p className="px-4 py-5 text-sm text-muted-foreground">No transactions yet.</p>}
+      </section>
+    ),
+  };
+}
+
+export default function ModuleWorkspace({ module, records: initialRecords, customers, vendors, employeeNames = [], accounts, items, defaultCurrency, sourceFilter, related = [] }: ModuleWorkspaceProps) {
   const router = useRouter();
   const [records, setRecords] = useState(initialRecords);
   const [search, setSearch] = useState("");
@@ -1061,6 +1113,7 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
         record={detailRecord}
         currency={currency}
         onClose={() => setDetailId(null)}
+        {...(detailRecord && (module.kind === "customers" || module.kind === "vendors") ? partyCentre(module.kind, detailRecord, related, currency) : {})}
         actions={detailRecord ? recordActions(module, detailRecord, (kind, record) => void handleAction(kind, record), {
           onEdit: () => { setDetailId(null); openEditRecord(detailRecord); },
           onDelete: () => { setDetailId(null); void handleDelete(detailRecord); },

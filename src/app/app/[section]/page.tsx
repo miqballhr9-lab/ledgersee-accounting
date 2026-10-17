@@ -14,7 +14,7 @@ import ModuleWorkspace from "@/components/bookkeeping/ModuleWorkspace";
 import PayrollWorkspace from "@/components/bookkeeping/PayrollWorkspace";
 import EmployeesWorkspace from "@/components/hr/EmployeesWorkspace";
 import { odooHrData } from "@/lib/hr-status";
-import { moduleBySlug } from "@/lib/bookkeeping-config";
+import { moduleBySlug, withCustomFields } from "@/lib/bookkeeping-config";
 import { packFor } from "@/lib/tax-packs";
 import type { BookkeepingRecord, RecordKind } from "@/lib/bookkeeping-types";
 import { buildInventory, inventoryKinds } from "@/lib/inventory";
@@ -128,8 +128,9 @@ export default async function SectionPage({ params, searchParams }: SectionPageP
     );
   }
 
-  const module = moduleBySlug(section);
-  if (!module) notFound();
+  const baseModule = moduleBySlug(section);
+  if (!baseModule) notFound();
+  let module = baseModule;
   if (module.kind === "accounts") {
     const groups = await listBookkeepingRecordGroups(["accounts", "settings"]);
     const accounts = groups.accounts ?? [];
@@ -146,6 +147,9 @@ export default async function SectionPage({ params, searchParams }: SectionPageP
     kinds.add("payroll");
     kinds.add("employees");
   }
+  // A customer's or supplier's page lists their transactions, as QuickBooks' customer centre does.
+  const partyDocuments: RecordKind[] = module.kind === "customers" ? ["invoices", "credit-notes", "estimates", "payments"] : module.kind === "vendors" ? ["bills", "expenses", "supplier-credits", "payments"] : [];
+  for (const kind of partyDocuments) kinds.add(kind);
   // Quantity on hand comes from the documents that move stock.
   if (module.kind === "items" || kinds.has("items")) for (const kind of inventoryKinds) kinds.add(kind);
   const groups = await listBookkeepingRecordGroups([...kinds]);
@@ -158,6 +162,7 @@ export default async function SectionPage({ params, searchParams }: SectionPageP
   const accounts = groups.accounts ?? [];
   const items = groups.items ?? [];
   const settings = groups.settings ?? [];
+  module = withCustomFields(module, settings[0]?.data);
   // Only employee names leave the server here; payroll amounts stay out of this page.
   const employeeNames = module.kind === "journals"
     ? [...new Set([
@@ -166,5 +171,6 @@ export default async function SectionPage({ params, searchParams }: SectionPageP
       ].filter(Boolean))]
     : [];
   const sourceFilter = budgetHead ? { startDate, endDate, budgetHead } : undefined;
-  return <ModuleWorkspace module={module} records={records} customers={customers} vendors={vendors} accounts={accounts} items={items} defaultCurrency={settings[0]?.data.currency || "USD"} employeeNames={employeeNames} sourceFilter={sourceFilter} />;
+  const related = partyDocuments.flatMap((kind) => groups[kind] ?? []);
+  return <ModuleWorkspace module={module} records={records} customers={customers} vendors={vendors} accounts={accounts} items={items} defaultCurrency={settings[0]?.data.currency || "USD"} employeeNames={employeeNames} sourceFilter={sourceFilter} related={related} />;
 }

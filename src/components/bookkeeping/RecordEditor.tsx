@@ -883,6 +883,15 @@ export default function RecordEditor({ module, record, customers, vendors, items
     );
   }
 
+  // QuickBooks price rules: a customer's price rule raises or lowers each sales price picked for them.
+  function priceFor(rate: string | undefined) {
+    const base = Number(rate) || 0;
+    if (!["invoices", "estimates", "sales-orders", "credit-notes", "recurring-invoices"].includes(module.kind)) return rate ?? "0";
+    const customer = customers.find((option) => option.id === values.customerId) ?? customers.find((option) => (option.data.name ?? "").trim().toLowerCase() === (values.customer ?? "").trim().toLowerCase());
+    const adjustment = Number(customer?.data.priceAdjustment) || 0;
+    return adjustment ? (Math.round(base * (1 + adjustment / 100) * 100) / 100).toFixed(2) : rate ?? "0";
+  }
+
   function chooseLineItem(lineId: string, itemId: string) {
     const item = availableItems.find((option) => option.id === itemId);
     if (!item) return;
@@ -890,13 +899,13 @@ export default function RecordEditor({ module, record, customers, vendors, items
       // Like QuickBooks, a bundle brings in its products and services as lines of their own.
       const parts = readBundleParts(item.data.bundleItems ?? "").flatMap((part, partIndex) => {
         const component = availableItems.find((option) => option.id === part.itemId);
-        return component ? [{ id: `${lineId}-b${Date.now()}-${partIndex}`, itemId: component.id, name: component.data.name?.trim() ?? "", description: component.data.description?.trim() || "", quantity: part.quantity || "1", rate: component.data.rate ?? "0", bundleId: item.id, bundleName: item.data.name?.trim() ?? "Bundle", bundleShow: item.data.showComponents === "false" ? "false" : "true" }] : [];
+        return component ? [{ id: `${lineId}-b${Date.now()}-${partIndex}`, itemId: component.id, name: component.data.name?.trim() ?? "", description: component.data.description?.trim() || "", quantity: part.quantity || "1", rate: priceFor(component.data.rate), bundleId: item.id, bundleName: item.data.name?.trim() ?? "Bundle", bundleShow: item.data.showComponents === "false" ? "false" : "true" }] : [];
       });
       if (parts.length) setInvoiceLines((current) => current.flatMap((currentLine) => (currentLine.id === lineId ? parts : [currentLine])));
       return;
     }
     setInvoiceLines((current) => current.map((currentLine) => currentLine.id === lineId
-      ? { ...currentLine, itemId: item.id, name: item.data.name?.trim() ?? "", description: currentLine.description || item.data.description?.trim() || "", quantity: currentLine.quantity || "1", rate: item.data.rate ?? "0" }
+      ? { ...currentLine, itemId: item.id, name: item.data.name?.trim() ?? "", description: currentLine.description || item.data.description?.trim() || "", quantity: currentLine.quantity || "1", rate: priceFor(item.data.rate) }
       : currentLine));
   }
 

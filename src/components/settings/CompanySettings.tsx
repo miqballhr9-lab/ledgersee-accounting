@@ -17,6 +17,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { readableError } from "@/lib/action-error";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
 import { packFor } from "@/lib/tax-packs";
+import { customFieldKinds, customFieldSettingKey, moduleBySlug } from "@/lib/bookkeeping-config";
 
 interface CompanySettingsProps {
   settings: BookkeepingRecord | null;
@@ -359,6 +360,10 @@ export default function CompanySettings({ settings, workspaceName }: CompanySett
                   {select("fiscalYear", "First month of fiscal year", months, "Reports use it for “This year” and retained earnings.")}
                   {select("accountingMethod", "Accounting method", ["Accrual", "Cash"], "The basis reports open with; you can still switch on each report.")}
                 </>,
+              )}
+              {section("custom-fields", "Custom fields",
+                <>{customFieldKinds.map((kind) => <Row key={kind} label={moduleBySlug(kind)?.plural ?? kind} value={saved[customFieldSettingKey(kind)] || "—"} />)}</>,
+                <>{customFieldKinds.map((kind) => <span key={kind}>{text(customFieldSettingKey(kind), moduleBySlug(kind)?.plural ?? kind, { placeholder: "e.g. PO number, Delivery note", help: "Extra fields on the form, comma separated." })}</span>)}</>,
               )}
               {section("closing", "Close the books",
                 <Row label="Closing date" value={saved.booksClosedThrough ? `Closed through ${saved.booksClosedThrough}` : "Not closed"} />,
