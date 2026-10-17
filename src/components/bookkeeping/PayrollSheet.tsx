@@ -44,7 +44,13 @@ interface PayrollSheetProps {
 function hrLine(month: string, employee: BookkeepingRecord, workingDays: string, hr?: PayrollHrRecords): Partial<SheetRow> {
   if (!hr) return {};
   const adjustments = payrollAdjustments(month, { id: employee.id, name: employee.data.name }, hr.leaves, hr.loans, hr.attendance, hr.weekend);
-  return { workedDays: adjustedWorkedDays(workingDays, adjustments), ...(adjustments.loanDeduction ? { loanDeduction: String(adjustments.loanDeduction) } : {}) };
+  const overtimeRate = Number(employee.data.overtimeRate) || 0;
+  return {
+    workedDays: adjustedWorkedDays(workingDays, adjustments),
+    ...(adjustments.loanDeduction ? { loanDeduction: String(adjustments.loanDeduction) } : {}),
+    ...(employee.data.socialDeduction ? { socialDeduction: employee.data.socialDeduction } : {}),
+    ...(overtimeRate && adjustments.overtimeHours ? { overtimeAllowance: (Math.round(overtimeRate * adjustments.overtimeHours * 100) / 100).toFixed(2) } : {}),
+  };
 }
 
 interface Person {

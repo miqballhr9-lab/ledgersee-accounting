@@ -34,7 +34,7 @@ export const isRunningAttachment = (status: string | undefined) => status === "R
 /** A salary attachment fully deducted ("Repaid" before the switch). */
 export const isCompletedAttachment = (status: string | undefined) => status === "Completed" || status === "Repaid";
 /** A time off or allocation request waiting for approval ("Pending" before the switch). */
-export const isToApprove = (status: string | undefined) => status === "To Approve" || status === "Pending" || status === "Requested";
+export const isToApprove = (status: string | undefined) => status === "To Approve" || status === "Second Approval" || status === "Pending" || status === "Requested";
 /** An application that led to a hire ("Hired" before the switch). */
 export const isHiredStage = (stage: string | undefined) => stage === "Contract Signed" || stage === "Hired";
 /** An application no longer in the pipeline. */

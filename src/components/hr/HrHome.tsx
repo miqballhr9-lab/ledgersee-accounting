@@ -27,7 +27,7 @@ export default function HrHome({ store }: { store: CrmStore; currency?: string; 
     { label: "Contracts", href: "/app/hr/contracts", icon: FileSignature, colour: "#6A5ACD", waiting: count("hr-contracts", (data) => data.status === "Running" && Boolean(data.endDate) && data.endDate <= soon) },
     { label: "Org Chart", href: "/app/hr/org-chart", icon: Workflow, colour: "#2F6F8F" },
     { label: "Attendances", href: "/app/hr/check-in", icon: Clock, colour: "#017E84" },
-    { label: "Time Off", href: "/app/hr/my-time-off", icon: CalendarDays, colour: "#21B799", waiting: count("hr-leaves", (data) => data.status === "To Approve") + count("hr-allocations", (data) => data.status === "To Approve") },
+    { label: "Time Off", href: "/app/hr/my-time-off", icon: CalendarDays, colour: "#21B799", waiting: count("hr-leaves", (data) => data.status === "To Approve" || data.status === "Second Approval") + count("hr-allocations", (data) => data.status === "To Approve") },
     { label: "Recruitment", href: "/app/hr/job-positions", icon: BriefcaseBusiness, colour: "#E46F78", waiting: count("hr-candidates", (data) => (data.stage || "New") === "New") },
     { label: "Appraisals", href: "/app/hr/appraisals", icon: Star, colour: "#E4A900", waiting: count("hr-appraisals", (data) => data.status === "To Confirm") },
     { label: "Expenses", href: "/app/hr/expenses", icon: ReceiptText, colour: "#8F5FD8", waiting: count("hr-claims", (data) => data.status === "Submitted") },

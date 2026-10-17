@@ -184,6 +184,11 @@ export default function CompanySettings({ settings, workspaceName }: CompanySett
     );
   }
 
+  const textArea = (key: string, label: string, help: string) => (
+    <Field label={label} htmlFor={`settings-${key}`} wide help={help}>
+      <Textarea id={`settings-${key}`} rows={5} value={draft[key] ?? ""} maxLength={3000} onChange={(event) => set(key, event.target.value)} />
+    </Field>
+  );
   const text = (key: string, label: string, props: { placeholder?: string; type?: string; help?: string; wide?: boolean; disabled?: boolean } = {}) => (
     <Field label={label} htmlFor={`settings-${key}`} help={props.help} wide={props.wide}>
       <Input id={`settings-${key}`} type={props.type ?? "text"} value={draft[key] ?? ""} placeholder={props.placeholder} disabled={props.disabled} maxLength={300} onChange={(event) => set(key, event.target.value)} />
@@ -360,12 +365,27 @@ export default function CompanySettings({ settings, workspaceName }: CompanySett
                 <>
                   {select("fiscalYear", "First month of fiscal year", months, "Reports use it for “This year” and retained earnings.")}
                   {select("accountingMethod", "Accounting method", ["Accrual", "Cash"], "The basis reports open with; you can still switch on each report.")}
+                  {text("standardDailyHours", "Working day (hours)", { type: "number", help: "Hours worked beyond this each day count as overtime. 8 when empty." })}
                   {select("weekendDays", "Weekly days off", ["Sunday", "Saturday, Sunday", "Friday", "Friday, Saturday"], "Time off and unpaid leave skip these days.")}
                 </>,
               )}
               {section("custom-fields", "Custom fields",
                 <>{customFieldKinds.map((kind) => <Row key={kind} label={moduleBySlug(kind)?.plural ?? kind} value={saved[customFieldSettingKey(kind)] || "—"} />)}</>,
                 <>{customFieldKinds.map((kind) => <span key={kind}>{text(customFieldSettingKey(kind), moduleBySlug(kind)?.plural ?? kind, { placeholder: "e.g. PO number, Delivery note", help: "Extra fields on the form, comma separated." })}</span>)}</>,
+              )}
+              {section("careers", "Careers page",
+                <Row label="Public jobs page" value={saved.careersToken ? `/careers/${saved.careersToken}` : "Off"} />,
+                <label className="flex items-center gap-2 text-sm sm:col-span-2">
+                  <Checkbox checked={Boolean(draft.careersToken)} onCheckedChange={(value) => set("careersToken", value === true ? (draft.careersToken || crypto.randomUUID()) : "")} />
+                  Publish a careers page with the job positions you&apos;re recruiting for; applications arrive in Recruitment as New.
+                </label>,
+              )}
+              {section("hr-plans", "Onboarding and offboarding",
+                <><Row label="Onboarding plan" value={saved.onboardingPlan ? `${saved.onboardingPlan.split("\n").filter(Boolean).length} activities` : "Standard"} /><Row label="Offboarding plan" value={saved.offboardingPlan ? `${saved.offboardingPlan.split("\n").filter(Boolean).length} activities` : "Standard"} /></>,
+                <>
+                  {textArea("onboardingPlan", "Onboarding plan", "One activity per line, created for each new hire.")}
+                  {textArea("offboardingPlan", "Offboarding plan", "One activity per line, created when a departure is approved.")}
+                </>,
               )}
               {section("closing", "Close the books",
                 <Row label="Closing date" value={saved.booksClosedThrough ? `Closed through ${saved.booksClosedThrough}` : "Not closed"} />,

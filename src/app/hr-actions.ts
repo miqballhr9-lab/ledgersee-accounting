@@ -38,7 +38,7 @@ export async function markAttendance(date: string, entries: AttendanceRow[]): Pr
   assertCanWrite(me, "hr-attendance");
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new ActionError("Choose the date.");
   if (entries.length > 1000) throw new ActionError("Mark up to 1,000 employees at a time.");
-  const all = await rows(me.id, ["employees", "hr-attendance", "hr-holidays"]);
+  const all = await rows(me.id, ["employees", "hr-attendance", "hr-holidays", "settings"]);
   const byKind = (kind: string) => all.filter((row) => row.kind === kind);
   const saved: BookkeepingRecord[] = [];
   for (const entry of entries) {
@@ -136,7 +136,7 @@ async function nowTime(userId: string) {
 /** Checks an employee in or out for today, in the business's time zone. */
 async function checkEmployee(me: Awaited<ReturnType<typeof requireUser>>, employee: StoredRow, direction: "in" | "out", self: boolean) {
   const { date, time } = await nowTime(me.id);
-  const all = await rows(me.id, ["hr-attendance", "hr-holidays"]);
+  const all = await rows(me.id, ["hr-attendance", "hr-holidays", "settings"]);
   const byKind = (kind: string) => all.filter((row) => row.kind === kind);
   const existing = byKind("hr-attendance").find((row) => row.data.employeeId === employee.id && row.data.date === date);
   const who = self ? "You" : employee.data.name || "This employee";

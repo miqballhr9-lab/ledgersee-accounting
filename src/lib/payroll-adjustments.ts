@@ -44,7 +44,8 @@ export function payrollAdjustments(month: string, employee: { id?: string; name?
     .filter((row) => running(row.data.status) && matches(row.data) && (!row.data.startMonth || row.data.startMonth <= month))
     .reduce((sum, row) => sum + Math.min(money(row.data.monthlyInstallment), money(row.data.balance)), 0);
   const hasLoans = loans.some((row) => matches(row.data));
-  return { unpaidDays, absentDays, loanDeduction: Math.round(loanDeduction * 100) / 100, hasLoans };
+  const overtimeHours = attendance.filter((row) => (row.data.date ?? "").startsWith(month) && matches(row.data)).reduce((sum, row) => sum + money(row.data.overtimeHours), 0);
+  return { unpaidDays, absentDays, loanDeduction: Math.round(loanDeduction * 100) / 100, hasLoans, overtimeHours: Math.round(overtimeHours * 100) / 100 };
 }
 
 /** Worked days after unpaid time off and absences, never below zero. */

@@ -210,6 +210,8 @@ async function runMonthlyPayroll(userId: string) {
     const hr = payrollAdjustments(month, { id: employee?.id, name: payload.employeeName }, leaves, loans, attendance, weekend);
     payload.workedDays = adjustedWorkedDays(workingDays, hr);
     if (hr.hasLoans) payload.loanDeduction = hr.loanDeduction.toFixed(2);
+    if (employee?.data.socialDeduction && !source.socialDeduction) payload.socialDeduction = employee.data.socialDeduction;
+    if (Number(employee?.data.overtimeRate) > 0 && hr.overtimeHours) payload.overtimeAllowance = (Number(employee?.data.overtimeRate) * hr.overtimeHours).toFixed(2);
     try {
       const saved = await saveBookkeepingRecord("payroll", payload);
       items.push({ kind: "payroll", id: saved.id, label: `${payload.employeeName} · salary ${month}`, status: "Pending approval" });

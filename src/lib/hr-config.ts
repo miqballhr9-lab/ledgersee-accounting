@@ -10,7 +10,7 @@
  */
 import type { CrmModule } from "@/lib/crm-config";
 
-export const leaveStatuses = ["To Approve", "Approved", "Refused", "Cancelled"] as const;
+export const leaveStatuses = ["To Approve", "Second Approval", "Approved", "Refused", "Cancelled"] as const;
 export const attendanceStatuses = ["Present", "Late", "Half day", "Absent", "On leave", "Holiday"] as const;
 
 const approveRefuse = [
@@ -61,6 +61,7 @@ export const hrModules: readonly CrmModule[] = [
       { key: "checkIn", label: "Check in", section: "Attendance", placeholder: "09:00" },
       { key: "checkOut", label: "Check out", section: "Attendance", placeholder: "17:30" },
       { key: "hoursWorked", label: "Worked hours", type: "number", section: "Attendance", readOnly: true, help: "Worked out from check in and check out." },
+      { key: "overtimeHours", label: "Overtime hours", type: "number", section: "Attendance", readOnly: true, help: "Hours beyond the working day set in Settings (8 by default)." },
       { key: "status", label: "Status", type: "select", options: attendanceStatuses, section: "Attendance" },
       { key: "notes", label: "Notes", type: "textarea", section: "Attendance", wide: true },
     ],
@@ -93,6 +94,8 @@ export const hrModules: readonly CrmModule[] = [
       { key: "days", label: "Allocation (days)", type: "number", section: "Allocation", required: true },
       { key: "validFrom", label: "Validity start", type: "date", section: "Allocation", required: true },
       { key: "validTo", label: "Validity end", type: "date", section: "Allocation", help: "Leave empty for no end." },
+      { key: "allocationType", label: "Allocation type", type: "select", options: ["Regular", "Accrual"], section: "Allocation", help: "Accrual: the days build up month by month, up to the allocation." },
+      { key: "accrualPerMonth", label: "Days earned per month", type: "number", section: "Allocation", help: "For an accrual, e.g. 1.5." },
       { key: "reason", label: "Reason", type: "textarea", section: "Allocation", wide: true },
       { key: "status", label: "Status", type: "select", options: ["To Approve", "Approved", "Refused"], section: "Allocation" },
     ],
@@ -104,7 +107,7 @@ export const hrModules: readonly CrmModule[] = [
     columns: ["leaveName", "requiresAllocation", "approval", "paid"],
     fields: [
       { key: "leaveName", label: "Time off type", section: "Time off type", required: true, placeholder: "e.g. Paid time off" },
-      { key: "approval", label: "Approval", type: "select", options: ["By time off officer", "No validation"], section: "Time off type", help: "With no validation, requests are approved as soon as they are made." },
+      { key: "approval", label: "Approval", type: "select", options: ["By time off officer", "By manager and time off officer", "No validation"], section: "Time off type", help: "With no validation, requests are approved as soon as they are made. With two approvals, a second person confirms." },
       { key: "requiresAllocation", label: "Requires allocation", type: "select", options: ["Yes", "No limit"], section: "Time off type" },
       { key: "daysPerYear", label: "Days a year when not allocated", type: "number", section: "Time off type", help: "Used for an employee who has no allocation of this type. Leave 0 to need an allocation." },
       { key: "paid", label: "Paid time off", type: "checkbox", section: "Time off type", help: "Unpaid time off is deducted from salary in payroll." },
@@ -223,12 +226,13 @@ export const hrModules: readonly CrmModule[] = [
   },
   {
     key: "onboarding", kind: "hr-onboarding", label: "Onboarding activity", plural: "Onboarding", section: "hr",
-    description: "The onboarding plan's activities for each new employee, who does them and when.",
+    description: "Onboarding and offboarding plan activities for each employee, who does them and when. Plans are set in Settings > Advanced.",
     titleKey: "task", statusKey: "status", kanbanKey: "status",
     quickActions: [{ label: "Mark done", key: "status", value: "Done", tone: "primary" }],
     columns: ["task", "employee", "owner", "dueDate", "status"],
     fields: [
       { key: "task", label: "Summary", section: "Activity", required: true, wide: true },
+      { key: "plan", label: "Plan", type: "select", options: ["Onboarding", "Offboarding"], section: "Activity" },
       { key: "employee", label: "Employee", type: "employee", section: "Activity", required: true },
       { key: "owner", label: "Assigned to", type: "owner", section: "Activity" },
       { key: "dueDate", label: "Due date", type: "date", section: "Activity" },
@@ -259,6 +263,22 @@ export const hrModules: readonly CrmModule[] = [
       { key: "finalRating", label: "Final rating", type: "select", options: ["Needs improvement", "Meets expectations", "Exceeds expectations", "Strongly exceeds expectations"], section: "Skills" },
       { key: "newWage", label: "New wage (monthly)", type: "currency", section: "Salary review", help: "Set when the appraisal brings a raise. Marking it done updates the employee's wage for the next payroll." },
       { key: "wageEffectiveMonth", label: "Effective from", section: "Salary review", placeholder: "YYYY-MM" },
+    ],
+  },
+  {
+    key: "goals", kind: "hr-goals", label: "Goal", plural: "Goals", section: "hr",
+    description: "Goals agreed with each employee, with a deadline and progress, reviewed in their appraisals.",
+    titleKey: "goal", statusKey: "status", kanbanKey: "status",
+    quickActions: [{ label: "Mark as done", key: "status", value: "Done", tone: "primary" }, { label: "Cancel", key: "status", value: "Cancelled", tone: "danger" }],
+    columns: ["goal", "employee", "deadline", "progress", "status"],
+    fields: [
+      { key: "goal", label: "Goal", section: "Goal", required: true, wide: true },
+      { key: "employee", label: "Employee", type: "employee", section: "Goal", required: true },
+      { key: "owner", label: "Manager", type: "owner", section: "Goal" },
+      { key: "deadline", label: "Deadline", type: "date", section: "Goal" },
+      { key: "progress", label: "Progress (%)", type: "select", options: ["0", "25", "50", "75", "100"], section: "Goal" },
+      { key: "status", label: "Status", type: "select", options: ["In progress", "Done", "Cancelled"], section: "Goal" },
+      { key: "description", label: "Description", type: "textarea", section: "Goal", wide: true },
     ],
   },
   {

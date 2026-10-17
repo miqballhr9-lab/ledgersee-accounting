@@ -80,9 +80,21 @@ export function timeOffAllowance(context: HrContext, data: Record<string, string
   if (!type) return null;
   const allocations = context.byKind("hr-allocations").filter((row) => row.data.status === "Approved" && sameEmployee(row.data, data) && row.data.leaveTypeId === data.leaveTypeId
     && (row.data.validFrom ?? "") <= `${year}-12-31` && (!row.data.validTo || row.data.validTo >= `${year}-01-01`));
-  if (allocations.length) return allocations.reduce((sum, row) => sum + money(row.data.days), 0);
+  if (allocations.length) return allocations.reduce((sum, row) => sum + allocationDays(row.data, year), 0);
   if (type.data.requiresAllocation === "No limit") return null;
   return money(type.data.daysPerYear);
+}
+
+/** An allocation's days for the year; an accrual earns its monthly days so far, up to the allocation. */
+function allocationDays(data: Record<string, string>, year: string) {
+  const total = money(data.days);
+  if (data.allocationType !== "Accrual" || !money(data.accrualPerMonth)) return total;
+  const today = new Date().toISOString().slice(0, 10);
+  const start = (data.validFrom ?? "") > `${year}-01-01` ? data.validFrom : `${year}-01-01`;
+  const end = today < `${year}-12-31` ? today : `${year}-12-31`;
+  if (end < start) return 0;
+  const months = (Number(end.slice(0, 4)) - Number(start.slice(0, 4))) * 12 + Number(end.slice(5, 7)) - Number(start.slice(5, 7)) + 1;
+  return Math.min(total, Math.round(months * money(data.accrualPerMonth) * 100) / 100);
 }
 
 /** Fills in and checks the calculated parts of an HR record before it is saved. */
@@ -96,6 +108,9 @@ export function applyHrRules(kind: string, data: Record<string, string>, existin
     if (data.checkIn && start === null) throw new ActionError("Enter check in as a time, e.g. 09:00.");
     if (data.checkOut && end === null) throw new ActionError("Enter check out as a time, e.g. 17:30.");
     data.hoursWorked = start !== null && end !== null && end > start ? String(Math.round(((end - start) / 60) * 100) / 100) : "";
+    // Overtime: hours beyond the business's working day (Settings), 8 hours by default.
+    const workingDay = money(context.byKind("settings")[0]?.data.standardDailyHours) || 8;
+    data.overtimeHours = data.hoursWorked && money(data.hoursWorked) > workingDay ? String(Math.round((money(data.hoursWorked) - workingDay) * 100) / 100) : "";
     if (!data.status) data.status = "Present";
     const duplicate = context.byKind("hr-attendance").some((row) => row.id !== id && row.data.date === data.date && sameEmployee(row.data, data));
     if (duplicate) throw new ActionError(`${data.employee} already has attendance for ${data.date}.`);
@@ -112,6 +127,15 @@ export function applyHrRules(kind: string, data: Record<string, string>, existin
     if (!data.status) data.status = !existing && type?.data.approval === "No validation" ? "Approved" : "To Approve";
     const overlapping = context.byKind("hr-leaves").find((row) => row.id !== id && (isToApprove(row.data.status) || row.data.status === "Approved") && sameEmployee(row.data, data) && row.data.fromDate <= data.toDate && row.data.toDate >= data.fromDate);
     if (overlapping && data.status !== "Refused" && data.status !== "Cancelled") throw new ActionError(`${data.employee} already has time off from ${overlapping.data.fromDate} to ${overlapping.data.toDate}.`);
+    // Two-step approval: the first approval moves the request to Second Approval; another person approves it.
+    if (data.status === "Approved" && existing?.status !== "Approved" && type?.data.approval === "By manager and time off officer") {
+      if (existing?.status !== "Second Approval") {
+        data.status = "Second Approval";
+        data.firstApprovedBy = context.actor;
+      } else if (existing.firstApprovedBy === context.actor) {
+        throw new ActionError(`${context.actor} gave the first approval; a second person must approve it.`);
+      }
+    }
     if (data.status === "Approved" && existing?.status !== "Approved") {
       const allowance = timeOffAllowance(context, data, data.fromDate.slice(0, 4));
       const used = leaveUsed(context.byKind("hr-leaves"), data, data.fromDate.slice(0, 4), id);
@@ -124,7 +148,7 @@ export function applyHrRules(kind: string, data: Record<string, string>, existin
       data.approvedOn = new Date().toISOString().slice(0, 10);
       data.paid = type?.data.paid === "false" ? "false" : "true";
     }
-    if (data.status !== "Approved") data.approvedBy = data.status === "Refused" ? `Refused by ${context.actor}` : "";
+    if (data.status !== "Approved") data.approvedBy = data.status === "Refused" ? `Refused by ${context.actor}` : data.status === "Second Approval" ? `First approval: ${data.firstApprovedBy || context.actor}` : "";
   }
 
   if (kind === "hr-allocations") {
@@ -132,6 +156,8 @@ export function applyHrRules(kind: string, data: Record<string, string>, existin
     if (days <= 0) throw new ActionError("Enter the number of days to allocate.");
     if (data.validTo && data.validFrom && data.validTo < data.validFrom) throw new ActionError("The validity can’t end before it starts.");
     data.days = String(days);
+    if (!data.allocationType) data.allocationType = "Regular";
+    if (data.allocationType === "Accrual" && !(money(data.accrualPerMonth) > 0)) throw new ActionError("Enter the days earned each month for an accrual.");
     if (!data.status) data.status = "To Approve";
     if (data.status === "Approved" && existing?.status !== "Approved") data.approvedBy = context.actor;
   }
@@ -156,6 +182,11 @@ export function applyHrRules(kind: string, data: Record<string, string>, existin
   }
 
   if (kind === "hr-candidates" && data.stage !== "Refused") data.refuseReason = "";
+  if (kind === "hr-goals") {
+    if (!data.status) data.status = "In progress";
+    if (!data.progress) data.progress = "0";
+    if (data.status === "Done") data.progress = "100";
+  }
 
   if (kind === "hr-contracts") {
     if (!data.status) data.status = "New";
@@ -226,6 +257,21 @@ const onboardingChecklist = [
   "First-week check-in with the manager",
 ];
 
+const offboardingChecklist = [
+  "Collect laptop, ID card and company property",
+  "Revoke email and system access",
+  "Hand over work and documents",
+  "Exit interview",
+  "Clear final settlement and issue experience letter",
+];
+
+/** A plan's activities from Settings (one per line), or the standard list. */
+async function planFor(userId: string, key: "onboardingPlan" | "offboardingPlan", fallback: string[]) {
+  const [settings] = await db.select().from(bookkeepingRecord).where(and(eq(bookkeepingRecord.userId, userId), eq(bookkeepingRecord.kind, "settings"))).limit(1);
+  const lines = (settings?.data[key] ?? "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean).slice(0, 30);
+  return lines.length ? lines : fallback;
+}
+
 /** What some saves set off elsewhere. Returns a note for the toast, if any. */
 export async function afterHrSave(userId: string, kind: string, before: Record<string, string> | undefined, after: StoredRow): Promise<string | undefined> {
   const data = after.data;
@@ -248,13 +294,13 @@ export async function afterHrSave(userId: string, kind: string, before: Record<s
         notes: "Hired from recruitment.",
       },
     }).returning();
-    for (const [index, task] of onboardingChecklist.entries()) {
+    for (const [index, task] of (await planFor(userId, "onboardingPlan", onboardingChecklist)).entries()) {
       const due = new Date();
       due.setUTCDate(due.getUTCDate() + (index < 3 ? 0 : 7));
       await db.insert(bookkeepingRecord).values({
         userId,
         kind: "hr-onboarding",
-        data: { employee: data.candidateName, employeeId: employee.id, task, dueDate: due.toISOString().slice(0, 10), status: "To Do" },
+        data: { employee: data.candidateName, employeeId: employee.id, task, plan: "Onboarding", dueDate: due.toISOString().slice(0, 10), status: "To Do" },
       });
     }
     await db.update(bookkeepingRecord).set({ data: { ...data, hiredEmployeeId: employee.id } }).where(eq(bookkeepingRecord.id, after.id));
@@ -288,6 +334,10 @@ export async function afterHrSave(userId: string, kind: string, before: Record<s
   if (kind === "hr-settlements" && settled(data.status) && !settled(before?.status) && data.employeeId) {
     const [employee] = await db.select().from(bookkeepingRecord).where(and(eq(bookkeepingRecord.id, data.employeeId), eq(bookkeepingRecord.userId, userId))).limit(1);
     if (employee) {
+      // Odoo's offboarding plan: the leaving checklist, due by the departure date.
+      for (const task of await planFor(userId, "offboardingPlan", offboardingChecklist)) {
+        await db.insert(bookkeepingRecord).values({ userId, kind: "hr-onboarding", data: { employee: employee.data.name ?? "", employeeId: employee.id, task, plan: "Offboarding", dueDate: data.lastWorkingDay ?? "", status: "To Do" } });
+      }
       await db.update(bookkeepingRecord).set({ data: { ...employee.data, status: "Inactive", leavingDate: data.lastWorkingDay ?? "" }, updatedAt: new Date() }).where(eq(bookkeepingRecord.id, employee.id));
       return `${employee.data.name} is now marked inactive.`;
     }

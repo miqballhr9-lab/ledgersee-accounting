@@ -63,6 +63,8 @@ function datesBetween(from: string, to: string) {
 /** Odoo Time Off dashboard: balance cards per type and the year's calendar of time off and public holidays. */
 export default function TimeOffDashboard({ year, today, employees, defaultEmployeeId, types, balances, leaves, holidays }: Props) {
   const [employeeId, setEmployeeId] = useState(defaultEmployeeId);
+  const [view, setView] = useState<"mine" | "team">("mine");
+  const [teamMonth, setTeamMonth] = useState(today.slice(0, 7));
   const employee = employees.find((entry) => entry.id === employeeId);
   const colourOf = (typeId: string) => colours[Math.max(0, types.findIndex((type) => type.id === typeId)) % colours.length];
   const mine = leaves.filter((leave) => leave.employeeId === employeeId && !["Refused", "Cancelled"].includes(leave.status));
@@ -79,15 +81,60 @@ export default function TimeOffDashboard({ year, today, employees, defaultEmploy
           <Button className="gap-1.5" nativeButton={false} render={<Link href="/app/hr/time-off?new=1" />}><Plus size={15} />New</Button>
           <h1 className="text-lg font-semibold">My Time Off</h1>
         </div>
-        {employees.length > 1 ? (
+        <div className="flex flex-wrap items-center gap-2">
+        {employees.length ? (
+          <div className="flex rounded-md border border-border p-0.5">
+            <Button type="button" size="sm" variant={view === "mine" ? "secondary" : "ghost"} onClick={() => setView("mine")}>Employee</Button>
+            <Button type="button" size="sm" variant={view === "team" ? "secondary" : "ghost"} onClick={() => setView("team")}>Team calendar</Button>
+          </div>
+        ) : null}
+        {employees.length > 1 && view === "mine" ? (
           <Select value={employeeId || null} onValueChange={(value) => setEmployeeId(String(value ?? ""))}>
             <SelectTrigger className="w-60" aria-label="Employee"><SelectValue>{employee?.name ?? "Choose an employee"}</SelectValue></SelectTrigger>
             <SelectContent>{employees.map((entry) => <SelectItem key={entry.id} value={entry.id}>{entry.name}</SelectItem>)}</SelectContent>
           </Select>
         ) : null}
+        {view === "team" ? <input type="month" aria-label="Month" value={teamMonth} onChange={(event) => setTeamMonth(event.target.value || today.slice(0, 7))} className="h-8 rounded-md border border-border bg-background px-2 text-sm" /> : null}
+        </div>
       </header>
 
-      {!employee ? <p className="py-16 text-center text-sm text-muted-foreground">Add an employee to see their time off.</p> : (
+      {view === "team" ? (() => {
+        // Odoo's team view: one row per employee, one column per day of the month.
+        const [y, m] = teamMonth.split("-").map(Number);
+        const count = new Date(Date.UTC(y, m, 0)).getUTCDate();
+        const daysOf = Array.from({ length: count }, (_, index) => `${teamMonth}-${String(index + 1).padStart(2, "0")}`);
+        const active = leaves.filter((leave) => !["Refused", "Cancelled"].includes(leave.status));
+        return (
+          <section className="mt-5 overflow-x-auto rounded-lg border border-border bg-card">
+            <table className="w-full border-collapse text-xs">
+              <thead>
+                <tr>
+                  <th className="sticky left-0 z-10 min-w-40 bg-card px-3 py-2 text-left text-sm font-semibold">{new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString("en-US", { month: "long", year: "numeric", timeZone: "UTC" })}</th>
+                  {daysOf.map((date) => <th key={date} className={`min-w-7 px-0.5 py-2 text-center font-medium ${new Date(`${date}T12:00:00Z`).getUTCDay() === 0 ? "text-muted-foreground/60" : "text-muted-foreground"}`}>{Number(date.slice(8))}</th>)}
+                </tr>
+              </thead>
+              <tbody>
+                {employees.map((person) => (
+                  <tr key={person.id} className="border-t border-border">
+                    <td className="sticky left-0 z-10 bg-card px-3 py-1.5 font-medium">{person.name}</td>
+                    {daysOf.map((date) => {
+                      const leave = active.find((entry) => entry.employeeId === person.id && entry.from <= date && (entry.to || entry.from) >= date);
+                      const holiday = holidayByDate.get(date);
+                      return (
+                        <td key={date} title={leave ? `${person.name}: ${leave.type} · ${leave.status}` : holiday} className="h-7 p-0.5">
+                          {leave ? <span className={`block h-5 rounded-sm ${leave.status === "Approved" ? "" : "border border-dashed"}`} style={leave.status === "Approved" ? { background: colourOf(leave.typeId) } : { borderColor: colourOf(leave.typeId) }} /> : holiday ? <span className="block h-5 rounded-sm bg-muted-foreground/25" /> : null}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </section>
+        );
+      })() : null}
+
+      {view === "team" ? null : !employee ? <p className="py-16 text-center text-sm text-muted-foreground">Add an employee to see their time off.</p> : (
         <>
           <section className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4" aria-label="Time off balances">
             {shownBalances.length ? shownBalances.map((balance) => {
