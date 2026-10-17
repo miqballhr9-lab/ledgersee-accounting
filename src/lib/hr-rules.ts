@@ -206,6 +206,42 @@ export function applyHrRules(kind: string, data: Record<string, string>, existin
     if (data.status === "Done") data.progress = "100";
   }
 
+  if (kind === "hr-shifts") {
+    const start = minutes(data.startTime);
+    const end = minutes(data.endTime);
+    if (start === null || end === null) throw new ActionError("Enter the shift's start and end as times, e.g. 09:00 and 17:00.");
+    // A shift ending before it starts runs past midnight.
+    const length = end > start ? end - start : end + 24 * 60 - start;
+    data.hours = String(Math.round((length / 60) * 100) / 100);
+    if (!data.status) data.status = "Draft";
+    const clash = context.byKind("hr-shifts").find((row) => row.id !== id && row.data.date === data.date && sameEmployee(row.data, data)
+      && (minutes(row.data.startTime) ?? 0) < (end > start ? end : 24 * 60) && (minutes(row.data.endTime) ?? 0) > start);
+    if (clash) throw new ActionError(`${data.employee} already has a shift from ${clash.data.startTime} to ${clash.data.endTime} that day.`);
+  }
+
+  if (kind === "hr-timesheets") {
+    const hours = money(data.hours);
+    if (!(hours > 0) || hours > 24) throw new ActionError("Enter the hours spent, up to 24 a day.");
+    if (!data.status) data.status = "Draft";
+  }
+
+  if (kind === "hr-lunch-orders" && !data.status) data.status = "Ordered";
+  if (kind === "hr-vehicles" && !data.status) data.status = "Registered";
+  if (kind === "hr-vehicle-services" && !data.status) data.status = "Done";
+  if (kind === "hr-courses" && !data.status) data.status = "Published";
+
+  if (kind === "hr-enrolments") {
+    // Progress and status move together: 100% is completed, and completing sets 100%.
+    if (data.status === "Completed" || money(data.progress) >= 100) {
+      data.status = "Completed";
+      data.progress = "100";
+      if (!data.completedOn) data.completedOn = new Date().toISOString().slice(0, 10);
+    } else {
+      data.status = money(data.progress) > 0 ? "In progress" : data.status || "Not started";
+      data.completedOn = "";
+    }
+  }
+
   if (kind === "hr-contracts") {
     if (!data.status) data.status = "New";
     if (data.endDate && data.startDate && data.endDate < data.startDate) throw new ActionError("The contract can’t end before it starts.");

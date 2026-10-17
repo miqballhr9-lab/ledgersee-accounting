@@ -67,7 +67,7 @@ async function lookupContext(userId: string) {
     .from(bookkeepingRecord)
     .where(and(eq(bookkeepingRecord.userId, userId), inArray(bookkeepingRecord.kind, [
       "customers", "crm-leads", "crm-contacts", "crm-deals", "crm-campaigns", "crm-cases",
-      "employees", "hr-departments", "hr-leave-types", "hr-jobs", "hr-leaves", "hr-allocations", "hr-holidays", "hr-loans", "hr-attendance", "hr-contracts", "accounts", "settings",
+      "employees", "hr-departments", "hr-leave-types", "hr-jobs", "hr-leaves", "hr-allocations", "hr-holidays", "hr-loans", "hr-attendance", "hr-contracts", "hr-shifts", "accounts", "settings",
     ])));
   const byKind = (kind: string) => rows.filter((row) => row.kind === kind);
   return { rows, byKind };

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import {
-  Banknote, BriefcaseBusiness, CalendarDays, CalendarCheck, Clock, FileBadge, FileSignature, HandCoins, ListChecks, LogOut, Network, PartyPopper, ReceiptText, Star, Users, Workflow,
+  Banknote, BriefcaseBusiness, CalendarDays, CalendarCheck, CalendarRange, Car, Clock, FileBadge, FileSignature, GraduationCap, HandCoins, ListChecks, LogOut, Network, PartyPopper, ReceiptText, Star, Timer, Users, Utensils, Workflow,
 } from "lucide-react";
 
 import type { CrmStore } from "@/components/crm/crm-shared";
@@ -38,6 +38,11 @@ export default function HrHome({ store }: { store: CrmStore; currency?: string; 
     { label: "Documents", href: "/app/hr/documents", icon: FileBadge, colour: "#4F6D7A", waiting: count("hr-documents", (data) => Boolean(data.expiryDate) && data.expiryDate <= soon) },
     { label: "Allocations", href: "/app/hr/allocations", icon: CalendarCheck, colour: "#2E8B7A" },
     { label: "Public Holidays", href: "/app/hr/public-holidays", icon: PartyPopper, colour: "#C2577A" },
+    { label: "Timesheets", href: "/app/hr/timesheets", icon: Timer, colour: "#3F8F6B", waiting: count("hr-timesheets", (data) => data.status === "Draft") },
+    { label: "Planning", href: "/app/hr/planning", icon: CalendarRange, colour: "#7A6FBF", waiting: count("hr-shifts", (data) => data.status === "Draft") },
+    { label: "Fleet", href: "/app/hr/fleet", icon: Car, colour: "#56738A", waiting: count("hr-vehicles", (data) => [data.insuranceExpiry, data.registrationExpiry].some((date) => Boolean(date) && date <= soon)) },
+    { label: "Lunch", href: "/app/hr/lunch", icon: Utensils, colour: "#D2843B", waiting: count("hr-lunch-orders", (data) => data.status === "Ordered") },
+    { label: "eLearning", href: "/app/hr/courses", icon: GraduationCap, colour: "#2C7DA0" },
   ];
 
   return (

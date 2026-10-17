@@ -63,6 +63,13 @@ export const recordKinds = [
   "hr-settlements",
   "hr-contracts",
   "hr-goals",
+  "hr-vehicles",
+  "hr-vehicle-services",
+  "hr-timesheets",
+  "hr-shifts",
+  "hr-lunch-orders",
+  "hr-courses",
+  "hr-enrolments",
 ] as const;
 
 export type RecordKind = (typeof recordKinds)[number];

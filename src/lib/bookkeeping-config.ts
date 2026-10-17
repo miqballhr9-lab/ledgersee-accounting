@@ -632,6 +632,13 @@ export const navigationGroups: NavigationGroup[] = [
       { slug: "hr/goals", label: "Goals", icon: "Star" },
       { slug: "hr/expenses", label: "Expenses", icon: "ReceiptText" },
       { slug: "hr/documents", label: "Documents", icon: "FileBadge" },
+      { slug: "hr/timesheets", label: "Timesheets", icon: "Timer" },
+      { slug: "hr/planning", label: "Planning", icon: "CalendarRange" },
+      { slug: "hr/fleet", label: "Fleet", icon: "Car" },
+      { slug: "hr/fleet-services", label: "Fleet services", icon: "Wrench" },
+      { slug: "hr/lunch", label: "Lunch", icon: "Utensils" },
+      { slug: "hr/courses", label: "eLearning", icon: "GraduationCap" },
+      { slug: "hr/course-enrolments", label: "Course enrolments", icon: "GraduationCap" },
     ],
   },
   {
