@@ -76,7 +76,7 @@ export default function AttendanceDialog({ open, onOpenChange, context }: { open
     const holidays = context.store["hr-holidays"] ?? [];
     const leaves = context.store["hr-leaves"] ?? [];
     const holiday = holidays.some((item) => item.data.date === day);
-    const sunday = new Date(`${day}T12:00:00Z`).getUTCDay() === 0;
+    const dayOff = (context.weekend ?? [0]).includes(new Date(`${day}T12:00:00Z`).getUTCDay());
     const lines: SheetRow[] = [];
     for (const record of attendance.filter((item) => item.data.date === day)) {
       if (!allEmployees.some((employee) => employee.id === record.data.employeeId)) continue;
@@ -85,7 +85,7 @@ export default function AttendanceDialog({ open, onOpenChange, context }: { open
     for (const employee of employees) {
       if (lines.some((line) => line.employeeId === employee.id)) continue;
       const onLeave = leaves.some((item) => item.data.employeeId === employee.id && item.data.status === "Approved" && item.data.fromDate <= day && item.data.toDate >= day);
-      const status = holiday || sunday ? "Holiday" : onLeave ? "On leave" : "Present";
+      const status = holiday || dayOff ? "Holiday" : onLeave ? "On leave" : "Present";
       lines.push({ id: lines.length + 1, employeeId: employee.id, status, checkIn: status === "Present" ? start : "", checkOut: status === "Present" ? end : "", notes: "" });
     }
     while (lines.length < 5) lines.push(blankRow(lines.length + 1));

@@ -33,7 +33,7 @@ import type { FormField, ModuleDefinition } from "@/lib/bookkeeping-config";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
 import { formatCustomerAddress } from "@/lib/customer-utils";
 import { expenseLinesFromData } from "@/lib/expense-utils";
-import { currencyAmount, dueDateForTerms, invoiceSubtotal, parseInvoiceLines } from "@/lib/invoice-utils";
+import { currencyAmount, dueDateForTerms, invoiceSubtotal, invoiceTax, parseInvoiceLines } from "@/lib/invoice-utils";
 import { accountCategoryForType } from "@/lib/account-types";
 import { paymentAccountLabel, paymentAccountType, receivingAccountType } from "@/lib/payment-accounts";
 
@@ -62,6 +62,7 @@ interface InvoiceLine {
   bundleId?: string;
   bundleName?: string;
   bundleShow?: string;
+  taxRate?: string;
 }
 
 const itemAccountKeys = new Set(["incomeAccountId", "expenseAccountId", "assetAccountId"]);
@@ -170,6 +171,7 @@ function readInvoiceLines(lines: string, items: BookkeepingRecord[]): InvoiceLin
       description: line.description,
       quantity: line.quantity,
       rate: line.rate,
+      ...(line.taxRate ? { taxRate: line.taxRate } : {}),
       ...(line.bundleId ? { bundleId: line.bundleId, bundleName: line.bundleName, bundleShow: line.bundleShow } : {}),
     };
   });
@@ -566,7 +568,7 @@ export default function RecordEditor({ module, record, customers, vendors, items
   }
 
   const subtotal = invoiceSubtotal(invoiceLines);
-  const taxAmount = subtotal * (Math.max(0, Number(values.taxRate) || 0) / 100);
+  const taxAmount = invoiceTax(invoiceLines, values.taxRate);
   const discount = Math.max(0, Number(values.discount) || 0);
   const invoiceTotal = Math.max(0, subtotal + taxAmount - discount);
   const expenseTotal = expenseLines.reduce((sum, line) => sum + (Number(line.amount) || 0), 0)
@@ -971,6 +973,7 @@ export default function RecordEditor({ module, record, customers, vendors, items
                 <th className={`w-24 text-right ${headCell} ${cellBorder}`}>Qty</th>
                 <th className={`w-32 text-right ${headCell} ${cellBorder}`}>Rate</th>
                 <th className={`w-36 text-right ${headCell} ${cellBorder}`}>Amount</th>
+                {hasTaxField ? <th className={`w-40 text-left ${headCell} ${cellBorder}`}>Tax</th> : null}
                 <th className="w-12"><span className="sr-only">Remove</span></th>
               </tr>
             </thead>
@@ -1010,6 +1013,21 @@ export default function RecordEditor({ module, record, customers, vendors, items
                       <Input id={`invoice-rate-${line.id}`} aria-label={`Rate for line ${index + 1}`} type="number" min="0" step="any" inputMode="decimal" value={line.rate} onChange={(event) => updateInvoiceLine(line.id, { rate: event.target.value })} className={`${cellInput} text-right tabular-nums`} />
                     </td>
                     <td className={`px-2.5 py-2.5 text-right font-medium tabular-nums ${cellBorder}`}>{currencyAmount((Number(line.quantity) || 0) * (Number(line.rate) || 0), moneyCurrency)}</td>
+                    {hasTaxField ? (
+                      <td className={`p-0 ${cellBorder}`}>
+                        {/* Each line can carry its own tax, as a mix of standard, reduced and exempt goods needs. */}
+                        <Select value={line.taxRate ? `rate:${line.taxRate}` : "default"} onValueChange={(next) => updateInvoiceLine(line.id, { taxRate: next && next !== "default" ? next.slice(5) : "" })}>
+                          <SelectTrigger aria-label={`Tax for line ${index + 1}`} className={`${cellInput} !h-10 justify-between`}>
+                            <SelectValue>{line.taxRate ? (Number(line.taxRate) === 0 ? "No tax" : `${taxOptions.find((tax) => Number(tax.data.rate) === Number(line.taxRate))?.data.name ?? "Tax"} · ${line.taxRate}%`) : `Default${values.taxRate ? ` · ${values.taxRate}%` : ""}`}</SelectValue>
+                          </SelectTrigger>
+                          <SelectContent className="min-w-56">
+                            <SelectItem value="default">Default (document tax)</SelectItem>
+                            <SelectItem value="rate:0">No tax</SelectItem>
+                            {taxOptions.filter((tax) => Number(tax.data.rate) > 0).map((tax) => <SelectItem key={tax.id} value={`rate:${Number(tax.data.rate)}`}>{tax.data.name} · {tax.data.rate}%</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                      </td>
+                    ) : null}
                     <td className="px-1 py-1 text-center">
                       <Button type="button" variant="ghost" size="icon-sm" aria-label={`Remove line ${index + 1}`} className="text-muted-foreground hover:text-destructive" onClick={() => setInvoiceLines((current) => current.filter((entry) => entry.id !== line.id))}><Trash2 size={14} /></Button>
                     </td>

@@ -40,8 +40,8 @@ export default async function HrSectionPage({ params, searchParams }: HrPageProp
   }
   if (!hrPages.includes(page)) notFound();
   const { open, job } = await searchParams;
-  const { store, currency, me, owners } = await loadHrData();
-  return <CrmWorkspace key={page} page={page} initialStore={store} currency={currency} me={me} owners={owners} openId={open} jobFilter={page === "applications" ? job : undefined} />;
+  const { store, currency, me, owners, weekend } = await loadHrData();
+  return <CrmWorkspace key={page} page={page} initialStore={store} currency={currency} me={me} owners={owners} weekend={weekend} openId={open} jobFilter={page === "applications" ? job : undefined} />;
 }
 
 const activeEmployees = (store: Awaited<ReturnType<typeof loadHrData>>["store"]) =>
@@ -50,7 +50,7 @@ const activeEmployees = (store: Awaited<ReturnType<typeof loadHrData>>["store"])
 /** Odoo's My Time Off: balances and the year's calendar, for you or (for HR) any employee. */
 async function MyTimeOffPage() {
   const me = await requireUser();
-  const { store, today } = await loadHrData();
+  const { store, today, weekend } = await loadHrData();
   const year = today.slice(0, 4);
   const employees = activeEmployees(store);
   const email = me.email.trim().toLowerCase();
@@ -74,6 +74,7 @@ async function MyTimeOffPage() {
   return (
     <TimeOffDashboard
       year={year}
+      weekend={weekend}
       today={today}
       employees={shown.map((employee) => ({ id: employee.id, name: employee.data.name || "Employee" }))}
       defaultEmployeeId={mine && ids.has(mine.id) ? mine.id : shown[0]?.id ?? ""}

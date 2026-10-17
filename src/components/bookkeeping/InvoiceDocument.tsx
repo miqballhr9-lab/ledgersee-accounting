@@ -42,6 +42,9 @@ export default function InvoiceDocument({ invoice, companyName, documentKind = "
   const subtotal = Number(invoice.subtotal) || 0;
   const taxAmount = Number(invoice.taxAmount) || 0;
   const discount = Number(invoice.discount) || 0;
+  // A tax column prints only when lines carry their own rates.
+  const lineTaxes = lines.some((line) => line.taxRate);
+  const lineTax = (line: (typeof lines)[number]) => `${line.taxRate || invoice.taxRate || "0"}%`;
 
   return (
     <article className="mx-auto w-full max-w-4xl border border-border bg-card p-6 text-card-foreground shadow-sm sm:p-10 print:max-w-none print:border-0 print:p-0 print:shadow-none">
@@ -92,6 +95,7 @@ export default function InvoiceDocument({ invoice, companyName, documentKind = "
               <th className="px-3 py-3 font-medium">Description</th>
               <th className="px-3 py-3 text-right font-medium">Qty</th>
               <th className="px-3 py-3 text-right font-medium">Rate</th>
+              {lineTaxes ? <th className="px-3 py-3 text-right font-medium">Tax</th> : null}
               <th className="px-3 py-3 text-right font-medium">Total</th>
             </tr>
           </thead>
@@ -106,6 +110,7 @@ export default function InvoiceDocument({ invoice, companyName, documentKind = "
                     <td className="max-w-64 whitespace-pre-wrap px-3 py-4 text-muted-foreground">{line.description || "—"}</td>
                     <td className="px-3 py-4 text-right tabular-nums">{line.quantity}</td>
                     <td className="px-3 py-4 text-right tabular-nums">{currencyAmount(Number(line.rate) || 0, currency)}</td>
+                    {lineTaxes ? <td className="px-3 py-4 text-right tabular-nums">{lineTax(line)}</td> : null}
                     <td className="px-3 py-4 text-right font-medium tabular-nums">{currencyAmount(lineTotal(line), currency)}</td>
                   </tr>
                 );
@@ -119,6 +124,7 @@ export default function InvoiceDocument({ invoice, companyName, documentKind = "
                     <td className="max-w-64 whitespace-pre-wrap px-3 py-4 text-muted-foreground">{group.show ? "Bundle" : group.lines.map((line) => line.name).join(", ")}</td>
                     <td className="px-3 py-4 text-right tabular-nums">1</td>
                     <td className="px-3 py-4 text-right tabular-nums">{currencyAmount(total, currency)}</td>
+                    {lineTaxes ? <td className="px-3 py-4" /> : null}
                     <td className="px-3 py-4 text-right font-medium tabular-nums">{currencyAmount(total, currency)}</td>
                   </tr>
                   {group.show ? group.lines.map((line, partIndex) => (
@@ -127,6 +133,7 @@ export default function InvoiceDocument({ invoice, companyName, documentKind = "
                       <td className="max-w-64 whitespace-pre-wrap px-3 py-2">{line.description || ""}</td>
                       <td className="px-3 py-2 text-right tabular-nums">{line.quantity}</td>
                       <td className="px-3 py-2 text-right tabular-nums">{currencyAmount(Number(line.rate) || 0, currency)}</td>
+                      {lineTaxes ? <td className="px-3 py-2 text-right tabular-nums">{lineTax(line)}</td> : null}
                       <td className="px-3 py-2 text-right tabular-nums">{currencyAmount(lineTotal(line), currency)}</td>
                     </tr>
                   )) : null}
@@ -139,7 +146,7 @@ export default function InvoiceDocument({ invoice, companyName, documentKind = "
 
       <section className="ml-auto mt-6 w-full max-w-sm space-y-3 text-sm">
         <div className="flex justify-between gap-4"><span className="text-muted-foreground">Subtotal</span><span className="tabular-nums">{currencyAmount(subtotal, currency)}</span></div>
-        <div className="flex justify-between gap-4"><span className="text-muted-foreground">{invoice.taxName ? `${invoice.taxName}` : `Tax (${invoice.taxRate || "0"}%)`}</span><span className="tabular-nums">{currencyAmount(taxAmount, currency)}</span></div>
+        <div className="flex justify-between gap-4"><span className="text-muted-foreground">{lineTaxes ? "Tax" : invoice.taxName ? `${invoice.taxName}` : `Tax (${invoice.taxRate || "0"}%)`}</span><span className="tabular-nums">{currencyAmount(taxAmount, currency)}</span></div>
         <div className="flex justify-between gap-4"><span className="text-muted-foreground">Discount</span><span className="tabular-nums">−{currencyAmount(discount, currency)}</span></div>
         <div className="flex justify-between gap-4 border-t border-border pt-4 text-base font-semibold"><span>{details.totalLabel}</span><span className="tabular-nums">{currencyAmount(Number(invoice.amount) || 0, currency)}</span></div>
       </section>

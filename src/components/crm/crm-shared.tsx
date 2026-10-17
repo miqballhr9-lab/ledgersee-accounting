@@ -14,6 +14,8 @@ export interface CrmContextValue {
   upsert: (records: BookkeepingRecord[]) => void;
   /** Removes records from the store. */
   remove: (kind: string, ids: string[]) => void;
+  /** The business's weekly days off, as UTC day numbers (HR pages). */
+  weekend?: number[];
 }
 
 export function errorText(error: unknown) {

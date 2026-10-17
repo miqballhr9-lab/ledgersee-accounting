@@ -47,8 +47,10 @@ export async function submitWebLead(token: string, input: WebLeadInput): Promise
   const openCount = (name: string) => leads.filter((row) => row.data.owner === name && !["Converted", "Junk Lead", "Lost Lead", "Not Qualified"].includes(row.data.leadStatus ?? "")).length;
   const owner = people.length ? people.reduce((best, name) => (openCount(name) < openCount(best) ? name : best), people[0]) : settings.data.companyName || "";
   const phone = String(input.phone ?? "").trim().slice(0, 40);
-  const company = String(input.company ?? "").trim().slice(0, 120);
-  const score = Math.min(100, 15 + (phone ? 15 : 0) + (company ? 10 : 0));
+  // The lead form needs a company; a person who gives none is filed under their own name.
+  const givenCompany = String(input.company ?? "").trim().slice(0, 120);
+  const company = givenCompany || [firstName, lastName].filter(Boolean).join(" ") || "Web form";
+  const score = Math.min(100, 15 + (phone ? 15 : 0) + (givenCompany ? 10 : 0));
   await db.insert(bookkeepingRecord).values({
     userId,
     kind: "crm-leads",

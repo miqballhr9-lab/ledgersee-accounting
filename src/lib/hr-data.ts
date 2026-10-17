@@ -5,6 +5,7 @@ import { requireUser } from "@/lib/auth";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
 import { hrKinds } from "@/lib/crm-config";
 import { odooHrData } from "@/lib/hr-status";
+import { weekendDays } from "@/lib/weekend";
 
 /** Everything the HR screens show, loaded in one query. */
 export async function loadHrData() {
@@ -24,6 +25,7 @@ export async function loadHrData() {
     me: me.name,
     owners: [...new Set([me.workspaceName, me.name, ...teamNames])],
     currency: groups.settings?.[0]?.data.currency || "USD",
+    weekend: weekendDays(groups.settings?.[0]?.data.weekendDays),
     today: businessToday(groups.settings?.[0]?.data.timeZone),
   };
 }

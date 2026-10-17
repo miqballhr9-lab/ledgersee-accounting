@@ -8,6 +8,8 @@ export interface InvoiceLineData {
   bundleId?: string;
   bundleName?: string;
   bundleShow?: string;
+  /** The line's own tax rate in percent; blank uses the document's rate. */
+  taxRate?: string;
 }
 
 export function parseInvoiceLines(raw: string): InvoiceLineData[] {
@@ -26,6 +28,7 @@ export function parseInvoiceLines(raw: string): InvoiceLineData[] {
           description: typeof line.description === "string" ? line.description : "",
           quantity: typeof line.quantity === "string" ? line.quantity : String(line.quantity ?? ""),
           rate: typeof line.rate === "string" ? line.rate : String(line.rate ?? ""),
+          ...(typeof line.taxRate === "string" && line.taxRate.trim() ? { taxRate: line.taxRate.trim() } : {}),
           ...(typeof line.bundleId === "string" && line.bundleId ? { bundleId: line.bundleId, bundleName: typeof line.bundleName === "string" ? line.bundleName : "", bundleShow: line.bundleShow === "false" ? "false" : "true" } : {}),
         }];
       });
@@ -53,6 +56,16 @@ export function invoiceSubtotal(lines: InvoiceLineData[]): number {
     const rate = Number(line.rate);
     if (!line.name.trim() || !Number.isFinite(quantity) || !Number.isFinite(rate)) return sum;
     return sum + Math.max(0, quantity) * Math.max(0, rate);
+  }, 0);
+}
+
+/** Tax on the lines: each line at its own rate when it has one, otherwise at the document's rate. */
+export function invoiceTax(lines: Array<Pick<InvoiceLineData, "quantity" | "rate" | "taxRate">>, documentRate: string | number | undefined): number {
+  const fallback = Math.max(0, Number(documentRate) || 0);
+  return lines.reduce((sum, line) => {
+    const amount = (Number(line.quantity) || 0) * (Number(line.rate) || 0);
+    const rate = line.taxRate?.trim() ? Math.max(0, Number(line.taxRate) || 0) : fallback;
+    return sum + amount * (rate / 100);
   }, 0);
 }
 

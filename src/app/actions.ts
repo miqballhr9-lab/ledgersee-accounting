@@ -14,7 +14,7 @@ import { canReadKind } from "@/lib/permissions";
 import { applyLoanRepayment } from "@/lib/hr-rules";
 import { sendEmailOrThrow } from "@/lib/email";
 import { createUploadUrl } from "@/lib/storage";
-import { dueDateForTerms, parseInvoiceLines } from "@/lib/invoice-utils";
+import { dueDateForTerms, invoiceTax, parseInvoiceLines } from "@/lib/invoice-utils";
 import { buildInventory, inventoryKinds, isInventoryItem } from "@/lib/inventory";
 import { siteUrl } from "@/lib/site";
 import { isRecordKind, type BookkeepingRecord, type RecordKind } from "@/lib/bookkeeping-types";
@@ -157,7 +157,8 @@ function amountFromLineItems(data: Record<string, string>, kind: string): Record
   const discount = Math.max(0, Number(data.discount) || 0);
   if (taxRate > 100) throw new ActionError("Tax rate can’t be greater than 100%.");
   if (Number(data.taxRate) < 0 || Number(data.discount) < 0) throw new ActionError("Tax and discount values can’t be negative.");
-  const taxAmount = subtotal * (taxRate / 100);
+  if (lines.some((line) => line.taxRate && (Number(line.taxRate) < 0 || Number(line.taxRate) > 100))) throw new ActionError("Each line’s tax rate must be between 0 and 100%.");
+  const taxAmount = invoiceTax(lines, taxRate);
 
   return {
     ...data,

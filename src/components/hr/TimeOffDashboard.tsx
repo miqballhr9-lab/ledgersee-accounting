@@ -36,6 +36,8 @@ interface Props {
   balances: Record<string, TimeOffBalance[]>;
   leaves: TimeOffEntry[];
   holidays: { name: string; from: string; to: string }[];
+  /** The business's weekly days off, as UTC day numbers. */
+  weekend?: number[];
 }
 
 const colours = ["#714B67", "#017E84", "#E46F78", "#21B799", "#E4A900", "#5B899E", "#8F5FD8"];
@@ -61,7 +63,8 @@ function datesBetween(from: string, to: string) {
 }
 
 /** Odoo Time Off dashboard: balance cards per type and the year's calendar of time off and public holidays. */
-export default function TimeOffDashboard({ year, today, employees, defaultEmployeeId, types, balances, leaves, holidays }: Props) {
+export default function TimeOffDashboard({ year, today, employees, defaultEmployeeId, types, balances, leaves, holidays, weekend: weekendDays = [0] }: Props) {
+  const offDay = (date: string) => weekendDays.includes(new Date(`${date}T12:00:00Z`).getUTCDay());
   const [employeeId, setEmployeeId] = useState(defaultEmployeeId);
   const [view, setView] = useState<"mine" | "team">("mine");
   const [teamMonth, setTeamMonth] = useState(today.slice(0, 7));
@@ -110,7 +113,7 @@ export default function TimeOffDashboard({ year, today, employees, defaultEmploy
               <thead>
                 <tr>
                   <th className="sticky left-0 z-10 min-w-40 bg-card px-3 py-2 text-left text-sm font-semibold">{new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString("en-US", { month: "long", year: "numeric", timeZone: "UTC" })}</th>
-                  {daysOf.map((date) => <th key={date} className={`min-w-7 px-0.5 py-2 text-center font-medium ${new Date(`${date}T12:00:00Z`).getUTCDay() === 0 ? "text-muted-foreground/60" : "text-muted-foreground"}`}>{Number(date.slice(8))}</th>)}
+                  {daysOf.map((date) => <th key={date} className={`min-w-7 px-0.5 py-2 text-center font-medium ${offDay(date) ? "text-muted-foreground/60" : "text-muted-foreground"}`}>{Number(date.slice(8))}</th>)}
                 </tr>
               </thead>
               <tbody>
@@ -175,7 +178,7 @@ export default function TimeOffDashboard({ year, today, employees, defaultEmploy
                         const date = `${year}-${String(month + 1).padStart(2, "0")}-${String(index + 1).padStart(2, "0")}`;
                         const leave = byDate.get(date);
                         const holiday = holidayByDate.get(date);
-                        const weekend = (offset + index) % 7 === 6;
+                        const weekend = offDay(date);
                         const approved = leave?.status === "Approved";
                         return (
                           <span key={date} title={leave ? `${leave.type} · ${leave.status}` : holiday}
