@@ -184,11 +184,13 @@ export default function CrmRecordDetail({ record, context, onClose, onOpenRecord
                   toast.success(`Quote ${result.number} created in Sales → Estimates.`);
                   onRefresh();
                 })}><FilePlus2 size={14} />Create quote</Button>
-                <Button type="button" size="sm" variant="outline" className="gap-1.5" disabled={Boolean(busy)} onClick={() => void act("invoice", async () => {
-                  const result = await createDocumentFromDeal(record.id, "invoices");
-                  toast.success(`Invoice ${result.number} created as a draft in Sales → Invoices.`);
-                  onRefresh();
-                })}><FileText size={14} />Create invoice</Button>
+                {context.accounting !== false ? (
+                  <Button type="button" size="sm" variant="outline" className="gap-1.5" disabled={Boolean(busy)} onClick={() => void act("invoice", async () => {
+                    const result = await createDocumentFromDeal(record.id, "invoices");
+                    toast.success(`Invoice ${result.number} created as a draft in Sales → Invoices.`);
+                    onRefresh();
+                  })}><FileText size={14} />Create invoice</Button>
+                ) : null}
               </>
             ) : null}
             {data.email ? <Button size="sm" variant="outline" className="gap-1.5" onClick={() => setEmail({ subject: "", body: `Hello ${data.firstName || data.fullName || data.name || ""},\n\n` })}><Mail size={14} />Send email</Button> : null}

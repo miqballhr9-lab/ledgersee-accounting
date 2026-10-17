@@ -21,7 +21,8 @@ import type { BookkeepingRecord, RecordKind } from "@/lib/bookkeeping-types";
 import { buildInventory, inventoryKinds, isInventoryItem } from "@/lib/inventory";
 import { stockByWarehouse } from "@/lib/warehouses";
 import { requireFeature } from "@/lib/plan-gate";
-import type { Feature } from "@/lib/plans";
+import { ensurePaymentAccounts } from "@/lib/hr-data";
+import { featuresForKind, type Feature } from "@/lib/plans";
 
 /** Warehouse names, in the order they were added; the first is where stock goes when a document names none. */
 const warehouseNames = (rows: BookkeepingRecord[] | undefined) => [...(rows ?? [])].sort((a, b) => a.createdAt.localeCompare(b.createdAt)).map((row) => row.data.name?.trim() ?? "").filter(Boolean);
@@ -46,9 +47,11 @@ export async function generateMetadata({ params }: SectionPageProps): Promise<Me
 export default async function SectionPage({ params, searchParams }: SectionPageProps) {
   const { section } = await params;
   const { startDate = "", endDate = "", budgetHead = "" } = await searchParams;
-  // Parts of the product outside the workspace's plan send people to Billing to upgrade.
-  const gated: Record<string, Feature> = { inventory: "inventory", warehouses: "inventory", "stock-transfers": "inventory", employees: "hr", payroll: "hr" };
-  if (gated[section]) await requireFeature(gated[section]);
+  // Parts of the product outside the workspace's plan send people to Billing to add the app.
+  const gated: Record<string, Feature[]> = { inventory: ["inventory"], employees: ["hr"], payroll: ["hr"], budgets: ["accounting"] };
+  const sectionModule = moduleBySlug(section);
+  const needed = gated[section] ?? (sectionModule ? featuresForKind(sectionModule.kind) : []);
+  if (section !== "settings" && needed.length) await requireFeature(...needed);
   if (section === "settings") {
     const [groups, me] = await Promise.all([listBookkeepingRecordGroups(["settings"]), requireUser()]);
     return <CompanySettings settings={groups.settings?.[0] ?? null} workspaceName={me.workspaceName} />;
@@ -68,6 +71,7 @@ export default async function SectionPage({ params, searchParams }: SectionPageP
   }
 
   if (section === "payroll") {
+    await ensurePaymentAccounts(await requireUser());
     const groups = await listBookkeepingRecordGroups(["payroll", "employees", "accounts", "settings", "hr-leaves", "hr-loans", "hr-attendance"]);
     const settingsData = groups.settings?.[0]?.data;
     const pack = packFor(settingsData?.taxCountry);

@@ -6,12 +6,14 @@ import { bookkeepingRecord } from "@/db/schema";
 import { requireUser } from "@/lib/auth";
 import InvoiceDocument from "@/components/bookkeeping/InvoiceDocument";
 import InvoicePrintButton from "@/components/bookkeeping/InvoicePrintButton";
+import { requireFeature } from "@/lib/plan-gate";
 
 interface InvoicePrintPageProps {
   params: Promise<{ id: string }>;
 }
 
 export default async function InvoicePrintPage({ params }: InvoicePrintPageProps) {
+  await requireFeature("accounting");
   const me = await requireUser();
   const { id } = await params;
   const [invoice, settings] = await Promise.all([

@@ -4,7 +4,8 @@ import type { Metadata } from "next";
 import { listAllBookkeepingRecords } from "@/app/actions";
 import ManagementReport from "@/components/reports/ManagementReport";
 import ReportViewer from "@/components/reports/ReportViewer";
-import { reportByKey } from "@/lib/report-catalog";
+import { requireFeature, reportCategoryFeature } from "@/lib/plan-gate";
+import { reportByKey, reportCategoryKey } from "@/lib/report-catalog";
 
 interface ReportPageProps {
   params: Promise<{ report: string }>;
@@ -17,6 +18,7 @@ export async function generateMetadata({ params }: ReportPageProps): Promise<Met
 
 export default async function ReportPage({ params }: ReportPageProps) {
   const { report } = await params;
+  await requireFeature(reportCategoryFeature(reportCategoryKey(report)));
   const records = await listAllBookkeepingRecords();
   if (report === "management-report") return <ManagementReport records={records} today={new Date().toISOString().slice(0, 10)} />;
   return (

@@ -2,10 +2,12 @@ import type { Metadata } from "next";
 
 import { listBookkeepingRecordGroups } from "@/app/actions";
 import BankDepositsWorkspace from "@/components/bookkeeping/BankDepositsWorkspace";
+import { requireFeature } from "@/lib/plan-gate";
 
 export const metadata: Metadata = { title: "Bank deposits" };
 
 export default async function DepositsPage() {
+  await requireFeature("accounting");
   const groups = await listBookkeepingRecordGroups(["deposits", "payments", "accounts", "bank-accounts", "settings"]);
   return (
     <BankDepositsWorkspace

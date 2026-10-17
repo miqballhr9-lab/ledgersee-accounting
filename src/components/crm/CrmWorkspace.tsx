@@ -54,6 +54,8 @@ interface CrmWorkspaceProps {
   weekend?: number[];
   /** Applications: the recruitment stages set in Settings. */
   recruitmentStages?: string;
+  /** False with the CRM app alone: deals make quotes, not invoices. */
+  accounting?: boolean;
 }
 
 const pageInfo: Record<string, { title: string; description: string }> = {
@@ -127,7 +129,7 @@ function dueDateOf(record: BookkeepingRecord) {
   return (record.data.dueDate || record.data.closingDate || record.data.from || record.data.startTime || "").slice(0, 10);
 }
 
-export default function CrmWorkspace({ page, initialStore, currency, me, owners, openId, jobFilter, weekend, recruitmentStages }: CrmWorkspaceProps) {
+export default function CrmWorkspace({ page, initialStore, currency, me, owners, openId, jobFilter, weekend, recruitmentStages, accounting = true }: CrmWorkspaceProps) {
   const router = useRouter();
   const [store, setStore] = useState<CrmStore>(initialStore);
   const [lastInitial, setLastInitial] = useState(initialStore);
@@ -193,7 +195,7 @@ export default function CrmWorkspace({ page, initialStore, currency, me, owners,
     setStore((current) => ({ ...current, [kind]: (current[kind] ?? []).filter((item) => !ids.includes(item.id)) }));
     setSelected((current) => current.filter((id) => !ids.includes(id)));
   }, []);
-  const context: CrmContextValue = { store, currency, me, owners, upsert, remove, weekend };
+  const context: CrmContextValue = { store, currency, me, owners, upsert, remove, weekend, accounting };
 
   useEffect(() => {
     if (!openId) return;

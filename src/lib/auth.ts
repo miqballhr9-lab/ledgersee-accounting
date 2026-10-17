@@ -27,7 +27,7 @@ import { currentScheduledUser } from "@/lib/run-as-user";
 import { currentRoleOverride } from "@/lib/role-override";
 import { canAccess, canReadKind, canWriteKind, isRole, type Role } from "@/lib/permissions";
 import { billingAccess, type BillingAccess } from "@/lib/billing";
-import { featureForKind, featureLabels, planFor } from "@/lib/plans";
+import { featureLabels, featuresForKind, planFor } from "@/lib/plans";
 
 /**
  * Which origin this app answers on — resolved PER REQUEST, not pinned at build.
@@ -385,8 +385,8 @@ export function assertCanWrite(me: WorkspaceUser, kind: string) {
 /** Throws when the plan has run out (records are read-only) or doesn't include this part of the product. */
 export function assertPlanAllows(me: WorkspaceUser, kind: string) {
   if (me.access.locked) throw new ActionError("Your business is on the Free plan, which is for the owner only. Ask the owner to upgrade so the team can make changes.");
-  const feature = featureForKind(kind);
-  if (!me.access.features.includes(feature)) throw new ActionError(`${featureLabels[feature]} isn’t in your plan. Upgrade to ${planFor(feature).name} in Billing to use it.`);
+  const needed = featuresForKind(kind);
+  if (!needed.some((feature) => me.access.features.includes(feature))) throw new ActionError(`${featureLabels[needed[0]]} isn’t in your plan. Add the ${planFor(needed[0]).name} in Billing to use it.`);
 }
 
 /** Throws unless the signed-in person's role may open records of this kind. */

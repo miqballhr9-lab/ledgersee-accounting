@@ -93,6 +93,7 @@ import {
 } from "@/components/ui/collapsible";
 import { navigationGroups } from "@/lib/bookkeeping-config";
 import { areaForPage, canAccess, homeFor, type Role } from "@/lib/permissions";
+import type { Feature } from "@/lib/plans";
 import { signOut } from "@/lib/auth-client";
 
 interface AppFrameProps {
@@ -102,8 +103,16 @@ interface AppFrameProps {
   /** Whose business this is: the owner's name, shown as the workspace. */
   workspaceName: string;
   isOwner: boolean;
+  /** The apps the business has; the menu shows only these. All when not given. */
+  features?: Feature[];
   children: React.ReactNode;
 }
+
+/** Which app each menu group belongs to; groups not listed (Organization) are for everyone. */
+const groupFeature: Record<string, Feature> = {
+  Overview: "accounting", CRM: "crm", Sales: "accounting", Purchases: "accounting", Inventory: "inventory", Accounts: "accounting",
+  HRM: "hr", Payroll: "hr", "My portal": "hr", Budgets: "accounting",
+};
 
 const icons: Record<string, LucideIcon> = {
   LayoutDashboard,
@@ -217,18 +226,22 @@ function initials(name: string) {
   return name.trim().split(/\s+/).slice(0, 2).map((part) => part[0]?.toUpperCase() ?? "").join("") || "LL";
 }
 
-export default function AppFrame({ userName, userEmail, role, workspaceName, isOwner, children }: AppFrameProps) {
+export default function AppFrame({ userName, userEmail, role, workspaceName, isOwner, features, children }: AppFrameProps) {
   const pathname = usePathname();
   const router = useRouter();
   const allowed = (href: string) => {
     const area = areaForPage(href);
     return !area || canAccess(role, area);
   };
+  const hasApp = (feature: Feature | undefined) => !feature || !features || features.includes(feature);
+  // Reports also hold the CRM and payroll reports, so anyone with an app sees them.
   const visibleGroups = navigationGroups
-    .map((group) => ({ ...group, items: group.items.filter((item) => allowed(itemHref(item.slug))) }))
+    .map((group) => ({ ...group, items: group.items.filter((item) => allowed(itemHref(item.slug)) && (item.slug === "reports" ? Boolean(features?.length) || !features : hasApp(groupFeature[group.label]))) }))
+    // Without Accounting, the Accounts group holds only Reports.
+    .map((group) => (group.label === "Accounts" && !hasApp("accounting") ? { ...group, label: "Reports" } : group))
     .filter((group) => group.items.length);
   const visibleGearGroups = gearGroups
-    .map((group) => ({ ...group, items: group.items.filter((item) => allowed(item.href)) }))
+    .map((group) => ({ ...group, items: group.items.filter((item) => allowed(item.href) && (item.href === "/app/reports" || item.href === "/app/settings" || item.href === "/app/team-members" || hasApp("accounting"))) }))
     .filter((group) => group.items.length);
   const blocked = !allowed(pathname);
   useEffect(() => {

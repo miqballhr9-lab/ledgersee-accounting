@@ -7,7 +7,7 @@ import { cache } from "react";
 import { db } from "@/db";
 import { bookkeepingRecord } from "@/db/schema";
 import { ActionError } from "@/lib/action-error";
-import { planByKey, plans, TRIAL_MONTHS, type Feature, type PlanKey } from "@/lib/plans";
+import { combinePlans, planByKey, planKeysOf, TRIAL_MONTHS, type Feature, type PlanKey } from "@/lib/plans";
 
 /**
  * Subscriptions, paid through Stripe. Billing is off until STRIPE_SECRET_KEY is
@@ -27,7 +27,11 @@ export interface BillingAccess {
   enabled: boolean;
   /** Records can be read and exported, not changed: a team member's workspace is on the owner-only Free plan. */
   locked: boolean;
+  /** The first plan, for messages; plans holds every app or bundle bought. */
   plan: PlanKey;
+  plans: PlanKey[];
+  /** The plans' names together, e.g. "CRM app + HRM app". */
+  planName: string;
   status: "trialing" | "active" | "past_due" | "canceled" | "trial_ended" | "free";
   trialEndsAt: string;
   currentPeriodEnd: string;
@@ -63,16 +67,17 @@ export async function saveSubscription(ownerId: string, patch: Record<string, st
 
 /** What a workspace may do under its plan right now. Read once per request. */
 export const billingAccess = cache(async function billingAccess(ownerId: string, ownerEmail: string): Promise<BillingAccess> {
-  const open: BillingAccess = { enabled: false, locked: false, plan: "enterprise", status: "free", trialEndsAt: "", currentPeriodEnd: "", cancelAtPeriodEnd: false, interval: "", features: allFeatures, users: Number.POSITIVE_INFINITY };
+  const open: BillingAccess = { enabled: false, locked: false, plan: "enterprise", plans: ["enterprise"], planName: "Enterprise bundle", status: "free", trialEndsAt: "", currentPeriodEnd: "", cancelAtPeriodEnd: false, interval: "", features: allFeatures, users: Number.POSITIVE_INFINITY };
   if (!billingEnabled() || exempt(ownerEmail)) return open;
   const data = (await subscriptionFor(ownerId)).data;
   const now = Date.now();
-  const plan = planByKey(data.plan) ?? plans[plans.length - 1];
-  const base = { ...open, enabled: true, plan: plan.key, trialEndsAt: data.trialEndsAt ?? "", currentPeriodEnd: data.currentPeriodEnd ?? "", cancelAtPeriodEnd: data.cancelAtPeriodEnd === "true", interval: data.interval ?? "" };
-  const paidUp = { ...base, features: plan.features, users: plan.users };
+  const keys = planKeysOf(data);
+  const bought = combinePlans(keys);
+  const base = { ...open, enabled: true, plan: keys[0], plans: keys, planName: bought.name, trialEndsAt: data.trialEndsAt ?? "", currentPeriodEnd: data.currentPeriodEnd ?? "", cancelAtPeriodEnd: data.cancelAtPeriodEnd === "true", interval: data.interval ?? "" };
+  const paidUp = { ...base, features: bought.features, users: bought.users };
   // When a trial or paid plan runs out, the business carries on with the Free plan; nothing is locked or deleted.
   const free = planByKey("free")!;
-  const onFree = { ...base, plan: free.key, features: free.features, users: free.users, cancelAtPeriodEnd: false, interval: "" };
+  const onFree = { ...base, plan: free.key, plans: [free.key], planName: free.name, features: free.features, users: free.users, cancelAtPeriodEnd: false, interval: "" };
   const before = (date: string | undefined, extraDays = 0) => Boolean(date) && now < Date.parse(date!) + extraDays * 86_400_000;
   switch (data.status) {
     case "active":
@@ -86,6 +91,17 @@ export const billingAccess = cache(async function billingAccess(ownerId: string,
       return before(data.currentPeriodEnd) ? { ...paidUp, status: "canceled" } : { ...onFree, status: data.status === "canceled" ? "canceled" : "trial_ended" };
   }
 });
+
+/** The Stripe subscription line for each plan bought, by plan key. Older records kept one line in stripeItemId. */
+export function stripeItemsOf(data: Record<string, string>): Record<string, string> {
+  try {
+    const parsed: unknown = JSON.parse(data.stripeItems || "{}");
+    if (parsed && typeof parsed === "object" && Object.keys(parsed).length) return parsed as Record<string, string>;
+  } catch {
+    // Unreadable: fall back to the single line.
+  }
+  return data.stripeItemId ? { [data.plan || "plan"]: data.stripeItemId } : {};
+}
 
 /** Calls Stripe's API (form-encoded, as Stripe expects) and returns its status and body without throwing on errors. */
 export async function stripeCall(method: "GET" | "POST", path: string, params: Record<string, string | number | undefined> = {}): Promise<{ ok: boolean; json: Record<string, unknown> & { error?: { message?: string; code?: string } } }> {

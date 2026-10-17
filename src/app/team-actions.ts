@@ -6,7 +6,6 @@ import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { bookkeepingRecord, user } from "@/db/schema";
 import { ActionError } from "@/lib/action-error";
-import { planByKey } from "@/lib/plans";
 import { assertAdmin, getUser, requireUser } from "@/lib/auth";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
 import { sendEmail } from "@/lib/email";
@@ -100,7 +99,7 @@ export async function inviteMember(input: InviteInput): Promise<{ member: Bookke
   if (existing?.data.status === "Active") throw new ActionError(`${existing.data.name || email} is already a member. Change their role from the list.`);
   // The plan sets how many people can sign in, the owner included.
   const seats = rows.filter((row) => row.id !== existing?.id && row.data.enabled !== "false" && ["Active", "Invited"].includes(row.data.status ?? "")).length + 1;
-  if (seats + 1 > me.access.users) throw new ActionError(`Your ${planByKey(me.access.plan)?.name ?? ""} plan includes ${me.access.users} ${me.access.users === 1 ? "user" : "users"}. Upgrade in Billing to invite more people.`);
+  if (seats + 1 > me.access.users) throw new ActionError(`Your ${me.access.planName} plan includes ${me.access.users} ${me.access.users === 1 ? "user" : "users"}. Upgrade in Billing to invite more people.`);
   const token = randomBytes(24).toString("base64url");
   const data: Record<string, string> = {
     ...(existing?.data ?? {}),

@@ -18,7 +18,7 @@ import { useFavouriteReports } from "@/components/reports/use-favourite-reports"
 const tabs = ["Standard", "Custom reports", "Management reports"] as const;
 
 /** The reports list, laid out like QuickBooks Online: favourites, then categories that open and close. */
-export default function ReportsHome({ customReports = [] }: { customReports?: BookkeepingRecord[] }) {
+export default function ReportsHome({ customReports = [], categoryKeys }: { customReports?: BookkeepingRecord[]; /** Categories the plan includes; all when not given. */ categoryKeys?: string[] }) {
   const router = useRouter();
   const [removing, setRemoving] = useState<string | null>(null);
   async function removeCustom(report: BookkeepingRecord) {
@@ -40,15 +40,16 @@ export default function ReportsHome({ customReports = [] }: { customReports?: Bo
   const total = reportCategories.reduce((sum, category) => sum + category.reports.length, 0);
 
   const categories = useMemo(() => {
-    const byKey = new Map(reportCategories.flatMap((category) => category.reports).map((report) => [report.key, report]));
+    const shown = categoryKeys ? reportCategories.filter((category) => categoryKeys.includes(category.key)) : reportCategories;
+    const byKey = new Map(shown.flatMap((category) => category.reports).map((report) => [report.key, report]));
     const favouriteReports = favourites.map((key) => byKey.get(key)).filter((report): report is ReportDefinition => Boolean(report));
-    const list = [{ key: "favourites", label: "Favourites", reports: favouriteReports }, ...reportCategories];
+    const list = [{ key: "favourites", label: "Favourites", reports: favouriteReports }, ...shown];
     const needle = query.trim().toLowerCase();
     if (!needle) return list;
     return list
       .map((category) => ({ ...category, reports: category.reports.filter((report) => `${report.label} ${report.description}`.toLowerCase().includes(needle)) }))
       .filter((category) => category.reports.length && category.key !== "favourites");
-  }, [favourites, query]);
+  }, [categoryKeys, favourites, query]);
 
   function toggleCategory(key: string) {
     setOpen((current) => {

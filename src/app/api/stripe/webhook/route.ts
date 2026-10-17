@@ -32,14 +32,18 @@ const statusMap: Record<string, string> = { active: "active", trialing: "trialin
 async function applySubscription(subscription: StripeObject) {
   const ownerId = await ownerOf(subscription);
   if (!ownerId) return;
-  const item = ((subscription.items as { data?: StripeObject[] } | undefined)?.data ?? [])[0] ?? {};
+  // One line per app or bundle; each line's product names its plan.
+  const items = (subscription.items as { data?: StripeObject[] } | undefined)?.data ?? [];
+  const lines = items.map((item) => ({ item, plan: planByKey(text((item.price as StripeObject | undefined)?.product).replace(/^mikledger_/, ""))?.key })).filter((line) => line.plan);
+  const metadata = (subscription.metadata ?? {}) as Record<string, string>;
+  const keys = lines.length ? lines.map((line) => line.plan!) : (metadata.plans || metadata.plan || "").split(",").filter((key) => planByKey(key));
+  const item = items[0] ?? {};
   const price = (item.price ?? {}) as StripeObject;
-  const product = text(price.product);
-  const plan = planByKey(product.replace(/^mikledger_/, ""))?.key ?? planByKey(((subscription.metadata ?? {}) as Record<string, string>).plan)?.key;
   const status = statusMap[text(subscription.status)] ?? "canceled";
   const current = (await subscriptionFor(ownerId)).data;
   await saveSubscription(ownerId, {
-    ...(plan ? { plan } : {}),
+    ...(keys.length ? { plans: keys.join(","), plan: keys[0] } : {}),
+    stripeItems: JSON.stringify(Object.fromEntries(lines.map((line) => [line.plan, text(line.item.id)]))),
     status,
     stripeSubscriptionId: text(subscription.id),
     stripeCustomerId: text(subscription.customer),

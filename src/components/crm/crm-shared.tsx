@@ -16,6 +16,8 @@ export interface CrmContextValue {
   remove: (kind: string, ids: string[]) => void;
   /** The business's weekly days off, as UTC day numbers (HR pages). */
   weekend?: number[];
+  /** False when the business has the CRM app without Accounting: quotes, but no invoices. */
+  accounting?: boolean;
 }
 
 export function errorText(error: unknown) {

@@ -25,6 +25,6 @@ export default async function CrmSectionPage({ params, searchParams }: CrmPagePr
   const { page } = await params;
   if (!isCrmPage(page)) notFound();
   const { open } = await searchParams;
-  const { store, currency, me, owners } = await loadCrmData();
-  return <CrmWorkspace key={page} page={page} initialStore={store} currency={currency} me={me} owners={owners} openId={open} />;
+  const { store, currency, me, owners, accounting } = await loadCrmData();
+  return <CrmWorkspace key={page} page={page} initialStore={store} currency={currency} me={me} owners={owners} openId={open} accounting={accounting} />;
 }

@@ -23,7 +23,7 @@ export default async function BookkeepingLayout({ children }: Readonly<{ childre
     : null;
 
   return (
-    <AppFrame userName={user.name} userEmail={user.email} role={user.role} workspaceName={user.workspaceName} isOwner={user.isOwner}>
+    <AppFrame userName={user.name} userEmail={user.email} role={user.role} workspaceName={user.workspaceName} isOwner={user.isOwner} features={access.locked ? undefined : access.features}>
       {billingNotice ? (
         <div className={`flex flex-wrap items-center justify-between gap-2 border-b px-4 py-2 text-sm sm:px-7 ${billingNotice.tone}`} role="status">
           <span>{billingNotice.text}</span>

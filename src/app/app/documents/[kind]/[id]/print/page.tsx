@@ -8,6 +8,8 @@ import InvoiceDocument from "@/components/bookkeeping/InvoiceDocument";
 import InvoicePrintButton from "@/components/bookkeeping/InvoicePrintButton";
 import { requireUser } from "@/lib/auth";
 import { canReadKind } from "@/lib/permissions";
+import { requireFeature } from "@/lib/plan-gate";
+import { featuresForKind } from "@/lib/plans";
 
 const printableKinds = ["estimates", "sales-orders", "credit-notes", "expenses"] as const;
 type PrintableKind = (typeof printableKinds)[number];
@@ -21,6 +23,8 @@ export default async function DocumentPrintPage({ params }: DocumentPrintPagePro
   const { kind, id } = await params;
   if (!printableKinds.includes(kind as PrintableKind)) notFound();
   if (!canReadKind(me.role, kind)) notFound();
+  // Quotes print with the CRM app too; the rest belong to Accounting.
+  await requireFeature(...featuresForKind(kind));
   const documentKind = kind as PrintableKind;
   const [document, settings] = await Promise.all([
     db

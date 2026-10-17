@@ -1,8 +1,10 @@
 import { listBookkeepingRecordGroups } from "@/app/actions";
 import Dashboard from "@/components/bookkeeping/Dashboard";
 import type { SetupProgress } from "@/components/bookkeeping/SetupChecklist";
+import { requireAccountingHome } from "@/lib/plan-gate";
 
 export default async function DashboardPage() {
+  await requireAccountingHome();
   const groups = await listBookkeepingRecordGroups(["invoices", "bills", "expenses", "settings", "customers", "items", "accounts"]);
   const invoices = groups.invoices ?? [];
   const records = [

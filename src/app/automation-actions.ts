@@ -4,11 +4,13 @@ import { and, desc, eq, sql } from "drizzle-orm";
 import { revalidatePath, withoutRevalidation } from "@/lib/revalidate";
 
 import { db } from "@/db";
-import { bookkeepingRecord } from "@/db/schema";
+import { bookkeepingRecord, user } from "@/db/schema";
 import { deleteBookkeepingRecord, generateRecurringInvoice, saveBookkeepingRecord } from "@/app/actions";
 import { runDueRecurringTransactions } from "@/app/recurring-actions";
 import { ActionError } from "@/lib/action-error";
 import { assertAdmin, requireUser } from "@/lib/auth";
+import { billingAccess } from "@/lib/billing";
+import { planFor, type Feature } from "@/lib/plans";
 import { sendEmail, sendEmailOrThrow } from "@/lib/email";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
 import { adjustedWorkedDays, parseSalaryRules, payrollAdjustments, salaryRuleAmounts } from "@/lib/payroll-adjustments";
@@ -361,10 +363,21 @@ function ruleDays(rule: StoredRow) {
   return Number.isFinite(days) && days >= 0 ? days : Number(fallback);
 }
 
+/** The apps each automation needs; a rule for an app the business doesn't have doesn't run. */
+const ruleFeatures: Record<string, Feature[]> = {
+  monthlyPayroll: ["hr"], recurringInvoices: ["accounting"], bankRules: ["accounting"], overdueReminders: ["accounting"],
+  crmLeadFollowUp: ["crm"], crmStaleDeals: ["crm"], crmWonDealInvoices: ["crm", "accounting"], crmOverdueTasks: ["crm"], crmCaseEscalation: ["crm"],
+};
+
 async function executeRule(userId: string, rule: StoredRow, trigger: "Scheduled" | "Run now") {
   const action = rule.data.action;
   const needsApproval = rule.data.requireApproval !== "false";
-  const result = action === "monthlyPayroll"
+  const [owner] = await db.select({ email: user.email }).from(user).where(eq(user.id, userId)).limit(1);
+  const access = await billingAccess(userId, owner?.email ?? "");
+  const missing = (ruleFeatures[action] ?? []).filter((feature) => !access.features.includes(feature));
+  const result = missing.length
+    ? { items: [], errors: [], summary: `Skipped: needs the ${missing.map((feature) => planFor(feature).name).join(" and ")}.` }
+    : action === "monthlyPayroll"
     ? await runMonthlyPayroll(userId)
     : action === "recurringInvoices"
       ? await runRecurringInvoices(userId)

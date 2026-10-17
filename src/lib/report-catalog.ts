@@ -183,4 +183,9 @@ export function reportByKey(key: string) {
   return allReports.find((report) => report.key === key);
 }
 
+/** The category a report sits in, e.g. "crm" or "employees". */
+export function reportCategoryKey(key: string) {
+  return reportCategories.find((category) => category.reports.some((report) => report.key === key))?.key ?? "";
+}
+
 export const defaultFavourites = ["profit-and-loss", "balance-sheet", "accounts-receivable-ageing-summary", "sales-by-customer-summary"];

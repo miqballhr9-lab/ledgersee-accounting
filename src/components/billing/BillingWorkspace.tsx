@@ -4,12 +4,12 @@ import { useState } from "react";
 import { Check, CreditCard, ExternalLink } from "lucide-react";
 import { toast } from "sonner";
 
-import { cancelSubscription, choosePlan, openBillingPortal, resumeSubscription } from "@/app/billing-actions";
+import { cancelSubscription, choosePlans, openBillingPortal, resumeSubscription } from "@/app/billing-actions";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { readableError } from "@/lib/action-error";
 import type { BillingAccess } from "@/lib/billing";
-import { featureLabels, planFor, plans, planPrice, formatPlanPrice, TRIAL_MONTHS, type BillingInterval, type Feature } from "@/lib/plans";
+import { featureLabels, formatPlanPrice, normalizePlans, planByKey, planFor, planPrice, plans, TRIAL_MONTHS, type BillingInterval, type Feature, type Plan, type PlanKey } from "@/lib/plans";
 
 export interface BillingPayment {
   id: string;
@@ -49,6 +49,54 @@ export default function BillingWorkspace({ enabled, paymentsReady, canManage, ac
   const [interval, setInterval] = useState<BillingInterval>(access.interval === "year" ? "year" : "month");
   const [busy, setBusy] = useState("");
   const subscribed = hasCustomer && ["active", "trialing", "past_due"].includes(access.status) && access.interval !== "";
+  const current = enabled && access.plans[0] !== "free" ? access.plans : [];
+  const [selected, setSelected] = useState<PlanKey[]>(() => (current.length && access.interval ? current : upgrade ? [planFor(upgrade).key] : []));
+  const total = selected.reduce((sum, key) => sum + planPrice(planByKey(key)!, interval), 0);
+  const unchanged = subscribed && interval === access.interval && selected.length === current.length && selected.every((key) => current.includes(key));
+  // Point out a bundle that costs no more than the apps chosen.
+  const chosenFeatures = new Set(selected.flatMap((key) => planByKey(key)!.features));
+  const cheaperBundle = plans.find((plan) => plan.type === "bundle" && !selected.includes(plan.key) && [...chosenFeatures].every((feature) => plan.features.includes(feature)) && planPrice(plan, interval) <= total);
+  const bundleHint = cheaperBundle ? `the ${cheaperBundle.name} includes all this for $${formatPlanPrice(planPrice(cheaperBundle, interval))}` : "";
+
+  function toggle(key: PlanKey) {
+    setSelected((now) => normalizePlans(now.includes(key) ? now.filter((entry) => entry !== key) : [...now, key]));
+  }
+
+  function planCard(plan: Plan) {
+    const isFree = plan.type === "free";
+    const picked = selected.includes(plan.key);
+    const coveredBy = !picked ? selected.map((key) => planByKey(key)!).find((other) => other.type === "bundle" && plan.features.every((feature) => other.features.includes(feature))) : undefined;
+    const highlight = picked || (upgrade ? planFor(upgrade).key === plan.key : false);
+    return (
+      <article key={plan.key} className={`flex flex-col rounded-lg border bg-card p-5 ${highlight ? "border-primary shadow-sm" : "border-border"}`}>
+        <div className="flex items-center justify-between gap-2">
+          <h3 className="text-lg font-semibold">{plan.name}</h3>
+          {current.includes(plan.key) || (isFree && enabled && access.plan === "free") ? <Badge variant="secondary">Current</Badge> : upgrade && planFor(upgrade).key === plan.key ? <Badge>Needed</Badge> : null}
+        </div>
+        <p className="mt-1 text-sm text-muted-foreground">{plan.description}</p>
+        <p className="mt-4"><span className="text-3xl font-semibold tabular-nums">${formatPlanPrice(planPrice(plan, interval))}</span><span className="text-sm text-muted-foreground">{isFree ? " for ever" : ` / ${interval === "year" ? "year" : "month"}`}</span></p>
+        {!isFree && interval === "year" && plan.monthly * 12 > plan.yearly ? <p className="text-xs font-medium text-primary">Save ${formatPlanPrice(plan.monthly * 12 - plan.yearly)} a year</p> : null}
+        <ul className="mt-4 flex-1 space-y-2 text-sm">
+          {plan.highlights.map((line) => <li key={line} className="flex gap-2"><Check size={16} className="mt-0.5 shrink-0 text-primary" />{line}</li>)}
+        </ul>
+        {isFree ? (
+          <Button
+            type="button"
+            className="mt-5 w-full"
+            variant="outline"
+            disabled={!enabled || !canManage || access.plan === "free" || !subscribed || access.cancelAtPeriodEnd || Boolean(busy)}
+            onClick={() => { if (window.confirm("Move to the Free plan? Your apps stay until the end of the period you've paid for, then only accounting for one user is included.")) void run("cancel", cancelSubscription, "You'll move to the Free plan at the end of this period."); }}
+          >
+            {enabled && access.plan === "free" ? "Your plan" : subscribed && !access.cancelAtPeriodEnd ? "Switch to Free" : "Included after the trial"}
+          </Button>
+        ) : (
+          <Button type="button" className="mt-5 w-full" variant={picked ? "default" : "outline"} aria-pressed={picked} disabled={Boolean(coveredBy) || Boolean(busy)} onClick={() => toggle(plan.key)}>
+            {coveredBy ? `In the ${coveredBy.name}` : picked ? <><Check size={15} />Selected</> : plan.type === "bundle" ? `Choose ${plan.name}` : `Add ${plan.name}`}
+          </Button>
+        )}
+      </article>
+    );
+  }
 
   async function run(key: string, action: () => Promise<{ url: string } | void>, done?: string) {
     setBusy(key);
@@ -77,7 +125,7 @@ export default function BillingWorkspace({ enabled, paymentsReady, canManage, ac
       {notice === "success" ? <p role="status" className="rounded-lg border border-primary/30 bg-primary/5 px-4 py-3 text-sm">Thank you! Your payment went through. Your plan updates here within a minute.</p> : null}
       {notice === "changed" ? <p role="status" className="rounded-lg border border-primary/30 bg-primary/5 px-4 py-3 text-sm">Your plan has changed. The difference is added to or taken off your next invoice.</p> : null}
       {notice === "cancelled" ? <p role="status" className="rounded-lg border border-border bg-muted/40 px-4 py-3 text-sm">Checkout was cancelled; nothing was charged.</p> : null}
-      {upgrade ? <p role="status" className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">{featureLabels[upgrade]} is part of the {planFor(upgrade).name} plan and above. Upgrade to use it.</p> : null}
+      {upgrade ? <p role="status" className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">{featureLabels[upgrade]} isn&apos;t in your plan. Add the {planFor(upgrade).name}, or a bundle that includes it.</p> : null}
 
       {!paymentsReady ? (
         <p className="rounded-lg border border-dashed border-border bg-card px-4 py-3 text-sm text-muted-foreground">Online payments aren&apos;t switched on yet, so every part of MIK LEDGER is open to you for now. The plans below show what will be offered.</p>
@@ -88,7 +136,7 @@ export default function BillingWorkspace({ enabled, paymentsReady, canManage, ac
           <div>
             <p className="text-xs text-muted-foreground">Current plan</p>
             <p className="mt-1 flex items-center gap-2 text-lg font-semibold">
-              {access.status === "trialing" && !subscribed ? "Free trial (all features)" : plans.find((plan) => plan.key === access.plan)?.name}
+              {access.status === "trialing" && !subscribed ? "Free trial (all apps)" : access.planName}
               <Badge variant={access.locked ? "destructive" : "secondary"}>{access.plan === "free" ? "Free for ever" : statusText[access.status]}</Badge>
             </p>
             <p className="mt-1 text-sm text-muted-foreground">
@@ -112,7 +160,7 @@ export default function BillingWorkspace({ enabled, paymentsReady, canManage, ac
 
       {enabled && !canManage ? <p className="text-sm text-muted-foreground">Only the business owner can change the plan.</p> : null}
 
-      <section aria-label="Plans" className="space-y-4">
+      <section aria-label="Plans" className="space-y-5">
         <div className="inline-flex rounded-md border border-border bg-card p-0.5" role="group" aria-label="Billing period">
           {(["month", "year"] as const).map((value) => (
             <Button key={value} type="button" size="sm" variant={interval === value ? "secondary" : "ghost"} aria-pressed={interval === value} onClick={() => setInterval(value)}>
@@ -120,50 +168,42 @@ export default function BillingWorkspace({ enabled, paymentsReady, canManage, ac
             </Button>
           ))}
         </div>
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          {plans.map((plan) => {
-            const isFree = plan.monthly <= 0;
-            const current = enabled && (isFree ? access.plan === "free" : subscribed && access.plan === plan.key && access.interval === interval);
-            const highlight = upgrade ? planFor(upgrade).key === plan.key : plan.key === "business";
-            return (
-              <article key={plan.key} className={`flex flex-col rounded-lg border bg-card p-5 ${highlight ? "border-primary shadow-sm" : "border-border"}`}>
-                <div className="flex items-center justify-between gap-2">
-                  <h2 className="text-lg font-semibold">{plan.name}</h2>
-                  {highlight ? <Badge>{upgrade ? "Needed" : "Most popular"}</Badge> : null}
-                </div>
-                <p className="mt-1 text-sm text-muted-foreground">{plan.description}</p>
-                <p className="mt-4"><span className="text-3xl font-semibold tabular-nums">${formatPlanPrice(planPrice(plan, interval))}</span><span className="text-sm text-muted-foreground">{isFree ? " for ever" : ` / ${interval === "year" ? "year" : "month"}`}</span></p>
-                {!isFree && interval === "year" && plan.monthly * 12 > plan.yearly ? <p className="text-xs font-medium text-primary">Save ${formatPlanPrice(plan.monthly * 12 - plan.yearly)} a year</p> : null}
-                <ul className="mt-4 flex-1 space-y-2 text-sm">
-                  {plan.highlights.map((line) => <li key={line} className="flex gap-2"><Check size={16} className="mt-0.5 shrink-0 text-primary" />{line}</li>)}
-                </ul>
-                {isFree ? (
-                  <Button
-                    type="button"
-                    className="mt-5 w-full"
-                    variant="outline"
-                    disabled={!enabled || !canManage || current || !subscribed || access.cancelAtPeriodEnd || Boolean(busy)}
-                    onClick={() => { if (window.confirm("Move to the Free plan? Your paid plan stays until the end of the period you've paid for, then only accounting for one user is included.")) void run("cancel", cancelSubscription, "You'll move to the Free plan at the end of this period."); }}
-                  >
-                    {current ? "Your plan" : subscribed && !access.cancelAtPeriodEnd ? "Switch to Free" : "Included after the trial"}
-                  </Button>
-                ) : (
-                <Button
-                  type="button"
-                  className="mt-5 w-full"
-                  variant={highlight ? "default" : "outline"}
-                  disabled={!enabled || !canManage || current || Boolean(busy)}
-                  title={!paymentsReady ? "Online payments aren't switched on yet." : undefined}
-                  onClick={() => run(plan.key, () => choosePlan(plan.key, interval))}
-                >
-                  {busy === plan.key ? "Opening…" : current ? "Your plan" : subscribed ? `Switch to ${plan.name}` : `Choose ${plan.name}`}
-                </Button>
-                )}
-              </article>
-            );
-          })}
+
+        <div>
+          <h2 className="font-semibold">Apps</h2>
+          <p className="text-sm text-muted-foreground">Take only what you need, one app or several together.</p>
         </div>
-        <p className="text-xs text-muted-foreground">Prices in US dollars. Payments are handled securely by Stripe; card details never reach MIK LEDGER.</p>
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          {plans.filter((plan) => plan.type !== "bundle").map((plan) => planCard(plan))}
+        </div>
+
+        <div>
+          <h2 className="font-semibold">Bundles</h2>
+          <p className="text-sm text-muted-foreground">Several apps together for less than buying them one by one.</p>
+        </div>
+        <div className="grid gap-4 md:grid-cols-2">
+          {plans.filter((plan) => plan.type === "bundle").map((plan) => planCard(plan))}
+        </div>
+
+        <div className="sticky bottom-0 z-10 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-card p-4 shadow-sm">
+          <div className="text-sm">
+            {selected.length ? (
+              <>
+                <p className="font-medium">{selected.map((key) => planByKey(key)?.name).join(" + ")}</p>
+                <p className="text-muted-foreground">${formatPlanPrice(total)} / {interval === "year" ? "year" : "month"}{bundleHint ? ` · ${bundleHint}` : ""}</p>
+              </>
+            ) : <p className="text-muted-foreground">Choose one or more apps, or a bundle.</p>}
+          </div>
+          <Button
+            type="button"
+            disabled={!enabled || !canManage || !selected.length || unchanged || Boolean(busy)}
+            title={!paymentsReady ? "Online payments aren't switched on yet." : undefined}
+            onClick={() => run("checkout", () => choosePlans(selected, interval))}
+          >
+            {busy === "checkout" ? "Opening…" : unchanged ? "Your plan" : subscribed ? "Update my plan" : "Continue to payment"}
+          </Button>
+        </div>
+        <p className="text-xs text-muted-foreground">Prices in US dollars. Yearly saves a month and a half. Payments are handled securely by Stripe; card details never reach MIK LEDGER.</p>
       </section>
 
       {enabled && payments.length ? (
