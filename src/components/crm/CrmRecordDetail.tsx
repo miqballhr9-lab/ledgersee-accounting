@@ -5,7 +5,10 @@ import Link from "next/link";
 import { toast } from "sonner";
 import { CalendarClock, Check, X, FilePlus2, FileText, Mail, Pencil, Phone, Plus, RefreshCcw, StickyNote, Trash2, UserCheck } from "lucide-react";
 
-import { addCrmNote, createDocumentFromDeal, deleteCrmRecords, updateCrmField } from "@/app/crm-actions";
+import { addCrmNote, createDocumentFromDeal, deleteCrmRecords, sendCrmEmail, updateCrmField } from "@/app/crm-actions";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Textarea } from "@/components/ui/textarea";
@@ -79,6 +82,7 @@ export default function CrmRecordDetail({ record, context, onClose, onOpenRecord
   const [tab, setTab] = useState<"overview" | "related" | "timeline">("overview");
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState("");
+  const [email, setEmail] = useState<{ subject: string; body: string } | null>(null);
   const [shownId, setShownId] = useState<string | null>(null);
   if ((record?.id ?? null) !== shownId) {
     setShownId(record?.id ?? null);
@@ -187,7 +191,7 @@ export default function CrmRecordDetail({ record, context, onClose, onOpenRecord
                 })}><FileText size={14} />Create invoice</Button>
               </>
             ) : null}
-            {data.email ? <Button size="sm" variant="outline" className="gap-1.5" nativeButton={false} render={<a href={`mailto:${data.email}`} />}><Mail size={14} />Send email</Button> : null}
+            {data.email ? <Button size="sm" variant="outline" className="gap-1.5" onClick={() => setEmail({ subject: "", body: `Hello ${data.firstName || data.fullName || data.name || ""},\n\n` })}><Mail size={14} />Send email</Button> : null}
             {phone ? <Button size="sm" variant="outline" className="gap-1.5" nativeButton={false} render={<a href={`tel:${phone}`} />}><Phone size={14} />Call</Button> : null}
             {mod?.quickActions?.filter((action) => data[action.key] !== action.value).map((action) => (
               <Button key={action.label} type="button" size="sm" variant={action.tone === "primary" ? "default" : "outline"} className={`gap-1.5 ${action.tone === "danger" ? "text-destructive hover:text-destructive" : ""}`} disabled={Boolean(busy)} onClick={() => void act(action.label, async () => {
@@ -400,6 +404,29 @@ export default function CrmRecordDetail({ record, context, onClose, onOpenRecord
           ) : null}
         </div>
       </SheetContent>
+      <Dialog open={Boolean(email)} onOpenChange={(next) => { if (!next && busy !== "email") setEmail(null); }}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Send email</DialogTitle>
+            <DialogDescription>To {data.email}. A copy is kept in this record&apos;s notes; replies come to your email.</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-3">
+            <div className="grid gap-1.5"><Label htmlFor="crm-email-subject">Subject</Label><Input id="crm-email-subject" value={email?.subject ?? ""} onChange={(event) => setEmail((current) => (current ? { ...current, subject: event.target.value } : current))} /></div>
+            <div className="grid gap-1.5"><Label htmlFor="crm-email-body">Message</Label><Textarea id="crm-email-body" rows={8} value={email?.body ?? ""} onChange={(event) => setEmail((current) => (current ? { ...current, body: event.target.value } : current))} /></div>
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setEmail(null)}>Cancel</Button>
+            <Button type="button" disabled={busy === "email" || !email?.subject.trim() || !email?.body.trim()} onClick={() => void act("email", async () => {
+              if (!email) return;
+              const saved = await sendCrmEmail(record.kind, record.id, email.subject, email.body);
+              context.upsert([saved]);
+              setEmail(null);
+              toast.success(`Email sent to ${data.email}.`);
+              onRefresh?.();
+            })}>{busy === "email" ? "Sending…" : "Send"}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Sheet>
   );
 }

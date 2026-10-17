@@ -68,7 +68,7 @@ export interface CrmModule {
 export const leadSources = [
   "Advertisement", "Cold Call", "Employee Referral", "External Referral", "Online Store", "Partner", "Public Relations",
   "Sales Email Alias", "Seminar Partner", "Internal Seminar", "Trade Show", "Web Download", "Web Research", "Chat",
-  "Facebook", "LinkedIn", "WhatsApp", "X (Twitter)",
+  "Facebook", "LinkedIn", "WhatsApp", "X (Twitter)", "Web Form",
 ] as const;
 
 export const industries = [
@@ -144,12 +144,14 @@ export const crmModules: readonly CrmModule[] = [
       { key: "employees", label: "No. of employees", type: "number", section: "Lead information" },
       { key: "annualRevenue", label: "Annual revenue", type: "currency", section: "Lead information" },
       { key: "rating", label: "Rating", type: "select", options: ["Acquired", "Active", "Market Failed", "Project Cancelled", "Shut Down"], section: "Lead information" },
+      { key: "leadScore", label: "Score", type: "number", section: "Lead information", readOnly: true, help: "Worked out from how complete and engaged the lead is (0–100)." },
       { key: "campaign", label: "Campaign source", type: "campaign", section: "Lead information" },
       { key: "emailOptOut", label: "Email opt out", type: "checkbox", section: "Lead information" },
       { key: "skypeId", label: "Skype ID", section: "Lead information" },
       { key: "twitter", label: "X (Twitter)", section: "Lead information", placeholder: "@handle" },
       ...address("address", "Address information"),
       { key: "description", label: "Description", type: "textarea", section: "Description information", wide: true },
+      { key: "attachment", label: "Attachment", type: "file", section: "Description information" },
     ],
   },
   {
@@ -183,6 +185,7 @@ export const crmModules: readonly CrmModule[] = [
       ...address("mailing", "Mailing address"),
       ...address("other", "Other address"),
       { key: "description", label: "Description", type: "textarea", section: "Description information", wide: true },
+      { key: "attachment", label: "Attachment", type: "file", section: "Description information" },
     ],
   },
   {
@@ -195,6 +198,7 @@ export const crmModules: readonly CrmModule[] = [
       { key: "dealName", label: "Deal name", section: "Deal information", required: true },
       { key: "account", label: "Account name", type: "account", section: "Deal information", required: true },
       { key: "contact", label: "Contact name", type: "contact", section: "Deal information" },
+      { key: "pipeline", label: "Pipeline", section: "Deal information", placeholder: "Standard", help: "Keep separate pipelines, e.g. Standard, Renewals, Partners." },
       { key: "type", label: "Type", type: "select", options: ["New Business", "Existing Business"], section: "Deal information" },
       { key: "amount", label: "Amount", type: "currency", section: "Deal information" },
       { key: "closingDate", label: "Closing date", type: "date", section: "Deal information", required: true },
@@ -206,6 +210,7 @@ export const crmModules: readonly CrmModule[] = [
       { key: "campaign", label: "Campaign source", type: "campaign", section: "Deal information" },
       { key: "lossReason", label: "Reason for loss", type: "select", options: ["Price", "Competitor", "No budget", "No decision", "Product fit", "Timing", "Other"], section: "Deal information" },
       { key: "description", label: "Description", type: "textarea", section: "Description information", wide: true },
+      { key: "attachment", label: "Attachment", type: "file", section: "Description information" },
     ],
   },
   {
@@ -309,6 +314,7 @@ export const crmModules: readonly CrmModule[] = [
       { key: "description", label: "Description", type: "textarea", section: "Description information", wide: true },
       { key: "internalComments", label: "Internal comments", type: "textarea", section: "Description information", wide: true },
       { key: "solution", label: "Solution", type: "textarea", section: "Solution information", wide: true },
+      { key: "attachment", label: "Attachment", type: "file", section: "Description information" },
     ],
   },
   {

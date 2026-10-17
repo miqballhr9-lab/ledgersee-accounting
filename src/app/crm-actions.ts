@@ -11,6 +11,7 @@ import { assertCanWrite, requireUser } from "@/lib/auth";
 import type { BookkeepingRecord, RecordKind } from "@/lib/bookkeeping-types";
 import { paymentAccountLabel, paymentAccountType } from "@/lib/payment-accounts";
 import { recordAudit } from "@/lib/audit";
+import { sendEmailOrThrow } from "@/lib/email";
 import { afterHrSave, applyHrRules } from "@/lib/hr-rules";
 import {
   crmKinds,
@@ -190,9 +191,21 @@ function buildData(mod: CrmModule, input: Record<string, string>, context: Looku
     if (isClosedStage(data.stage) && !isClosedStage(existing?.stage)) data.closedOn = new Date().toISOString().slice(0, 10);
     if (!isClosedStage(data.stage)) data.closedOn = "";
   }
+  if (mod.kind === "crm-leads") data.leadScore = String(leadScore(data));
+  if (mod.kind === "crm-deals" && !data.pipeline) data.pipeline = "Standard";
   if ((mod.kind === "crm-tasks") && data.status === "Completed" && existing?.status !== "Completed") data.completedOn = new Date().toISOString().slice(0, 10);
   if (mod.section === "hr") applyHrRules(mod.kind, data, existing, { byKind: context.byKind, actor: ownerName }, id);
   return data;
+}
+
+/** Zoho-style lead score: how complete and how far along a lead is, out of 100. */
+function leadScore(data: Record<string, string>) {
+  const points: Array<[boolean, number]> = [
+    [Boolean(data.email), 15], [Boolean(data.phone || data.mobile), 15], [Boolean(data.company), 10], [Boolean(data.website), 5],
+    [Boolean(data.industry), 5], [money(data.annualRevenue) > 0, 10], [money(data.noOfEmployees) > 0, 5],
+    [/referral|partner/i.test(data.leadSource ?? ""), 10], [data.leadStatus === "Contacted", 10], [data.leadStatus === "Pre-Qualified" || data.leadStatus === "Contact in Future", 20],
+  ];
+  return Math.min(100, points.reduce((sum, [hit, value]) => sum + (hit ? value : 0), 0));
 }
 
 function changeEntries(mod: CrmModule, before: Record<string, string> | undefined, after: Record<string, string>, by: string): CrmHistoryEntry[] {
@@ -210,6 +223,15 @@ async function nextNumber(userId: string, kind: string, key: string, prefix: str
   const rows = await db.select().from(bookkeepingRecord).where(and(eq(bookkeepingRecord.userId, userId), eq(bookkeepingRecord.kind, kind)));
   const highest = rows.reduce((max, row) => Math.max(max, Number((row.data[key] ?? "").replace(/\D/g, "")) || 0), 0);
   return `${prefix}${String(highest + 1).padStart(4, "0")}`;
+}
+
+/** Assignment rule (Settings): new leads go to whichever listed person has the fewest open leads. */
+async function assignedOwner(userId: string, context: LookupContext, fallback: string) {
+  const [settings] = await db.select().from(bookkeepingRecord).where(and(eq(bookkeepingRecord.userId, userId), eq(bookkeepingRecord.kind, "settings"))).limit(1);
+  const people = (settings?.data.leadAssignment ?? "").split(",").map((name) => name.trim()).filter(Boolean);
+  if (!people.length) return fallback;
+  const open = (name: string) => context.byKind("crm-leads").filter((row) => row.data.owner === name && !["Converted", "Junk Lead", "Lost Lead", "Not Qualified"].includes(row.data.leadStatus ?? "")).length;
+  return people.reduce((best, name) => (open(name) < open(best) ? name : best), people[0]);
 }
 
 export async function saveCrmRecord(kind: string, input: Record<string, string>, id?: string): Promise<BookkeepingRecord> {
@@ -233,6 +255,12 @@ export async function saveCrmRecord(kind: string, input: Record<string, string>,
     revalidatePath("/app", "layout");
     return toRecord(saved);
   }
+  // As Zoho's duplicate check, a second lead or contact with the same email isn't added.
+  if ((kind === "crm-leads" || kind === "crm-contacts") && data.email) {
+    const twin = context.byKind(kind).find((row) => (row.data.email ?? "").trim().toLowerCase() === data.email.trim().toLowerCase());
+    if (twin) throw new ActionError(`${mod.label} ${twin.data.fullName || twin.data.email} already has this email. Open it instead.`);
+  }
+  if (kind === "crm-leads" && !input.owner?.trim()) data.owner = await assignedOwner(me.id, context, data.owner);
   if (mod.numbering) data[mod.numbering.key] = await nextNumber(me.id, kind, mod.numbering.key, mod.numbering.prefix);
   const [created] = await db.insert(bookkeepingRecord).values({ userId: me.id, kind, data }).returning();
   if (mod.section === "hr") await afterHrSave(me.id, kind, undefined, created);
@@ -561,4 +589,34 @@ export async function importCrmRecords(kind: string, rows: Record<string, string
   }
   revalidatePath("/app", "layout");
   return { created, failed: failed.slice(0, 50) };
+}
+
+/** Sends an email to a lead, contact or account from the CRM, and keeps a note of it on the record. */
+export async function sendCrmEmail(kind: string, id: string, subject: string, body: string): Promise<BookkeepingRecord> {
+  const me = await requireUser();
+  if (kind !== "customers") crmModuleFor(kind);
+  assertCanWrite(me, kind);
+  const cleanSubject = String(subject ?? "").trim().slice(0, 200);
+  const cleanBody = String(body ?? "").trim().slice(0, 8000);
+  if (!cleanSubject || !cleanBody) throw new ActionError("Write a subject and a message.");
+  const [record] = await db.select().from(bookkeepingRecord).where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, kind))).limit(1);
+  if (!record) throw new ActionError("We couldn’t find that record. Refresh and try again.");
+  const to = (record.data.email ?? "").trim();
+  if (!to) throw new ActionError("Add an email address to this record first.");
+  const [settings] = await db.select().from(bookkeepingRecord).where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "settings"))).limit(1);
+  const company = settings?.data.companyName || me.workspaceName;
+  const escape = (value: string) => value.replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character] ?? character);
+  await sendEmailOrThrow({ to, subject: cleanSubject, html: cleanBody.split(/\n{2,}/).map((part) => `<p>${escape(part).replace(/\n/g, "<br>")}</p>`).join(""), fromName: company, replyTo: me.email });
+  const [note] = await db.insert(bookkeepingRecord).values({
+    userId: me.id,
+    kind: "crm-notes",
+    data: { parentKind: kind, parentId: id, title: `Email sent: ${cleanSubject}`, content: cleanBody, author: me.name, createdOn: nowStamp() },
+  }).returning();
+  if (kind !== "customers") {
+    const mod = crmModuleFor(kind);
+    const data = withHistory(record.data, [{ at: nowStamp(), by: me.name, text: `Email sent: ${cleanSubject}` }]);
+    await db.update(bookkeepingRecord).set({ data: mod ? data : record.data, updatedAt: new Date() }).where(eq(bookkeepingRecord.id, record.id));
+  }
+  revalidatePath("/app", "layout");
+  return toRecord(note);
 }

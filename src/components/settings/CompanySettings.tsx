@@ -373,6 +373,19 @@ export default function CompanySettings({ settings, workspaceName }: CompanySett
                 <>{customFieldKinds.map((kind) => <Row key={kind} label={moduleBySlug(kind)?.plural ?? kind} value={saved[customFieldSettingKey(kind)] || "—"} />)}</>,
                 <>{customFieldKinds.map((kind) => <span key={kind}>{text(customFieldSettingKey(kind), moduleBySlug(kind)?.plural ?? kind, { placeholder: "e.g. PO number, Delivery note", help: "Extra fields on the form, comma separated." })}</span>)}</>,
               )}
+              {section("crm", "CRM",
+                <>
+                  <Row label="Web-to-lead form" value={saved.webFormToken ? `/forms/${saved.webFormToken}` : "Off"} />
+                  <Row label="Lead assignment" value={saved.leadAssignment || "The person who adds the lead"} />
+                </>,
+                <>
+                  <label className="flex items-center gap-2 text-sm sm:col-span-2">
+                    <Checkbox checked={Boolean(draft.webFormToken)} onCheckedChange={(value) => set("webFormToken", value === true ? (draft.webFormToken || crypto.randomUUID()) : "")} />
+                    Publish a web form; what visitors send arrives in Leads with the source Web Form.
+                  </label>
+                  {text("leadAssignment", "Lead assignment (round robin)", { placeholder: "e.g. Ali, Sara, Usman", help: "New leads go to whichever of these people has the fewest open leads.", wide: true })}
+                </>,
+              )}
               {section("careers", "Careers page",
                 <Row label="Public jobs page" value={saved.careersToken ? `/careers/${saved.careersToken}` : "Off"} />,
                 <label className="flex items-center gap-2 text-sm sm:col-span-2">

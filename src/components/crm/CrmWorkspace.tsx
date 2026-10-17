@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { ArrowDownToLine, ChevronDown, Scale, Columns3, Ellipsis, KanbanSquare, List, Pencil, Plus, Search, SlidersHorizontal, Trash2, Upload, UserCheck, Users } from "lucide-react";
+import { ArrowDownToLine, CalendarDays, ChevronDown, Scale, Columns3, Ellipsis, KanbanSquare, List, Pencil, Plus, Search, SlidersHorizontal, Trash2, Upload, UserCheck, Users } from "lucide-react";
 
 import { deleteCrmRecords, importCrmRecords, updateCrmField } from "@/app/crm-actions";
 import BulkActionsMenu from "@/components/bookkeeping/BulkActionsMenu";
@@ -112,7 +112,10 @@ export default function CrmWorkspace({ page, initialStore, currency, me, owners,
   }
   const [activityKey, setActivityKey] = useState<CrmModuleKey>("tasks");
   const mod = page === "accounts" ? null : crmModule(page === "activities" ? activityKey : page)!;
-  const [view, setView] = useState<"list" | "kanban" | "balances">(page === "deals" || page === "applications" || page === "job-positions" ? "kanban" : "list");
+  const [sort, setSort] = useState<{ key: string; desc: boolean } | null>(null);
+  const [pipeline, setPipeline] = useState("");
+  const [calendarMonth, setCalendarMonth] = useState(() => new Date().toISOString().slice(0, 7));
+  const [view, setView] = useState<"list" | "kanban" | "balances" | "calendar">(page === "deals" || page === "applications" || page === "job-positions" ? "kanban" : "list");
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<ViewFilter>("all");
   const [statusFilter, setStatusFilter] = useState("");
@@ -173,6 +176,7 @@ export default function CrmWorkspace({ page, initialStore, currency, me, owners,
       if (term && !Object.values(record.data).some((value) => value?.toLowerCase().includes(term))) return false;
       if (!mod) return true;
       if (jobFilter && mod.kind === "hr-candidates" && record.data.job !== jobFilter) return false;
+      if (pipeline && mod.kind === "crm-deals" && (record.data.pipeline || "Standard") !== pipeline) return false;
       if (statusFilter && mod.statusKey && record.data[mod.statusKey] !== statusFilter) return false;
       if (filter === "mine" && record.data.owner !== me) return false;
       if (filter === "open" && isClosed(mod, record)) return false;
@@ -180,8 +184,16 @@ export default function CrmWorkspace({ page, initialStore, currency, me, owners,
       if (filter === "today" && dueDateOf(record) !== todayText) return false;
       if (filter === "overdue" && !(dueDateOf(record) && dueDateOf(record) < todayText && !isClosed(mod, record))) return false;
       return true;
+    }).sort((a, b) => {
+      // Column sorting, as in Zoho's list views: numbers by value, everything else alphabetically.
+      if (!sort) return 0;
+      const left = a.data[sort.key] ?? "";
+      const right = b.data[sort.key] ?? "";
+      const numeric = left !== "" && right !== "" && Number.isFinite(Number(left)) && Number.isFinite(Number(right));
+      const order = numeric ? Number(left) - Number(right) : left.localeCompare(right, undefined, { numeric: true });
+      return sort.desc ? -order : order;
     });
-  }, [jobFilter, records, search, mod, statusFilter, filter, me, todayText]);
+  }, [jobFilter, pipeline, sort, records, search, mod, statusFilter, filter, me, todayText]);
 
 
   const jobPreset = jobFilter && mod?.kind === "hr-candidates" ? { job: jobFilter } : undefined;
@@ -406,6 +418,21 @@ export default function CrmWorkspace({ page, initialStore, currency, me, owners,
           </>
         ) : null}
         <div className="ml-auto flex flex-wrap gap-2">
+          {mod?.kind === "crm-deals" ? (
+            <Select value={pipeline || "all"} onValueChange={(value) => setPipeline(value === "all" ? "" : String(value ?? ""))}>
+              <SelectTrigger className="w-[170px]" aria-label="Pipeline"><SelectValue>{pipeline || "All pipelines"}</SelectValue></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All pipelines</SelectItem>
+                {[...new Set(["Standard", ...records.map((record) => record.data.pipeline || "Standard")])].map((name) => <SelectItem key={name} value={name}>{name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          ) : null}
+          {mod && ["crm-meetings", "crm-tasks", "crm-calls"].includes(mod.kind) ? (
+            <div className="flex rounded-md border border-border p-0.5">
+              <Button type="button" size="sm" variant={view !== "calendar" ? "secondary" : "ghost"} className="gap-1.5" onClick={() => setView("list")}><List size={14} />List</Button>
+              <Button type="button" size="sm" variant={view === "calendar" ? "secondary" : "ghost"} className="gap-1.5" onClick={() => setView("calendar")}><CalendarDays size={14} />Calendar</Button>
+            </div>
+          ) : null}
           {mod?.kanbanKey || mod?.kind === "hr-jobs" ? (
             <div className="flex rounded-md border border-border p-0.5">
               <Button type="button" size="sm" variant={view === "list" ? "secondary" : "ghost"} className="gap-1.5" onClick={() => setView("list")}><List size={14} />List</Button>
@@ -579,6 +606,42 @@ export default function CrmWorkspace({ page, initialStore, currency, me, owners,
         </section>
       ) : null}
 
+      {mod && view === "calendar" ? (() => {
+        // Zoho's calendar view: each day of the month with the meetings, calls and tasks on it.
+        const [y, m] = calendarMonth.split("-").map(Number);
+        const first = new Date(Date.UTC(y, m - 1, 1));
+        const count = new Date(Date.UTC(y, m, 0)).getUTCDate();
+        const offset = (first.getUTCDay() + 6) % 7;
+        const onDay = (date: string) => filtered.filter((record) => dueDateOf(record) === date);
+        return (
+          <section className="mt-4 rounded-lg border border-border bg-card p-3">
+            <div className="mb-3 flex items-center justify-between gap-2">
+              <h2 className="text-sm font-semibold">{first.toLocaleDateString("en-US", { month: "long", year: "numeric", timeZone: "UTC" })}</h2>
+              <input type="month" aria-label="Month" value={calendarMonth} onChange={(event) => setCalendarMonth(event.target.value || calendarMonth)} className="h-8 rounded-md border border-border bg-background px-2 text-sm" />
+            </div>
+            <div className="grid grid-cols-7 gap-1 text-xs">
+              {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((day) => <div key={day} className="px-1 py-1 font-medium text-muted-foreground">{day}</div>)}
+              {Array.from({ length: offset }, (_, index) => <div key={`pad-${index}`} />)}
+              {Array.from({ length: count }, (_, index) => {
+                const date = `${calendarMonth}-${String(index + 1).padStart(2, "0")}`;
+                const items = onDay(date);
+                return (
+                  <div key={date} className={`min-h-24 rounded-md border p-1 ${date === todayText ? "border-primary" : "border-border"}`}>
+                    <p className="text-right text-[11px] text-muted-foreground">{index + 1}</p>
+                    <ul className="space-y-0.5">
+                      {items.slice(0, 4).map((record) => (
+                        <li key={record.id}><button type="button" onClick={() => setDetail(record)} className="block w-full truncate rounded bg-primary/10 px-1 py-0.5 text-left text-[11px] text-primary hover:bg-primary/20">{(record.data.from || record.data.startTime || "").slice(11, 16)} {recordTitle(record)}</button></li>
+                      ))}
+                      {items.length > 4 ? <li className="px-1 text-[11px] text-muted-foreground">+{items.length - 4} more</li> : null}
+                    </ul>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        );
+      })() : null}
+
       {mod && view === "list" ? (
         <section className="mt-4 overflow-x-auto rounded-lg border border-border bg-card">
           {filtered.length ? (
@@ -586,7 +649,13 @@ export default function CrmWorkspace({ page, initialStore, currency, me, owners,
               <thead>
                 <tr className="border-b border-border bg-muted/40 text-left text-xs font-medium text-muted-foreground">
                   <th className="w-10 px-3 py-3"><Checkbox aria-label="Select all" checked={allSelected} onCheckedChange={(checked) => setSelected(checked ? filtered.map((record) => record.id) : [])} /></th>
-                  {columns.map((key) => <th key={key} className="px-4 py-3">{fieldFor(mod, key)?.label ?? key}</th>)}
+                  {columns.map((key) => (
+                    <th key={key} className="px-4 py-3" aria-sort={sort?.key === key ? (sort.desc ? "descending" : "ascending") : undefined}>
+                      <button type="button" className="inline-flex items-center gap-1 hover:text-foreground" onClick={() => setSort((current) => (current?.key === key ? (current.desc ? null : { key, desc: true }) : { key, desc: false }))}>
+                        {fieldFor(mod, key)?.label ?? key}{sort?.key === key ? (sort.desc ? " ↓" : " ↑") : ""}
+                      </button>
+                    </th>
+                  ))}
                   <th className="w-12"><span className="sr-only">Actions</span></th>
                 </tr>
               </thead>
