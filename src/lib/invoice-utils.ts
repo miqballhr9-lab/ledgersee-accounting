@@ -10,6 +10,13 @@ export interface InvoiceLineData {
   bundleShow?: string;
   /** The line's own tax rate in percent; blank uses the document's rate. */
   taxRate?: string;
+  /** Lot number, or serial numbers separated by commas, for items tracked by lot or serial. */
+  serials?: string;
+}
+
+/** Serial numbers on a line, one per unit. */
+export function serialList(serials: string | undefined): string[] {
+  return (serials ?? "").split(/[,\n]/).map((serial) => serial.trim()).filter(Boolean);
 }
 
 export function parseInvoiceLines(raw: string): InvoiceLineData[] {
@@ -29,6 +36,7 @@ export function parseInvoiceLines(raw: string): InvoiceLineData[] {
           quantity: typeof line.quantity === "string" ? line.quantity : String(line.quantity ?? ""),
           rate: typeof line.rate === "string" ? line.rate : String(line.rate ?? ""),
           ...(typeof line.taxRate === "string" && line.taxRate.trim() ? { taxRate: line.taxRate.trim() } : {}),
+          ...(typeof line.serials === "string" && line.serials.trim() ? { serials: line.serials.trim() } : {}),
           ...(typeof line.bundleId === "string" && line.bundleId ? { bundleId: line.bundleId, bundleName: typeof line.bundleName === "string" ? line.bundleName : "", bundleShow: line.bundleShow === "false" ? "false" : "true" } : {}),
         }];
       });

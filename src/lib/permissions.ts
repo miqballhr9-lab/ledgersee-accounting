@@ -52,6 +52,8 @@ export function areaForKind(kind: string): Area | "settings" {
     customers: "sales", items: "sales", "time-activities": "sales", "delayed-charges": "sales", mileage: "purchases", invoices: "sales", estimates: "sales", "sales-orders": "sales", "credit-notes": "sales", "recurring-invoices": "sales", payments: "sales",
     vendors: "purchases", bills: "purchases", expenses: "purchases", "purchase-orders": "purchases", "supplier-credits": "purchases",
     "inventory-movements": "inventory",
+    warehouses: "inventory",
+    "stock-transfers": "inventory",
     "bank-accounts": "accounting", deposits: "accounting", "tax-filings": "accounting", transactions: "accounting", "bank-rules": "accounting", accounts: "accounting", journals: "accounting", taxes: "accounting", reconciliations: "accounting", "recurring-transactions": "accounting", "custom-reports": "accounting",
     budgets: "budgets",
     payroll: "payroll", employees: "payroll",

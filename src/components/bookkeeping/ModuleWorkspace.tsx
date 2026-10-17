@@ -230,6 +230,7 @@ function createDefaults(module: ModuleDefinition, records: BookkeepingRecord[], 
   }
   if (module.kind === "expenses" || module.kind === "transactions" || module.kind === "journals") values.date = dateString(today);
   if (module.kind === "delayed-charges") Object.assign(values, { date: dateString(today), chargeType: "Charge", quantity: "1", status: "Open" });
+  if (module.kind === "stock-transfers") Object.assign(values, { date: dateString(today), fromWarehouse: module.fields.find((field) => field.key === "fromWarehouse")?.options?.[0] ?? "" });
   if (module.kind === "employees") {
     values.employeeId = `EMP-${String(records.filter((record) => record.kind === "employees").length + 1).padStart(3, "0")}`;
     values.status = "Active";

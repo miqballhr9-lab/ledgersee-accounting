@@ -63,6 +63,7 @@ interface InvoiceLine {
   bundleName?: string;
   bundleShow?: string;
   taxRate?: string;
+  serials?: string;
 }
 
 const itemAccountKeys = new Set(["incomeAccountId", "expenseAccountId", "assetAccountId"]);
@@ -72,7 +73,7 @@ function itemFieldVisible(key: string, itemType: string) {
   const type = itemType === "Product" || !itemType ? "Inventory" : itemType;
   if (type === "Bundle") return ["name", "category", "sku", "itemType", "bundleItems", "showComponents"].includes(key);
   if (["bundleItems", "showComponents"].includes(key)) return false;
-  if (type !== "Inventory" && ["openingQty", "openingDate", "reorderPoint", "assetAccountId"].includes(key)) return false;
+  if (type !== "Inventory" && ["openingQty", "openingDate", "reorderPoint", "assetAccountId", "tracking", "warehouse"].includes(key)) return false;
   return true;
 }
 
@@ -105,12 +106,32 @@ interface PurchaseItemLine {
   description: string;
   quantity: string;
   rate: string;
+  serials?: string;
 }
 
 function readPurchaseItemLines(record: BookkeepingRecord | null): PurchaseItemLine[] {
   return parseInvoiceLines(record?.data.lineItems ?? "")
     .filter((line) => line.itemId)
-    .map((line, index) => ({ id: `saved-item-${index}`, itemId: line.itemId, name: line.name, description: line.description, quantity: line.quantity, rate: line.rate }));
+    .map((line, index) => ({ id: `saved-item-${index}`, itemId: line.itemId, name: line.name, description: line.description, quantity: line.quantity, rate: line.rate, ...(line.serials ? { serials: line.serials } : {}) }));
+}
+
+/** Items tracked by lot or serial number ask for them on each line. */
+function trackingOf(item: BookkeepingRecord | undefined) {
+  const tracking = item?.data.tracking;
+  return tracking === "Lot" || tracking === "Serial number" ? tracking : "";
+}
+
+function SerialInput({ tracking, value, line, onChange }: { tracking: string; value: string; line: number; onChange: (value: string) => void }) {
+  if (!tracking) return null;
+  return (
+    <Input
+      aria-label={`${tracking === "Lot" ? "Lot number" : "Serial numbers"} for line ${line}`}
+      placeholder={tracking === "Lot" ? "Lot no." : "Serial nos., comma separated"}
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+      className="mx-2.5 mb-2 h-8 w-[calc(100%-1.25rem)] text-xs"
+    />
+  );
 }
 
 const structuredLineKinds = new Set(["invoices", "estimates", "sales-orders", "credit-notes", "recurring-invoices", "purchase-orders"]);
@@ -172,6 +193,7 @@ function readInvoiceLines(lines: string, items: BookkeepingRecord[]): InvoiceLin
       quantity: line.quantity,
       rate: line.rate,
       ...(line.taxRate ? { taxRate: line.taxRate } : {}),
+      ...(line.serials ? { serials: line.serials } : {}),
       ...(line.bundleId ? { bundleId: line.bundleId, bundleName: line.bundleName, bundleShow: line.bundleShow } : {}),
     };
   });
@@ -216,7 +238,7 @@ function serializeExpenseEditorLines(lines: ExpenseEntryLine[], itemLines: Purch
       })),
     ...itemLines
       .filter((line) => line.itemId)
-      .map((line) => ({ itemId: line.itemId, name: line.name.trim(), description: line.description.trim(), quantity: line.quantity.trim() || "1", rate: line.rate.trim() })),
+      .map((line) => ({ itemId: line.itemId, name: line.name.trim(), description: line.description.trim(), quantity: line.quantity.trim() || "1", rate: line.rate.trim(), ...(line.serials?.trim() ? { serials: line.serials.trim() } : {}) })),
   ]);
 }
 
@@ -259,7 +281,9 @@ export default function RecordEditor({ module, record, customers, vendors, items
   const [expenseLines, setExpenseLines] = useState<ExpenseEntryLine[]>(() => readExpenseEditorLines(record));
   const [purchaseItems, setPurchaseItems] = useState<PurchaseItemLine[]>(() => readPurchaseItemLines(record));
   const availableItems = items.filter((item) => item.data.name?.trim());
-  const visibleFields = module.kind === "items" ? module.fields.filter((field) => itemFieldVisible(field.key, values.itemType ?? "")) : module.fields;
+  // A warehouse picker only shows once the business has warehouses to pick from.
+  const visibleFields = (module.kind === "items" ? module.fields.filter((field) => itemFieldVisible(field.key, values.itemType ?? "")) : module.fields)
+    .filter((field) => field.key !== "warehouse" || Boolean(field.options?.length));
   const paymentAccounts = accounts.filter((account) => (module.kind === "invoices" ? receivingAccountType(account) : paymentAccountType(account)));
   const [savedRecordId, setSavedRecordId] = useState<string | null>(record?.id ?? null);
   const [error, setError] = useState("");
@@ -1000,6 +1024,7 @@ export default function RecordEditor({ module, record, customers, vendors, items
                           ))}
                         </SelectContent>
                       </Select>
+                      <SerialInput tracking={trackingOf(picked)} value={line.serials ?? ""} line={index + 1} onChange={(serials) => updateInvoiceLine(line.id, { serials })} />
                       {line.bundleId ? <p className="px-2.5 pb-2 text-xs text-primary">Part of bundle: {line.bundleName}</p> : null}
                       {short ? <p className="px-2.5 pb-2 text-xs text-amber-700 dark:text-amber-400">Only {onHand?.toLocaleString()} on hand. You can still save; stock will show below zero until you receive more.</p> : null}
                     </td>
@@ -1141,6 +1166,7 @@ export default function RecordEditor({ module, record, customers, vendors, items
                             ))}
                           </SelectContent>
                         </Select>
+                        <SerialInput tracking={trackingOf(picked)} value={line.serials ?? ""} line={index + 1} onChange={(serials) => updatePurchaseItem(line.id, { serials })} />
                       </td>
                       <td className={`p-0 ${cellBorder}`}><Input id={`purchase-description-${line.id}`} aria-label={`Description for item line ${index + 1}`} value={line.description} onChange={(event) => updatePurchaseItem(line.id, { description: event.target.value })} className={cellInput} /></td>
                       <td className={`p-0 ${cellBorder}`}><Input id={`purchase-qty-${line.id}`} aria-label={`Quantity for item line ${index + 1}`} type="number" min="0.001" step="any" inputMode="decimal" value={line.quantity} onChange={(event) => updatePurchaseItem(line.id, { quantity: event.target.value })} className={`${cellInput} text-right tabular-nums`} /></td>

@@ -36,6 +36,10 @@ interface InventoryWorkspaceProps {
   /** Every stock movement: invoices, credit notes, bills, receipts and adjustments, newest first. */
   activity: (InventoryEvent & { itemName: string; unit: string })[];
   currency: string;
+  /** Warehouse names; with more than one, stock shows by warehouse and movements ask where. */
+  warehouses?: string[];
+  /** Quantity on hand per warehouse, by item id. */
+  byWarehouse?: Record<string, Record<string, number>>;
 }
 
 const sourceSlug: Record<string, string> = { invoices: "invoices", "credit-notes": "credit-notes", bills: "bills", expenses: "expenses", "supplier-credits": "supplier-credits", "purchase-orders": "purchase-orders", items: "items" };
@@ -60,7 +64,7 @@ function formatDate(value: string) {
   return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(date);
 }
 
-export default function InventoryWorkspace({ products: productRecords, stock: stockById, activity, currency }: InventoryWorkspaceProps) {
+export default function InventoryWorkspace({ products: productRecords, stock: stockById, activity, currency, warehouses = [], byWarehouse = {} }: InventoryWorkspaceProps) {
   const router = useRouter();
   const products = useMemo(
     () => [...productRecords].sort((left, right) => (left.data.name || "").localeCompare(right.data.name || "")),
@@ -77,6 +81,8 @@ export default function InventoryWorkspace({ products: productRecords, stock: st
   const [movementDate, setMovementDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [reference, setReference] = useState("");
   const [notes, setNotes] = useState("");
+  const [warehouse, setWarehouse] = useState("");
+  const [serials, setSerials] = useState("");
   const [formError, setFormError] = useState("");
   const [isSaving, setIsSaving] = useState(false);
 
@@ -106,6 +112,8 @@ export default function InventoryWorkspace({ products: productRecords, stock: st
     setReference("");
     setNotes("");
     setUnitCost("");
+    setWarehouse(warehouses[0] ?? "");
+    setSerials("");
     setFormError("");
     setDialogOpen(true);
   }
@@ -123,6 +131,8 @@ export default function InventoryWorkspace({ products: productRecords, stock: st
         reference,
         notes,
         unitCost: movementType === "Receipt" ? unitCost : undefined,
+        warehouse,
+        serials,
       });
       setDialogOpen(false);
       toast.success(movementType === "Receipt" ? "Stock received." : movementType === "Delivery" ? "Delivery recorded." : "Stock count saved.");
@@ -201,7 +211,7 @@ export default function InventoryWorkspace({ products: productRecords, stock: st
                     const { product, stock, reorderPoint, value, averageCost } = row;
                     return (
                       <TableRow key={product.id}>
-                        <TableCell className="min-w-48 font-medium"><Link href={`/app/items?open=${product.id}`} className="text-primary hover:underline">{product.data.name || "Unnamed product"}</Link><div className="mt-1 text-xs font-normal text-muted-foreground">{product.data.unit || "Unit not set"}</div></TableCell>
+                        <TableCell className="min-w-48 font-medium"><Link href={`/app/items?open=${product.id}`} className="text-primary hover:underline">{product.data.name || "Unnamed product"}</Link><div className="mt-1 text-xs font-normal text-muted-foreground">{product.data.unit || "Unit not set"}</div>{warehouses.length > 1 && byWarehouse[product.id] ? <div className="mt-1 text-xs font-normal text-muted-foreground">{Object.entries(byWarehouse[product.id]).filter(([, qty]) => qty).map(([place, qty]) => `${place}: ${formatQuantity(qty)}`).join(" · ") || "Nothing in any warehouse"}</div> : null}</TableCell>
                         <TableCell className="text-muted-foreground">{product.data.sku || "—"}</TableCell>
                         <TableCell className="text-right font-medium tabular-nums">{formatQuantity(stock, product.data.unit)}</TableCell>
                         <TableCell className="text-right tabular-nums">{reorderPoint > 0 ? formatQuantity(reorderPoint) : "—"}</TableCell>
@@ -305,6 +315,21 @@ export default function InventoryWorkspace({ products: productRecords, stock: st
                 <Input id="inventory-date" type="date" required value={movementDate} onChange={(event) => setMovementDate(event.target.value)} />
               </div>
             </div>
+            {warehouses.length ? (
+              <div className="space-y-2">
+                <Label htmlFor="inventory-warehouse">Warehouse</Label>
+                <Select value={warehouse || null} onValueChange={(value) => setWarehouse(String(value ?? ""))}>
+                  <SelectTrigger id="inventory-warehouse" className="w-full"><SelectValue placeholder="Choose a warehouse" /></SelectTrigger>
+                  <SelectContent>{warehouses.map((name) => <SelectItem key={name} value={name}>{name}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
+            ) : null}
+            {selectedProduct?.data.tracking === "Lot" || selectedProduct?.data.tracking === "Serial number" ? (
+              <div className="space-y-2">
+                <Label htmlFor="inventory-serials">{selectedProduct.data.tracking === "Lot" ? "Lot number" : "Serial numbers"}</Label>
+                <Input id="inventory-serials" value={serials} onChange={(event) => setSerials(event.target.value)} placeholder={selectedProduct.data.tracking === "Lot" ? "e.g. LOT-2026-10" : "Comma separated, one per unit"} />
+              </div>
+            ) : null}
             <div className="space-y-2">
               <Label htmlFor="inventory-reference">Reference</Label>
               <Input id="inventory-reference" value={reference} onChange={(event) => setReference(event.target.value)} placeholder={movementType === "Receipt" ? "Supplier or purchase order" : movementType === "Delivery" ? "Customer or sales order" : "Count reference"} />

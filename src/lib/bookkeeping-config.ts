@@ -131,6 +131,8 @@ export const modules: readonly ModuleDefinition[] = [
       { key: "openingQty", label: "Initial quantity on hand", type: "number", section: "Inventory", placeholder: "0", help: "Inventory items only. Stock you already have before using MIK LEDGER." },
       { key: "openingDate", label: "As of date", type: "date", section: "Inventory" },
       { key: "reorderPoint", label: "Reorder point", type: "number", section: "Inventory", placeholder: "0", help: "Shows as low stock when the quantity on hand reaches this." },
+      { key: "tracking", label: "Track by", type: "select", options: ["None", "Lot", "Serial number"], section: "Inventory", help: "Lots or serial numbers are asked for on each purchase and sale line." },
+      { key: "warehouse", label: "Warehouse", type: "select", options: [], section: "Inventory", help: "Where the opening quantity is kept. Add warehouses under Inventory." },
       { key: "incomeAccountId", label: "Income account", type: "select", options: [], section: "Accounting", help: "Where sales of this item are recorded. Sales when left empty." },
       { key: "expenseAccountId", label: "Expense account", type: "select", options: [], section: "Accounting", help: "Cost of goods sold for inventory; the purchase expense for other items. Cost of goods sold when left empty." },
       { key: "assetAccountId", label: "Inventory asset account", type: "select", options: [], section: "Accounting", help: "Inventory items only. Where the value of stock on hand sits." },
@@ -160,6 +162,7 @@ export const modules: readonly ModuleDefinition[] = [
       { key: "notes", label: "Message on invoice", type: "textarea", help: "Printed on the document for the customer." },
       { key: "className", label: "Class", help: "QuickBooks-style class, e.g. a department or line of business. Reports can split by it." },
       { key: "location", label: "Location", help: "Branch or location, e.g. Lahore or Karachi. Reports can split by it." },
+      { key: "warehouse", label: "Warehouse", type: "select", options: [], help: "Where the stock on this document comes from or goes to. Empty uses the first warehouse." },
       { key: "project", label: "Project", help: "The project this belongs to; see Project Profitability." },
       { key: "tags", label: "Tags", help: "Comma separated, e.g. Lahore branch, Project A. Search by tag to find and total these." },
       { key: "attachment", label: "Attachment", type: "file", help: "Attach a PDF, image, or CSV up to 10 MB." },
@@ -223,6 +226,7 @@ export const modules: readonly ModuleDefinition[] = [
       { key: "status", label: "Status", type: "select", options: ["Draft", "Applied", "Refunded"] },
       { key: "className", label: "Class", help: "QuickBooks-style class, e.g. a department or line of business. Reports can split by it." },
       { key: "location", label: "Location", help: "Branch or location, e.g. Lahore or Karachi. Reports can split by it." },
+      { key: "warehouse", label: "Warehouse", type: "select", options: [], help: "Where the stock on this document comes from or goes to. Empty uses the first warehouse." },
       { key: "project", label: "Project", help: "The project this belongs to; see Project Profitability." },
       { key: "tags", label: "Tags", help: "Comma separated, e.g. Lahore branch, Project A. Search by tag to find and total these." },
       { key: "attachment", label: "Attachment", type: "file", help: "Attach a PDF, image, or CSV up to 10 MB." },
@@ -258,6 +262,7 @@ export const modules: readonly ModuleDefinition[] = [
       { key: "memo", label: "Memo", type: "textarea" },
       { key: "className", label: "Class", help: "QuickBooks-style class, e.g. a department or line of business. Reports can split by it." },
       { key: "location", label: "Location", help: "Branch or location, e.g. Lahore or Karachi. Reports can split by it." },
+      { key: "warehouse", label: "Warehouse", type: "select", options: [], help: "Where the stock on this document comes from or goes to. Empty uses the first warehouse." },
       { key: "project", label: "Project", help: "The project this belongs to; see Project Profitability." },
       { key: "tags", label: "Tags", help: "Comma separated, e.g. Lahore branch, Project A. Search by tag to find and total these." },
       { key: "attachment", label: "Attachment", type: "file", help: "PDF, image, or CSV up to 10 MB." },
@@ -277,6 +282,7 @@ export const modules: readonly ModuleDefinition[] = [
       { key: "memo", label: "Memo", type: "textarea" },
       { key: "className", label: "Class", help: "QuickBooks-style class, e.g. a department or line of business. Reports can split by it." },
       { key: "location", label: "Location", help: "Branch or location, e.g. Lahore or Karachi. Reports can split by it." },
+      { key: "warehouse", label: "Warehouse", type: "select", options: [], help: "Where the stock on this document comes from or goes to. Empty uses the first warehouse." },
       { key: "project", label: "Project", help: "The project this belongs to; see Project Profitability." },
       { key: "tags", label: "Tags", help: "Comma separated, e.g. Lahore branch, Project A. Search by tag to find and total these." },
       { key: "attachment", label: "Receipt attachment", type: "file", help: "PDF, image, or CSV up to 10 MB." },
@@ -297,6 +303,7 @@ export const modules: readonly ModuleDefinition[] = [
       { key: "memo", label: "Memo", type: "textarea" },
       { key: "className", label: "Class", help: "QuickBooks-style class, e.g. a department or line of business. Reports can split by it." },
       { key: "location", label: "Location", help: "Branch or location, e.g. Lahore or Karachi. Reports can split by it." },
+      { key: "warehouse", label: "Warehouse", type: "select", options: [], help: "Where the stock on this document comes from or goes to. Empty uses the first warehouse." },
       { key: "project", label: "Project", help: "The project this belongs to; see Project Profitability." },
       { key: "attachment", label: "Attachment", type: "file", help: "PDF, image, or CSV up to 10 MB." },
     ],
@@ -311,6 +318,7 @@ export const modules: readonly ModuleDefinition[] = [
       { key: "date", label: "PO date", type: "date", required: true },
       { key: "expectedDate", label: "Expected date", type: "date" },
       { key: "poNumber", label: "PO no.", required: true },
+      { key: "warehouse", label: "Warehouse", type: "select", options: [], help: "Where the order is received into. Empty uses the first warehouse." },
       { ...lineItemsField, label: "PO lines" },
       { key: "taxRate", label: "Tax rate (%)", type: "number" },
       { key: "discount", label: "Discount amount", type: "number" },
@@ -332,6 +340,31 @@ export const modules: readonly ModuleDefinition[] = [
       { key: "billable", label: "Billable", type: "checkbox" },
       { key: "rate", label: "Rate per hour", type: "number" },
       { key: "status", label: "Status", type: "select", options: ["Unbilled", "Billed", "Not billable"] },
+    ],
+  },
+  {
+    slug: "warehouses", kind: "warehouses", label: "Warehouse", plural: "Warehouses",
+    description: "The places you keep stock. Documents and adjustments say which warehouse stock comes into or goes out of; the first warehouse is used when none is given.", titleKey: "name",
+    columns: ["name", "code", "address"],
+    fields: [
+      { key: "name", label: "Name", required: true, placeholder: "e.g. Lahore store" },
+      { key: "code", label: "Short code", placeholder: "e.g. LHR" },
+      { key: "address", label: "Address", type: "textarea" },
+    ],
+  },
+  {
+    slug: "stock-transfers", kind: "stock-transfers", label: "Stock transfer", plural: "Stock transfers",
+    description: "Stock moved from one warehouse to another. The quantity on hand and its value stay the same; only where it is kept changes.", titleKey: "item",
+    columns: ["date", "item", "quantity", "fromWarehouse", "toWarehouse", "reference"],
+    fields: [
+      { key: "date", label: "Date", type: "date", required: true },
+      { key: "item", label: "Product", type: "select", options: [], required: true },
+      { key: "quantity", label: "Quantity", type: "number", required: true },
+      { key: "fromWarehouse", label: "From warehouse", type: "select", options: [], required: true },
+      { key: "toWarehouse", label: "To warehouse", type: "select", options: [], required: true },
+      { key: "serials", label: "Lot or serial numbers", help: "For tracked items: the lot, or the serial numbers moved, comma separated." },
+      { key: "reference", label: "Reference" },
+      { key: "notes", label: "Notes", type: "textarea" },
     ],
   },
   {
@@ -592,7 +625,11 @@ export const navigationGroups: NavigationGroup[] = [
   },
   {
     label: "Inventory",
-    items: [{ slug: "inventory", label: "Inventory", icon: "Boxes" }],
+    items: [
+      { slug: "inventory", label: "Inventory", icon: "Boxes" },
+      { slug: "warehouses", label: "Warehouses", icon: "Warehouse" },
+      { slug: "stock-transfers", label: "Stock transfers", icon: "ArrowLeftRight" },
+    ],
   },
   {
     label: "Accounts",
@@ -704,4 +741,16 @@ export function withCustomFields(module: ModuleDefinition, settings: Record<stri
   const extra: FormField[] = names.map((label) => ({ key: `cf${label.replace(/[^a-zA-Z0-9]+/g, " ").trim().split(/\s+/).map((word) => word[0].toUpperCase() + word.slice(1)).join("").slice(0, 40) || "Field"}`, label, help: "Custom field" }));
   const known = new Set(module.fields.map((field) => field.key));
   return { ...module, fields: [...module.fields, ...extra.filter((field) => !known.has(field.key))] };
+}
+
+/** Fields that pick a warehouse or a stock item, filled with this business's own; without warehouses the warehouse field is left off. */
+export function withWarehouses(module: ModuleDefinition, warehouses: string[], stockItems: string[] = []): ModuleDefinition {
+  const keys = new Set(["warehouse", "fromWarehouse", "toWarehouse"]);
+  if (!module.fields.some((field) => keys.has(field.key) || (module.kind === "stock-transfers" && field.key === "item"))) return module;
+  return {
+    ...module,
+    fields: module.fields
+      .filter((field) => field.key !== "warehouse" || warehouses.length > 0)
+      .map((field) => (keys.has(field.key) ? { ...field, options: warehouses } : module.kind === "stock-transfers" && field.key === "item" ? { ...field, options: stockItems } : field)),
+  };
 }

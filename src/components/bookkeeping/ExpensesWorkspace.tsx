@@ -22,7 +22,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { moduleBySlug, type ModuleDefinition } from "@/lib/bookkeeping-config";
+import { moduleBySlug, withWarehouses, type ModuleDefinition } from "@/lib/bookkeeping-config";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
 import { expenseCategoryLabel, expenseLinesFromData } from "@/lib/expense-utils";
 import { dueDateForTerms } from "@/lib/invoice-utils";
@@ -37,6 +37,8 @@ interface ExpensesWorkspaceProps {
   asOfDate: string;
   /** Products and services for Item details. */
   items?: BookkeepingRecord[];
+  /** Warehouse names, for where purchased stock goes. */
+  warehouses?: string[];
 }
 
 type DatePreset = "last30" | "last90" | "last12" | "thisYear" | "all" | "custom";
@@ -117,7 +119,7 @@ function createDefaults(kind: "bills" | "expenses", records: BookkeepingRecord[]
   return values;
 }
 
-export default function ExpensesWorkspace({ expenses: initialExpenses, bills: initialBills, vendors, accounts, currency, asOfDate, items = [] }: ExpensesWorkspaceProps) {
+export default function ExpensesWorkspace({ expenses: initialExpenses, bills: initialBills, vendors, accounts, currency, asOfDate, items = [], warehouses = [] }: ExpensesWorkspaceProps) {
   const router = useRouter();
   const [records, setRecords] = useState([...initialBills, ...initialExpenses]);
   const [search, setSearch] = useState("");
@@ -176,8 +178,9 @@ export default function ExpensesWorkspace({ expenses: initialExpenses, bills: in
   useEffect(() => setPage(1), [categoryFilter, customEnd, customStart, datePreset, search, statusFilter, typeFilter]);
 
   function getEditorModule(kind: "bills" | "expenses", record: BookkeepingRecord | null, check: boolean | "card-credit" = false) {
-    const baseModule = checkModule(moduleBySlug(kind), check);
-    if (!baseModule) return null;
+    const checkedModule = checkModule(moduleBySlug(kind), check);
+    if (!checkedModule) return null;
+    const baseModule = withWarehouses(checkedModule, warehouses);
     const categoryOptions = [...new Set([
       ...expenseCategories.map((account) => account.data.name),
       record?.data.category,

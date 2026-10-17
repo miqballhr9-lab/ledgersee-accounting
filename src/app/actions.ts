@@ -14,7 +14,8 @@ import { canReadKind } from "@/lib/permissions";
 import { applyLoanRepayment } from "@/lib/hr-rules";
 import { sendEmailOrThrow } from "@/lib/email";
 import { createUploadUrl } from "@/lib/storage";
-import { dueDateForTerms, invoiceTax, parseInvoiceLines } from "@/lib/invoice-utils";
+import { dueDateForTerms, invoiceTax, parseInvoiceLines, serialList } from "@/lib/invoice-utils";
+import { stockByWarehouse } from "@/lib/warehouses";
 import { buildInventory, inventoryKinds, isInventoryItem } from "@/lib/inventory";
 import { siteUrl } from "@/lib/site";
 import { isRecordKind, type BookkeepingRecord, type RecordKind } from "@/lib/bookkeeping-types";
@@ -385,6 +386,7 @@ async function saveRecord(
     // Invoiced charges stay closed; anything else waits for the next invoice.
     data = { ...data, chargeType: data.chargeType === "Credit" ? "Credit" : "Charge", quantity: String(quantity), amount: (quantity * rate).toFixed(2), status: current?.data.status === "Closed" || data.status === "Closed" ? "Closed" : "Open" };
   }
+  if (kind === "warehouses" || kind === "stock-transfers" || data.warehouse?.trim() || data.lineItems?.includes("\"serials\"")) data = await checkStockPlaces(me.id, kind, data, id);
   if (kind === "recurring-transactions") data = recurringTemplateData(me, data);
   // A check is an expense paid from a bank account, with a check number.
   if (kind === "expenses" && data.docType && !["Check", "Credit card credit"].includes(data.docType)) data = { ...data, docType: "" };
@@ -1426,6 +1428,43 @@ function paymentRate(document: Record<string, string>, exchangeRate: string): Re
   return Number(document.exchangeRate || 1) === rate ? {} : { exchangeRate: String(rate) };
 }
 
+/**
+ * Warehouses, transfers and serial numbers: a warehouse named on a document must
+ * exist, a transfer moves stock that is there, and serial numbers match the quantity.
+ */
+async function checkStockPlaces(userId: string, kind: string, data: Record<string, string>, id?: string): Promise<Record<string, string>> {
+  const rows = await db.select().from(bookkeepingRecord).where(and(eq(bookkeepingRecord.userId, userId), inArray(bookkeepingRecord.kind, ["warehouses", "items", ...(kind === "stock-transfers" ? [...inventoryKinds, "stock-transfers"] : [])])));
+  const records = rows.map(serializeRow);
+  const warehouses = records.filter((row) => row.kind === "warehouses" && row.data.name?.trim());
+  const known = (name: string | undefined) => warehouses.some((row) => row.data.name.trim().toLowerCase() === (name ?? "").trim().toLowerCase());
+  if (kind === "warehouses") {
+    if (warehouses.some((row) => row.id !== id && row.data.name.trim().toLowerCase() === (data.name ?? "").trim().toLowerCase())) throw new ActionError(`There's already a warehouse called ${data.name}.`);
+    return data;
+  }
+  if (kind !== "stock-transfers" && data.warehouse?.trim() && !known(data.warehouse)) throw new ActionError(`Choose a warehouse from Inventory > Warehouses.`);
+  const items = records.filter((row) => row.kind === "items");
+  if (kind !== "stock-transfers") {
+    for (const line of parseInvoiceLines(data.lineItems ?? "")) {
+      const item = items.find((row) => row.id === line.itemId);
+      if (item?.data.tracking !== "Serial number" || !line.serials) continue;
+      const count = serialList(line.serials).length;
+      if (count !== Number(line.quantity)) throw new ActionError(`${item.data.name}: enter ${Number(line.quantity)} serial ${Number(line.quantity) === 1 ? "number" : "numbers"}, one per unit (${count} given).`);
+    }
+    return data;
+  }
+  const item = items.find((row) => isInventoryItem(row) && (row.id === data.itemId || row.data.name?.trim().toLowerCase() === (data.item ?? "").trim().toLowerCase()));
+  if (!item) throw new ActionError("Choose an inventory product to move.");
+  const quantity = Number(data.quantity);
+  if (!Number.isFinite(quantity) || quantity <= 0) throw new ActionError("Enter a quantity greater than zero.");
+  if (!known(data.fromWarehouse) || !known(data.toWarehouse)) throw new ActionError("Choose both warehouses from Inventory > Warehouses.");
+  if (data.fromWarehouse.trim().toLowerCase() === data.toWarehouse.trim().toLowerCase()) throw new ActionError("Choose two different warehouses.");
+  if (item.data.tracking === "Serial number" && data.serials?.trim() && serialList(data.serials).length !== quantity) throw new ActionError(`Enter ${quantity} serial numbers, one per unit.`);
+  // Only stock that is in the "from" warehouse on that day can move.
+  const available = stockByWarehouse(records.filter((row) => row.id !== id), data.date || "9999-12-31").get(item.id)?.get(data.fromWarehouse.trim()) ?? 0;
+  if (quantity > available + 1e-9) throw new ActionError(`Only ${available} of ${item.data.name} ${available === 1 ? "is" : "are"} in ${data.fromWarehouse} on ${data.date}.`);
+  return { ...data, item: item.data.name ?? data.item, itemId: item.id, quantity: String(quantity) };
+}
+
 function isPaymentDate(value: string) {
   return /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(`${value}T00:00:00Z`));
 }
@@ -1953,6 +1992,10 @@ export async function createInventoryMovement(input: {
   notes?: string;
   /** Cost per unit for stock received without a bill; the item's purchase cost when blank. */
   unitCost?: string;
+  /** Where the stock comes in or goes out; the first warehouse when blank. */
+  warehouse?: string;
+  /** The lot, or serial numbers, for items tracked by them. */
+  serials?: string;
 }): Promise<BookkeepingRecord> {
   const me = await requireUser();
   assertCanWrite(me, "inventory-movements");
@@ -1964,6 +2007,7 @@ export async function createInventoryMovement(input: {
   const notes = (input.notes || "").trim().slice(0, 500);
 
   if (!["Receipt", "Delivery", "Adjustment"].includes(input.movementType)) throw new ActionError("Choose a valid stock movement.");
+  if (input.warehouse?.trim()) await checkStockPlaces(me.id, "inventory-movements", { warehouse: input.warehouse });
   if (!itemId) throw new ActionError("Choose a product to continue.");
   if (!Number.isFinite(quantity) || quantity < 0 || (input.movementType !== "Adjustment" && quantity === 0)) {
     throw new ActionError("Enter a valid quantity greater than zero.");
@@ -2018,6 +2062,8 @@ export async function createInventoryMovement(input: {
           date,
           reference,
           notes,
+          ...(input.warehouse?.trim() ? { warehouse: input.warehouse.trim().slice(0, 120) } : {}),
+          ...(input.serials?.trim() ? { serials: input.serials.trim().slice(0, 2000) } : {}),
           ...(Number.isFinite(unitCost) ? { unitCost: String(unitCost) } : {}),
         },
         updatedAt,

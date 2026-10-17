@@ -14,11 +14,15 @@ import ModuleWorkspace from "@/components/bookkeeping/ModuleWorkspace";
 import PayrollWorkspace from "@/components/bookkeeping/PayrollWorkspace";
 import EmployeesWorkspace from "@/components/hr/EmployeesWorkspace";
 import { odooHrData } from "@/lib/hr-status";
-import { moduleBySlug, withCustomFields } from "@/lib/bookkeeping-config";
+import { moduleBySlug, withCustomFields, withWarehouses } from "@/lib/bookkeeping-config";
 import { weekendDays } from "@/lib/weekend";
 import { packFor } from "@/lib/tax-packs";
 import type { BookkeepingRecord, RecordKind } from "@/lib/bookkeeping-types";
-import { buildInventory, inventoryKinds } from "@/lib/inventory";
+import { buildInventory, inventoryKinds, isInventoryItem } from "@/lib/inventory";
+import { stockByWarehouse } from "@/lib/warehouses";
+
+/** Warehouse names, in the order they were added; the first is where stock goes when a document names none. */
+const warehouseNames = (rows: BookkeepingRecord[] | undefined) => [...(rows ?? [])].sort((a, b) => a.createdAt.localeCompare(b.createdAt)).map((row) => row.data.name?.trim() ?? "").filter(Boolean);
 
 /** Items with their quantity on hand, for item pickers. */
 function itemsWithStock(groups: Partial<Record<string, BookkeepingRecord[]>>) {
@@ -46,15 +50,16 @@ export default async function SectionPage({ params, searchParams }: SectionPageP
   }
 
   if (section === "inventory") {
-    const groups = await listBookkeepingRecordGroups([...inventoryKinds, "settings"]);
+    const groups = await listBookkeepingRecordGroups([...inventoryKinds, "settings", "warehouses", "stock-transfers"]);
     const summaries = buildInventory(Object.values(groups).flat());
+    const byWarehouse = Object.fromEntries([...stockByWarehouse(Object.values(groups).flat())].map(([id, places]) => [id, Object.fromEntries(places)]));
     const products = [...summaries.values()].map(({ item, onHand }) => ({ ...item, data: { ...item.data, stock: String(onHand) } }));
     const stock = Object.fromEntries([...summaries].map(([id, summary]) => [id, { onHand: summary.onHand, value: summary.value, averageCost: summary.averageCost }]));
     const activity = [...summaries.values()]
       .flatMap((summary) => summary.events.map((event) => ({ ...event, itemName: summary.item.data.name || "Item", unit: summary.item.data.unit || "" })))
       .sort((a, b) => b.date.localeCompare(a.date) || b.order - a.order)
       .slice(0, 500);
-    return <InventoryWorkspace products={products} stock={stock} activity={activity} currency={groups.settings?.[0]?.data.currency || "USD"} />;
+    return <InventoryWorkspace products={products} stock={stock} activity={activity} currency={groups.settings?.[0]?.data.currency || "USD"} warehouses={warehouseNames(groups.warehouses)} byWarehouse={byWarehouse} />;
   }
 
   if (section === "payroll") {
@@ -87,7 +92,7 @@ export default async function SectionPage({ params, searchParams }: SectionPageP
   }
 
   if (section === "expenses") {
-    const groups = await listBookkeepingRecordGroups(["expenses", "bills", "vendors", "accounts", "settings", ...inventoryKinds]);
+    const groups = await listBookkeepingRecordGroups(["expenses", "bills", "vendors", "accounts", "settings", "warehouses", ...inventoryKinds]);
     return (
       <ExpensesWorkspace
         expenses={groups.expenses ?? []}
@@ -97,12 +102,13 @@ export default async function SectionPage({ params, searchParams }: SectionPageP
         currency={groups.settings?.[0]?.data.currency || "USD"}
         asOfDate={new Date().toISOString().slice(0, 10)}
         items={itemsWithStock(groups)}
+        warehouses={warehouseNames(groups.warehouses)}
       />
     );
   }
 
   if (section === "bills") {
-    const groups = await listBookkeepingRecordGroups(["bills", "vendors", "accounts", "settings", ...inventoryKinds]);
+    const groups = await listBookkeepingRecordGroups(["bills", "vendors", "accounts", "settings", "warehouses", ...inventoryKinds]);
     return (
       <BillsWorkspace
         records={groups.bills ?? []}
@@ -112,6 +118,7 @@ export default async function SectionPage({ params, searchParams }: SectionPageP
         billTerms={groups.settings?.[0]?.data.billTerms || "30 days"}
         items={itemsWithStock(groups)}
         asOfDate={new Date().toISOString().slice(0, 10)}
+        warehouses={warehouseNames(groups.warehouses)}
       />
     );
   }
@@ -139,7 +146,7 @@ export default async function SectionPage({ params, searchParams }: SectionPageP
     return <ChartOfAccountsWorkspace accounts={accounts} currency={settings[0]?.data.currency || "USD"} />;
   }
 
-  const kinds = new Set<RecordKind>([module.kind, "settings"]);
+  const kinds = new Set<RecordKind>([module.kind, "settings", "warehouses"]);
   if (module.fields.some((field) => field.key === "customer") || module.kind === "journals") kinds.add("customers");
   if (module.fields.some((field) => field.key === "vendor") || module.kind === "journals") kinds.add("vendors");
   if (["invoices", "bills", "journals", "supplier-credits", "credit-notes", "purchase-orders", "employees", "items"].includes(module.kind)) kinds.add("accounts");
@@ -152,7 +159,7 @@ export default async function SectionPage({ params, searchParams }: SectionPageP
   const partyDocuments: RecordKind[] = module.kind === "customers" ? ["invoices", "credit-notes", "estimates", "payments"] : module.kind === "vendors" ? ["bills", "expenses", "supplier-credits", "payments"] : [];
   for (const kind of partyDocuments) kinds.add(kind);
   // Quantity on hand comes from the documents that move stock.
-  if (module.kind === "items" || kinds.has("items")) for (const kind of inventoryKinds) kinds.add(kind);
+  if (module.kind === "items" || module.kind === "stock-transfers" || kinds.has("items")) for (const kind of inventoryKinds) kinds.add(kind);
   const groups = await listBookkeepingRecordGroups([...kinds]);
   const stock = kinds.has("items") ? buildInventory(Object.values(groups).flat()) : null;
   const withStock = (list: BookkeepingRecord[]) => (stock ? list.map((item) => (stock.has(item.id) ? { ...item, data: { ...item.data, qtyOnHand: String(stock.get(item.id)!.onHand) } } : item)) : list);
@@ -164,6 +171,7 @@ export default async function SectionPage({ params, searchParams }: SectionPageP
   const items = groups.items ?? [];
   const settings = groups.settings ?? [];
   module = withCustomFields(module, settings[0]?.data);
+  module = withWarehouses(module, warehouseNames(groups.warehouses), module.kind === "stock-transfers" ? (groups.items ?? []).filter(isInventoryItem).map((item) => item.data.name?.trim() ?? "").filter(Boolean) : []);
   // Only employee names leave the server here; payroll amounts stay out of this page.
   const employeeNames = module.kind === "journals"
     ? [...new Set([

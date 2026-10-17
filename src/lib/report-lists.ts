@@ -4,6 +4,7 @@ import { parseInvoiceLines } from "@/lib/invoice-utils";
 import { accountOf, type Ledger } from "@/lib/ledger";
 import { formatLongDate, periodLabel, type ReportColumn, type ReportLine, type ReportOptions, type ReportResult, type ZoomSpec } from "@/lib/reports";
 import { taxLines } from "@/lib/tax-return";
+import { defaultWarehouse, lotRegister, stockByWarehouse } from "@/lib/warehouses";
 import { buildInventory, itemTypeLabel } from "@/lib/inventory";
 import { isRunningAttachment, isToApprove } from "@/lib/hr-status";
 
@@ -721,6 +722,29 @@ export function buildListReport(key: string, records: BookkeepingRecord[], ledge
       const lines: ReportLine[] = summaries.map((summary) => ({ id: summary.item.id, label: summary.item.data.name || "Item", kind: "account" as const, depth: 0, values: [summary.item.data.sku ?? "", summary.onHand, summary.value, summary.onHand > 0 ? summary.value / summary.onHand : null], source: src(summary.item) }));
       if (lines.length) lines.push({ id: "total", label: "TOTAL", kind: "grand", depth: 0, values: ["", summaries.reduce((sum, item) => sum + item.onHand, 0), summaries.reduce((sum, item) => sum + item.value, 0), null] });
       return asOfResult(columns, lines, asOf, "No inventory items yet. Set an item's type to Inventory to track it.");
+    }
+
+    case "stock-by-warehouse": {
+      const places = stockByWarehouse(records, asOf);
+      const names = [...new Set([defaultWarehouse(records), ...records.filter((record) => record.kind === "warehouses").map((record) => record.data.name?.trim() ?? "").filter(Boolean), ...[...places.values()].flatMap((map) => [...map.keys()])])];
+      const columns = [...names.map((name, index) => amount(`w${index}`, name)), amount("total", "Total")];
+      const items = records.filter((record) => record.kind === "items" && places.has(record.id)).sort((a, b) => (a.data.name ?? "").localeCompare(b.data.name ?? ""));
+      const lines: ReportLine[] = items.map((item) => {
+        const map = places.get(item.id)!;
+        const values = names.map((name) => map.get(name) ?? 0);
+        return { id: item.id, label: item.data.name || "Item", kind: "account" as const, depth: 0, values: [...values, values.reduce((sum, value) => sum + value, 0)], source: src(item) };
+      });
+      if (lines.length) lines.push({ id: "total", label: "TOTAL", kind: "grand", depth: 0, values: columns.map((_, index) => lines.reduce((sum, line) => sum + Number(line.values[index] ?? 0), 0)) });
+      return asOfResult(columns, lines, asOf, "No inventory items yet. Set an item's type to Inventory to track it.");
+    }
+
+    case "lot-serial-numbers": {
+      const columns = [text("number", "Lot / serial no."), text("tracking", "Tracked by"), text("warehouse", "Warehouse"), text("in", "First received"), text("last", "Last moved"), amount("received", "Received"), amount("out", "Sold or returned"), amount("onHand", "On hand")];
+      const lines = grouped(columns, groupBy(lotRegister(records), (entry) => entry.itemName).map(([label, entries]) => ({
+        label,
+        rows: entries.map((entry): Row => ({ values: [entry.number, entry.tracking, entry.onHand > 0 ? entry.warehouse : "—", entry.firstIn, entry.lastMove, entry.quantityIn, entry.quantityOut, entry.onHand], source: entry.history.length ? entry.history[entry.history.length - 1].source : undefined })),
+      })));
+      return asOfResult(columns, lines, asOf, "No lots or serial numbers yet. Set an item to track by lot or serial number, then enter them on its purchase and sale lines.");
     }
 
     case "inventory-valuation-detail": {

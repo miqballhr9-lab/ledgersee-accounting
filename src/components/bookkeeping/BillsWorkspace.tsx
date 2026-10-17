@@ -22,7 +22,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { moduleBySlug, type ModuleDefinition } from "@/lib/bookkeeping-config";
+import { moduleBySlug, withWarehouses, type ModuleDefinition } from "@/lib/bookkeeping-config";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
 import { expenseCategoryLabel, expenseLinesFromData } from "@/lib/expense-utils";
 import { dueDateForTerms } from "@/lib/invoice-utils";
@@ -37,6 +37,8 @@ interface BillsWorkspaceProps {
   billTerms?: string;
   /** Products and services for the bill's Item details. */
   items?: BookkeepingRecord[];
+  /** Warehouse names, for where the bill's stock goes. */
+  warehouses?: string[];
 }
 
 type BillStatus = "Open" | "Partially Paid" | "Overdue" | "Paid" | "Cancelled";
@@ -72,7 +74,7 @@ function csvValue(value: string) {
   return `"${value.replaceAll('"', '""')}"`;
 }
 
-export default function BillsWorkspace({ records: initialRecords, vendors, accounts, currency, asOfDate, billTerms = "30 days", items = [] }: BillsWorkspaceProps) {
+export default function BillsWorkspace({ records: initialRecords, vendors, accounts, currency, asOfDate, billTerms = "30 days", items = [], warehouses = [] }: BillsWorkspaceProps) {
   const router = useRouter();
   const [records, setRecords] = useState(initialRecords);
   const [search, setSearch] = useState("");
@@ -96,8 +98,8 @@ export default function BillsWorkspace({ records: initialRecords, vendors, accou
   const editorModule = useMemo(() => {
     const baseModule = moduleBySlug("bills");
     if (!baseModule) return null;
-    return baseModule;
-  }, []);
+    return withWarehouses(baseModule, warehouses);
+  }, [warehouses]);
 
   const filteredRecords = useMemo(() => {
     const normalizedSearch = search.trim().toLocaleLowerCase();

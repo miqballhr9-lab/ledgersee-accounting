@@ -169,6 +169,8 @@ export const reportCategories: ReportCategory[] = [
     reports: [
       { key: "inventory-valuation-summary", label: "Inventory Valuation Summary", description: "Quantity on hand and value of each item.", ready: true, engine: "list" },
       { key: "inventory-valuation-detail", label: "Inventory Valuation Detail", description: "Stock movements and their value.", ready: true, engine: "list" },
+      { key: "stock-by-warehouse", label: "Stock by Warehouse", description: "Quantity on hand of each item in each warehouse, after transfers.", ready: true, engine: "list" },
+      { key: "lot-serial-numbers", label: "Lot and Serial Numbers", description: "Each lot and serial number: where it came from, where it is, and whether it is still in stock.", ready: true, engine: "list" },
       { key: "stock-take-worksheet", label: "Stock Take Worksheet", description: "A sheet for counting stock.", ready: true, engine: "list" },
       { key: "product-service-list", label: "Product/Service List", description: "Items with prices and costs.", ready: true, engine: "list" },
     ],
