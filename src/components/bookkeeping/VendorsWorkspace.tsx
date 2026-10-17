@@ -322,6 +322,7 @@ export default function VendorsWorkspace({ records: initialRecords, bills, accou
       ) : null}
       {editorModule ? (
         <RecordEditor
+          defaultCurrency={currency}
           key={`vendors-${editingRecord?.id ?? "new"}`}
           module={editorModule as ModuleDefinition}
           record={editingRecord}

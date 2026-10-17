@@ -42,6 +42,12 @@ export default function InvoiceDocument({ invoice, companyName, documentKind = "
   const subtotal = Number(invoice.subtotal) || 0;
   const taxAmount = Number(invoice.taxAmount) || 0;
   const discount = Number(invoice.discount) || 0;
+  // A document in a foreign currency also shows its local value: tax authorities (FBR, FTA, ZATCA)
+  // want the tax in the country's own currency.
+  const localCurrency = pack?.currency || seller?.currency || "";
+  const rate = Number(invoice.exchangeRate) || 0;
+  const converted = localCurrency && currency !== localCurrency && rate > 0 && rate !== 1;
+  const local = (amount: number) => currencyAmount(amount * rate, localCurrency);
   // A tax column prints only when lines carry their own rates.
   const lineTaxes = lines.some((line) => line.taxRate);
   const lineTax = (line: (typeof lines)[number]) => `${line.taxRate || invoice.taxRate || "0"}%`;
@@ -70,6 +76,7 @@ export default function InvoiceDocument({ invoice, companyName, documentKind = "
           {documentKind === "sales-orders" ? <div><dt className="text-xs text-muted-foreground">Delivery date</dt><dd className="mt-1 font-medium">{invoice.deliveryDate || "—"}</dd></div> : null}
           {documentKind === "invoices" ? <div><dt className="text-xs text-muted-foreground">Payment terms</dt><dd className="mt-1 font-medium">{invoice.paymentTerms || "—"}</dd></div> : null}
           <div><dt className="text-xs text-muted-foreground">Currency</dt><dd className="mt-1 font-medium">{currency}</dd></div>
+          {converted ? <div className="col-span-2"><dt className="text-xs text-muted-foreground">Exchange rate</dt><dd className="mt-1 font-medium tabular-nums">1 {currency} = {rate.toLocaleString(undefined, { maximumFractionDigits: 6 })} {localCurrency}</dd></div> : null}
         </dl>
       </header>
 
@@ -149,6 +156,15 @@ export default function InvoiceDocument({ invoice, companyName, documentKind = "
         <div className="flex justify-between gap-4"><span className="text-muted-foreground">{lineTaxes ? "Tax" : invoice.taxName ? `${invoice.taxName}` : `Tax (${invoice.taxRate || "0"}%)`}</span><span className="tabular-nums">{currencyAmount(taxAmount, currency)}</span></div>
         <div className="flex justify-between gap-4"><span className="text-muted-foreground">Discount</span><span className="tabular-nums">−{currencyAmount(discount, currency)}</span></div>
         <div className="flex justify-between gap-4 border-t border-border pt-4 text-base font-semibold"><span>{details.totalLabel}</span><span className="tabular-nums">{currencyAmount(Number(invoice.amount) || 0, currency)}</span></div>
+              {converted ? (
+          <div className="mt-2 space-y-2 rounded-md border border-border bg-muted/40 p-3 text-sm">
+            <p className="text-xs font-semibold uppercase tracking-[0.1em] text-muted-foreground">In {localCurrency} at {rate.toLocaleString(undefined, { maximumFractionDigits: 6 })}</p>
+            <div className="flex justify-between gap-4"><span className="text-muted-foreground">Subtotal</span><span className="tabular-nums">{local(subtotal)}</span></div>
+            <div className="flex justify-between gap-4"><span className="text-muted-foreground">Tax</span><span className="tabular-nums">{local(taxAmount)}</span></div>
+            {discount ? <div className="flex justify-between gap-4"><span className="text-muted-foreground">Discount</span><span className="tabular-nums">−{local(discount)}</span></div> : null}
+            <div className="flex justify-between gap-4 font-semibold"><span>{details.totalLabel}</span><span className="tabular-nums">{local(Number(invoice.amount) || 0)}</span></div>
+          </div>
+        ) : null}
       </section>
 
       {documentKind === "invoices" && seller?.invoiceMessage && !invoice.notes ? <section className="mt-8 border-t border-border pt-5"><p className="whitespace-pre-wrap text-sm">{seller.invoiceMessage}</p></section> : null}

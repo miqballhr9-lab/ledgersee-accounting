@@ -453,6 +453,7 @@ export default function BillsWorkspace({ records: initialRecords, vendors, accou
       {payBillsOpen ? <PayBillsDialog open onOpenChange={setPayBillsOpen} bills={records} accounts={accounts} currency={currency} asOfDate={asOfDate} onDone={() => router.refresh()} /> : null}
       {editorModule ? (
         <RecordEditor
+          defaultCurrency={currency}
           key={`bills-${editingRecord?.id ?? "new"}`}
           module={editorModule as ModuleDefinition}
           record={editingRecord}

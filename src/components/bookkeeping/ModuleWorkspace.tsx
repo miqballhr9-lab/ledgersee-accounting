@@ -1149,6 +1149,7 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
         />
       ) : (
         <RecordEditor
+          defaultCurrency={defaultCurrency}
           key={`${module.kind}-${editingRecord?.id ?? "new"}`}
           module={module}
           record={editingRecord}

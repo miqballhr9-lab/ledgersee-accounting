@@ -424,7 +424,10 @@ export default function CompanySettings({ settings, workspaceName }: CompanySett
                 <>{text("booksClosedThrough", "Closing date", { type: "date", help: "Nothing dated on or before this day can be added, changed or deleted, so filed periods stay as they are. Leave empty to keep every period open." })}</>,
               )}
               {section("currency", "Currency",
-                <Row label="Home currency" value={saved.currency} />,
+                <>
+                  <Row label="Home currency" value={saved.currency} />
+                  {pack && saved.currency && saved.currency !== pack.currency ? <p className="text-xs leading-5 text-amber-700 dark:text-amber-400 sm:col-span-2">Your tax country is {pack.country}, but your home currency is {saved.currency}. Books, reports and tax returns are kept in the home currency; change it to {pack.currency} to keep them in {pack.currency}.</p> : null}
+                </>,
                 <Field label="Home currency" htmlFor="settings-currency" wide help="Changing it after you have transactions changes how existing amounts read in reports.">
                   <CurrencyPicker id="settings-currency" value={draft.currency ?? ""} required onValueChange={(value: string) => set("currency", value)} />
                 </Field>,

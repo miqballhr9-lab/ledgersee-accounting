@@ -911,6 +911,13 @@ export default function RecordEditor({ module, record, customers, vendors, items
         ) : null}
         {module.kind === "expenses" && field.key === "payee" ? <datalist id="expense-payees">{vendorOptions.map((vendor) => <option value={vendor.data.name} key={vendor.id} />)}</datalist> : null}
 
+        {field.key === "exchangeRate" && defaultCurrency ? (
+          (values.currency || defaultCurrency) === defaultCurrency
+            ? <p className="text-xs leading-5 text-muted-foreground">{defaultCurrency} is your home currency, so this document isn&apos;t converted. Books and reports use the home currency set in Settings.</p>
+            : Number(values.exchangeRate) > 0
+              ? <p className="text-xs leading-5 text-muted-foreground">1 {values.currency} = {values.exchangeRate} {defaultCurrency} · total {currencyAmount((hasStructuredLines ? invoiceTotal : expenseGrandTotal) * Number(values.exchangeRate), defaultCurrency)} in your books</p>
+              : null
+        ) : null}
         {field.help && field.type !== "file" && field.type !== "checkbox" && !(field.key === "paymentMethod" && !paymentAccounts.length && !record) && !(hasStructuredLines && field.key === "lineItems") && !(categoryLineKinds.has(module.kind) && field.key === "lineItems") ? <p className="text-xs leading-5 text-muted-foreground">{field.help}</p> : null}
       </div>
     );
