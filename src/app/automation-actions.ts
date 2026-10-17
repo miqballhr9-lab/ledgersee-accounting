@@ -11,7 +11,7 @@ import { ActionError } from "@/lib/action-error";
 import { assertAdmin, requireUser } from "@/lib/auth";
 import { sendEmailOrThrow } from "@/lib/email";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
-import { adjustedWorkedDays, payrollAdjustments } from "@/lib/payroll-adjustments";
+import { adjustedWorkedDays, parseSalaryRules, payrollAdjustments, salaryRuleAmounts } from "@/lib/payroll-adjustments";
 import { weekendDays } from "@/lib/weekend";
 import { runCaseEscalation, runLeadFollowUp, runOverdueTasks, runStaleDeals, runWonDealInvoices } from "@/lib/crm-automation";
 import {
@@ -161,7 +161,9 @@ async function runMonthlyPayroll(userId: string) {
   const lastMonth = previousMonth(month);
   const [payroll, employees, leaves, loans, attendance] = await Promise.all([rowsOfKind(userId, "payroll"), rowsOfKind(userId, "employees"), rowsOfKind(userId, "hr-leaves"), rowsOfKind(userId, "hr-loans"), rowsOfKind(userId, "hr-attendance")]);
   const thisMonth = payroll.filter((row) => row.data.month === month);
-  const weekend = weekendDays((await rowsOfKind(userId, "settings"))[0]?.data.weekendDays);
+  const settings = (await rowsOfKind(userId, "settings"))[0]?.data;
+  const weekend = weekendDays(settings?.weekendDays);
+  const salaryRules = parseSalaryRules(settings?.salaryRules);
   const lastMonthEntries = payroll.filter((row) => row.data.month === lastMonth);
   const hasEntry = (employeeId: string, name: string) => thisMonth.some((row) => row.data.employeeId === employeeId && row.data.employeeName?.trim() === name.trim());
 
@@ -208,6 +210,8 @@ async function runMonthlyPayroll(userId: string) {
     // HR: unpaid time off and absences come off the worked days, and running attachments set this month's installment.
     const employee = employees.find((row) => row.data.employeeId === payload.employeeId && row.data.name?.trim() === payload.employeeName.trim());
     const hr = payrollAdjustments(month, { id: employee?.id, name: payload.employeeName }, leaves, loans, attendance, weekend);
+    // Salary rules from Settings fill a new employee's allowances and deductions; last month's figures carry over otherwise.
+    if (!lastMonthEntries.some((row) => row.data.employeeId === payload.employeeId && row.data.employeeName?.trim() === payload.employeeName.trim())) Object.assign(payload, salaryRuleAmounts(salaryRules, Number(payload.baseSalary) || 0, employee?.data.department));
     payload.workedDays = adjustedWorkedDays(workingDays, hr);
     if (hr.hasLoans) payload.loanDeduction = hr.loanDeduction.toFixed(2);
     if (employee?.data.socialDeduction && !source.socialDeduction) payload.socialDeduction = employee.data.socialDeduction;

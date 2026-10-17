@@ -19,6 +19,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { parseCsv } from "@/lib/budget-utils";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
 import { crmModule, isClosedStage, type CrmModule, type CrmModuleKey, type CrmPage } from "@/lib/crm-config";
+import { withRecruitmentStages } from "@/lib/hr-config";
 import ConvertLeadDialog from "@/components/crm/ConvertLeadDialog";
 import AttendanceDialog from "@/components/hr/AttendanceDialog";
 import LeaveBalances from "@/components/hr/LeaveBalances";
@@ -50,6 +51,8 @@ interface CrmWorkspaceProps {
   jobFilter?: string;
   /** HR pages: the business's weekly days off, as UTC day numbers. */
   weekend?: number[];
+  /** Applications: the recruitment stages set in Settings. */
+  recruitmentStages?: string;
 }
 
 const pageInfo: Record<string, { title: string; description: string }> = {
@@ -123,7 +126,7 @@ function dueDateOf(record: BookkeepingRecord) {
   return (record.data.dueDate || record.data.closingDate || record.data.from || record.data.startTime || "").slice(0, 10);
 }
 
-export default function CrmWorkspace({ page, initialStore, currency, me, owners, openId, jobFilter, weekend }: CrmWorkspaceProps) {
+export default function CrmWorkspace({ page, initialStore, currency, me, owners, openId, jobFilter, weekend, recruitmentStages }: CrmWorkspaceProps) {
   const router = useRouter();
   const [store, setStore] = useState<CrmStore>(initialStore);
   const [lastInitial, setLastInitial] = useState(initialStore);
@@ -132,7 +135,7 @@ export default function CrmWorkspace({ page, initialStore, currency, me, owners,
     setStore(initialStore);
   }
   const [activityKey, setActivityKey] = useState<CrmModuleKey>("tasks");
-  const mod = page === "accounts" ? null : crmModule(page === "activities" ? activityKey : page)!;
+  const mod = page === "accounts" ? null : withRecruitmentStages(crmModule(page === "activities" ? activityKey : page)!, recruitmentStages);
   const [sort, setSort] = useState<{ key: string; desc: boolean } | null>(null);
   const [pipeline, setPipeline] = useState("");
   const [calendarMonth, setCalendarMonth] = useState(() => new Date().toISOString().slice(0, 7));

@@ -25,6 +25,7 @@ export async function loadHrData() {
     me: me.name,
     owners: [...new Set([me.workspaceName, me.name, ...teamNames])],
     currency: groups.settings?.[0]?.data.currency || "USD",
+    recruitmentStages: groups.settings?.[0]?.data.recruitmentStages ?? "",
     weekend: weekendDays(groups.settings?.[0]?.data.weekendDays),
     today: businessToday(groups.settings?.[0]?.data.timeZone),
   };

@@ -13,7 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { readableError } from "@/lib/action-error";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
 import { calculatePayroll, emptyPayrollValues, type PayrollValues, type SalaryTaxRule } from "@/lib/payroll-utils";
-import { adjustedWorkedDays, payrollAdjustments } from "@/lib/payroll-adjustments";
+import { adjustedWorkedDays, parseSalaryRules, payrollAdjustments, salaryRuleAmounts } from "@/lib/payroll-adjustments";
 
 export interface PayrollHrRecords {
   leaves: BookkeepingRecord[];
@@ -21,6 +21,8 @@ export interface PayrollHrRecords {
   attendance: BookkeepingRecord[];
   /** Weekly days off (UTC day numbers), which unpaid time off doesn't count. */
   weekend?: number[];
+  /** Salary rules from Settings, which fill allowances and deductions on new lines. */
+  salaryRules?: string;
 }
 
 interface PayrollSheetProps {
@@ -46,6 +48,7 @@ function hrLine(month: string, employee: BookkeepingRecord, workingDays: string,
   const adjustments = payrollAdjustments(month, { id: employee.id, name: employee.data.name }, hr.leaves, hr.loans, hr.attendance, hr.weekend);
   const overtimeRate = Number(employee.data.overtimeRate) || 0;
   return {
+    ...salaryRuleAmounts(parseSalaryRules(hr.salaryRules), Number(employee.data.baseSalary) || 0, employee.data.department),
     workedDays: adjustedWorkedDays(workingDays, adjustments),
     ...(adjustments.loanDeduction ? { loanDeduction: String(adjustments.loanDeduction) } : {}),
     ...(employee.data.socialDeduction ? { socialDeduction: employee.data.socialDeduction } : {}),

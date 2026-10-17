@@ -193,6 +193,22 @@ export default function PayrollWorkspace({ records, accounts, employees = [], hr
     tax: summary.tax + Number(record.data.taxDeduction || 0),
   }), { gross: 0, payable: 0, tax: 0 }), [periodRecords]);
 
+  // Payslip batches, as in Odoo: a month's salaries under one reference, with how far they are paid.
+  const batches = useMemo(() => {
+    const groups = new Map<string, { reference: string; month: string; count: number; gross: number; payable: number; paid: number }>();
+    for (const record of savedRecords) {
+      const month = record.data.month || "";
+      const reference = record.data.reference || `SAL-${month}`;
+      const batch = groups.get(`${month}|${reference}`) ?? { reference, month, count: 0, gross: 0, payable: 0, paid: 0 };
+      batch.count += 1;
+      batch.gross += Number(record.data.grossSalary || 0);
+      batch.payable += Number(record.data.payableSalary || 0);
+      if (record.data.status === "Paid") batch.paid += 1;
+      groups.set(`${month}|${reference}`, batch);
+    }
+    return [...groups.values()].sort((a, b) => b.month.localeCompare(a.month) || a.reference.localeCompare(b.reference)).slice(0, 12);
+  }, [savedRecords]);
+
   function openNewEntry() {
     setSheet({ key: ++sheetCount.current, month: selectedMonth });
   }
@@ -401,6 +417,35 @@ export default function PayrollWorkspace({ records, accounts, employees = [], hr
           <p className="mt-2 flex items-center gap-2 text-xl font-semibold tabular-nums"><Banknote size={17} className="text-primary" />{formatRupees(monthTotals.payable)}</p>
         </div>
       </section>
+
+      {batches.length ? (
+        <section className="rounded-lg border border-border bg-card" aria-labelledby="payslip-batches-title">
+          <h2 id="payslip-batches-title" className="border-b border-border px-4 py-3 font-semibold">Payslip batches</h2>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[640px] text-sm">
+              <thead className="text-left text-xs uppercase tracking-wide text-muted-foreground">
+                <tr className="border-b border-border"><th className="px-4 py-2 font-medium">Batch</th><th className="px-4 py-2 font-medium">Period</th><th className="px-4 py-2 text-right font-medium">Payslips</th><th className="px-4 py-2 text-right font-medium">Gross</th><th className="px-4 py-2 text-right font-medium">Net to pay</th><th className="px-4 py-2 font-medium">Status</th></tr>
+              </thead>
+              <tbody>
+                {batches.map((batch) => {
+                  const status = batch.paid === batch.count ? "Paid" : batch.paid ? `${batch.paid} of ${batch.count} paid` : "To pay";
+                  const current = !customFromDate && !customToDate && batch.month === selectedMonth;
+                  return (
+                    <tr key={`${batch.month}-${batch.reference}`} className={`cursor-pointer border-b border-border last:border-0 hover:bg-muted/40 ${current ? "bg-primary/5" : ""}`} onClick={() => { setSelectedMonth(batch.month); setCustomFromDate(""); setCustomToDate(""); }}>
+                      <td className="px-4 py-2.5 font-medium text-primary">{batch.reference}</td>
+                      <td className="px-4 py-2.5">{monthLabel(batch.month)}</td>
+                      <td className="px-4 py-2.5 text-right tabular-nums">{batch.count}</td>
+                      <td className="px-4 py-2.5 text-right tabular-nums">{formatRupees(batch.gross)}</td>
+                      <td className="px-4 py-2.5 text-right tabular-nums">{formatRupees(batch.payable)}</td>
+                      <td className="px-4 py-2.5"><span className={`rounded-full px-2 py-0.5 text-xs font-medium ${batch.paid === batch.count ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300" : batch.paid ? "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300" : "bg-muted text-muted-foreground"}`}>{status}</span></td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      ) : null}
 
       <section className="rounded-lg border border-border bg-card">
         <div className="flex flex-col gap-3 border-b border-border p-4">

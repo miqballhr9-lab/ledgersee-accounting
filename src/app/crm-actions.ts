@@ -12,6 +12,7 @@ import type { BookkeepingRecord, RecordKind } from "@/lib/bookkeeping-types";
 import { paymentAccountLabel, paymentAccountType } from "@/lib/payment-accounts";
 import { recordAudit } from "@/lib/audit";
 import { sendEmailOrThrow } from "@/lib/email";
+import { withRecruitmentStages } from "@/lib/hr-config";
 import { afterHrSave, applyHrRules } from "@/lib/hr-rules";
 import {
   crmKinds,
@@ -38,10 +39,11 @@ function toRecord(row: StoredRow): BookkeepingRecord {
   return { id: row.id, kind: row.kind as RecordKind, data: row.data, createdAt: row.createdAt.toISOString(), updatedAt: row.updatedAt.toISOString() };
 }
 
-function crmModuleFor(kind: string): CrmModule {
+function crmModuleFor(kind: string, context?: { byKind: (kind: string) => StoredRow[] }): CrmModule {
   const mod = crmModuleByKind(kind);
   if (!mod) throw new ActionError("That CRM section isn’t available.");
-  return mod;
+  // Applications use the recruitment stages set in Settings.
+  return context ? withRecruitmentStages(mod, context.byKind("settings")[0]?.data.recruitmentStages) : mod;
 }
 
 function nowStamp() {
@@ -324,8 +326,8 @@ async function assignedOwner(userId: string, context: LookupContext, fallback: s
 export async function saveCrmRecord(kind: string, input: Record<string, string>, id?: string): Promise<BookkeepingRecord> {
   const me = await requireUser();
   assertCanWrite(me, kind);
-  const mod = crmModuleFor(kind);
   const context = await lookupContext(me.id);
+  const mod = crmModuleFor(kind, context);
   let existing: StoredRow | undefined;
   if (id) {
     [existing] = await db.select().from(bookkeepingRecord)
@@ -362,13 +364,13 @@ export async function saveCrmRecord(kind: string, input: Record<string, string>,
 export async function updateCrmField(kind: string, ids: string[], key: string, value: string): Promise<BookkeepingRecord[]> {
   const me = await requireUser();
   assertCanWrite(me, kind);
-  const mod = crmModuleFor(kind);
+  const context = await lookupContext(me.id);
+  const mod = crmModuleFor(kind, context);
   const field = mod.fields.find((item) => item.key === key);
   if (!field || field.readOnly || !["select", "owner", "date", "checkbox"].includes(field.type ?? "text")) throw new ActionError("That field can’t be changed in bulk.");
   if (!ids.length) return [];
   const rows = await db.select().from(bookkeepingRecord)
     .where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, kind), inArray(bookkeepingRecord.id, ids.slice(0, 500))));
-  const context = await lookupContext(me.id);
   const saved: BookkeepingRecord[] = [];
   for (const row of rows) {
     const input = { ...row.data, [key]: value, ...(key === "stage" ? { probability: "" } : {}) };
@@ -656,10 +658,10 @@ export async function createDocumentFromDeal(dealId: string, target: "estimates"
 export async function importCrmRecords(kind: string, rows: Record<string, string>[]): Promise<{ created: number; failed: { row: number; message: string }[] }> {
   const me = await requireUser();
   assertCanWrite(me, kind);
-  const mod = crmModuleFor(kind);
   if (!rows.length) throw new ActionError("The file has no rows to import.");
   if (rows.length > MAX_IMPORT_ROWS) throw new ActionError(`Import up to ${MAX_IMPORT_ROWS} rows at a time.`);
   const context = await lookupContext(me.id);
+  const mod = crmModuleFor(kind, context);
   const failed: { row: number; message: string }[] = [];
   let created = 0;
   let sequence = mod.numbering ? Number((await nextNumber(me.id, kind, mod.numbering.key, "")).replace(/\D/g, "")) : 0;

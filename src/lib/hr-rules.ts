@@ -1,10 +1,11 @@
 import "server-only";
 
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 
 import { db } from "@/db";
 import { bookkeepingRecord } from "@/db/schema";
 import { ActionError } from "@/lib/action-error";
+import { sendEmail } from "@/lib/email";
 import { isWeekend, weekendDays } from "@/lib/weekend";
 import { isCompletedAttachment, isHiredStage, isRunningAttachment, isToApprove, odooHrData } from "@/lib/hr-status";
 
@@ -107,7 +108,24 @@ export function applyHrRules(kind: string, data: Record<string, string>, existin
     const end = minutes(data.checkOut);
     if (data.checkIn && start === null) throw new ActionError("Enter check in as a time, e.g. 09:00.");
     if (data.checkOut && end === null) throw new ActionError("Enter check out as a time, e.g. 17:30.");
-    data.hoursWorked = start !== null && end !== null && end > start ? String(Math.round(((end - start) / 60) * 100) / 100) : "";
+    // Times typed in by hand replace the day's check in/out sessions.
+    if (existing?.sessions && data.sessions === existing.sessions && (data.checkIn !== existing.checkIn || data.checkOut !== existing.checkOut)) {
+      data.sessions = "";
+      data.sessionLog = "";
+    }
+    const sessions = attendanceSessions(data.sessions);
+    if (sessions.length) {
+      // Several check ins in a day (Odoo's attendances): the worked hours add up each closed session.
+      const worked = sessions.reduce((sum, session) => {
+        const from = minutes(session.in);
+        const to = minutes(session.out);
+        return from !== null && to !== null && to > from ? sum + (to - from) : sum;
+      }, 0);
+      data.hoursWorked = worked ? String(Math.round((worked / 60) * 100) / 100) : "";
+      data.sessionLog = sessions.map((session) => `${session.in}–${session.out || "…"}`).join(", ");
+    } else {
+      data.hoursWorked = start !== null && end !== null && end > start ? String(Math.round(((end - start) / 60) * 100) / 100) : "";
+    }
     // Overtime: hours beyond the business's working day (Settings), 8 hours by default.
     const workingDay = money(context.byKind("settings")[0]?.data.standardDailyHours) || 8;
     data.overtimeHours = data.hoursWorked && money(data.hoursWorked) > workingDay ? String(Math.round((money(data.hoursWorked) - workingDay) * 100) / 100) : "";
@@ -207,8 +225,12 @@ export function applyHrRules(kind: string, data: Record<string, string>, existin
   }
 
   if (kind === "hr-appraisals") {
+    // A new appraisal starts from the business's appraisal template (Settings > HR), as Odoo's templates do.
+    const settings = context.byKind("settings")[0]?.data;
+    if (!existing && !data.employeeFeedback && settings?.appraisalEmployeeTemplate) data.employeeFeedback = settings.appraisalEmployeeTemplate;
+    if (!existing && !data.comments && settings?.appraisalManagerTemplate) data.comments = settings.appraisalManagerTemplate;
     if (data.wageEffectiveMonth && !/^\d{4}-\d{2}$/.test(data.wageEffectiveMonth)) throw new ActionError("Enter the effective month as YYYY-MM.");
-    const ratings = ["qualityRating", "productivityRating", "teamworkRating", "punctualityRating"].map((key) => money(data[key])).filter((value) => value > 0);
+    const ratings = ["qualityRating", "productivityRating", "teamworkRating", "punctualityRating", "peerRating"].map((key) => money(data[key])).filter((value) => value > 0);
     data.overallRating = ratings.length ? (ratings.reduce((sum, value) => sum + value, 0) / ratings.length).toFixed(1) : "";
     if (!data.status) data.status = "To Confirm";
   }
@@ -272,9 +294,54 @@ async function planFor(userId: string, key: "onboardingPlan" | "offboardingPlan"
   return lines.length ? lines : fallback;
 }
 
+const requestLabels: Record<string, string> = { "hr-leaves": "time off request", "hr-allocations": "time off allocation", "hr-loans": "salary attachment request", "hr-claims": "expense", "hr-appraisals": "appraisal" };
+
+const escapeHtml = (text: string) => text.replace(/[&<>"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[char] ?? char);
+
+/**
+ * Odoo's HR emails: a new request reaches the employee's manager, and the
+ * employee hears when it is approved or refused. Off in Settings turns them off.
+ * Mail problems never stop the save.
+ */
+async function notifyHr(userId: string, kind: string, before: Record<string, string> | undefined, data: Record<string, string>) {
+  const label = requestLabels[kind];
+  if (!label) return;
+  const status = data.status ?? "";
+  const decided = ["Approved", "Refused", "Paid", "Confirmed"].includes(status) && before?.status !== status;
+  const asked = !before && (isToApprove(status) || status === "Submitted");
+  if (!decided && !asked) return;
+  const rows = await db.select().from(bookkeepingRecord).where(and(eq(bookkeepingRecord.userId, userId), inArray(bookkeepingRecord.kind, ["settings", "employees"])));
+  const settings = rows.find((row) => row.kind === "settings")?.data ?? {};
+  if (settings.hrEmails === "Off") return;
+  const employees = rows.filter((row) => row.kind === "employees");
+  const employee = employees.find((row) => row.id === data.employeeId) ?? employees.find((row) => row.data.name && row.data.name === data.employee);
+  const company = settings.companyName || "HR";
+  const name = employee?.data.name || data.employee || "An employee";
+  const detail = [data.leaveType, data.fromDate && data.toDate ? `${data.fromDate} to ${data.toDate}` : "", data.amount ? `amount ${data.amount}` : "", data.period].filter(Boolean).join(" · ");
+  if (decided) {
+    if (!employee?.data.email) return;
+    await sendEmail({
+      to: employee.data.email,
+      subject: `Your ${label} was ${status.toLowerCase()}`,
+      html: `<p>Hello ${escapeHtml(name)},</p><p>Your ${label}${detail ? ` (${escapeHtml(detail)})` : ""} was <strong>${escapeHtml(status.toLowerCase())}</strong>${data.refuseReason ? `: ${escapeHtml(data.refuseReason)}` : "."}</p><p>${escapeHtml(company)}</p>`,
+      fromName: company,
+    });
+    return;
+  }
+  const manager = employees.find((row) => row.data.name && row.data.name === employee?.data.manager);
+  if (!manager?.data.email) return;
+  await sendEmail({
+    to: manager.data.email,
+    subject: `${name} asks for approval: ${label}`,
+    html: `<p>Hello ${escapeHtml(manager.data.name ?? "")},</p><p>${escapeHtml(name)} sent a ${label}${detail ? ` (${escapeHtml(detail)})` : ""}. Open HRM to approve or refuse it.</p><p>${escapeHtml(company)}</p>`,
+    fromName: company,
+  });
+}
+
 /** What some saves set off elsewhere. Returns a note for the toast, if any. */
 export async function afterHrSave(userId: string, kind: string, before: Record<string, string> | undefined, after: StoredRow): Promise<string | undefined> {
   const data = after.data;
+  await notifyHr(userId, kind, before, data).catch((error) => console.error("[hr] notification not sent", error));
   if (kind === "hr-candidates" && isHiredStage(data.stage) && !isHiredStage(before?.stage) && !data.hiredEmployeeId) {
     const employeeId = await nextEmployeeId(userId);
     const today = new Date().toISOString().slice(0, 10);
@@ -375,5 +442,18 @@ export async function applyLoanRepayment(userId: string, payroll: Record<string,
       data: { ...loan.data, repaidAmount: fixed(nextRepaid), balance: fixed(amount - nextRepaid), status: amount - nextRepaid <= 0.004 ? "Completed" : "Running" },
       updatedAt: new Date(),
     }).where(eq(bookkeepingRecord.id, loan.id));
+  }
+}
+
+/** The day's check in/out sessions, oldest first. */
+export function attendanceSessions(raw: string | undefined): Array<{ in: string; out: string }> {
+  if (!raw) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed)
+      ? parsed.filter((entry): entry is { in: string; out?: string } => Boolean(entry) && typeof entry === "object" && typeof (entry as { in?: unknown }).in === "string").map((entry) => ({ in: entry.in, out: typeof entry.out === "string" ? entry.out : "" }))
+      : [];
+  } catch {
+    return [];
   }
 }

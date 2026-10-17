@@ -18,6 +18,7 @@ import { readableError } from "@/lib/action-error";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
 import { packFor } from "@/lib/tax-packs";
 import { customFieldKinds, customFieldSettingKey, moduleBySlug } from "@/lib/bookkeeping-config";
+import { defaultRecruitmentStages } from "@/lib/hr-config";
 
 interface CompanySettingsProps {
   settings: BookkeepingRecord | null;
@@ -361,12 +362,14 @@ export default function CompanySettings({ settings, workspaceName }: CompanySett
                   <Row label="First month of fiscal year" value={saved.fiscalYear} />
                   <Row label="Accounting method" value={saved.accountingMethod} />
                   <Row label="Weekly days off" value={saved.weekendDays || "Sunday"} />
+                  <Row label="Salary rules" value={saved.salaryRules ? `${saved.salaryRules.split("\n").filter(Boolean).length} rules` : "None"} />
                 </>,
                 <>
                   {select("fiscalYear", "First month of fiscal year", months, "Reports use it for “This year” and retained earnings.")}
                   {select("accountingMethod", "Accounting method", ["Accrual", "Cash"], "The basis reports open with; you can still switch on each report.")}
                   {text("standardDailyHours", "Working day (hours)", { type: "number", help: "Hours worked beyond this each day count as overtime. 8 when empty." })}
                   {select("weekendDays", "Weekly days off", ["Sunday", "Saturday, Sunday", "Friday", "Friday, Saturday"], "Time off and unpaid leave skip these days.")}
+                  {textArea("salaryRules", "Salary rules", "One per line, filled in on new payroll lines: Medical = 10% of basic, Gym = 2000, EOBI / PF = 1% of basic for Sales. Columns: Incentive, Gym, Medical, Other allowance, Fine, EOBI / PF, Other adjustment.")}
                 </>,
               )}
               {section("custom-fields", "Custom fields",
@@ -386,18 +389,27 @@ export default function CompanySettings({ settings, workspaceName }: CompanySett
                   {text("leadAssignment", "Lead assignment (round robin)", { placeholder: "e.g. Ali, Sara, Usman", help: "New leads go to whichever of these people has the fewest open leads.", wide: true })}
                 </>,
               )}
-              {section("careers", "Careers page",
-                <Row label="Public jobs page" value={saved.careersToken ? `/careers/${saved.careersToken}` : "Off"} />,
-                <label className="flex items-center gap-2 text-sm sm:col-span-2">
-                  <Checkbox checked={Boolean(draft.careersToken)} onCheckedChange={(value) => set("careersToken", value === true ? (draft.careersToken || crypto.randomUUID()) : "")} />
-                  Publish a careers page with the job positions you&apos;re recruiting for; applications arrive in Recruitment as New.
-                </label>,
+              {section("careers", "Careers page and recruitment",
+                <>
+                  <Row label="Public jobs page" value={saved.careersToken ? `/careers/${saved.careersToken}` : "Off"} />
+                  <Row label="Recruitment stages" value={saved.recruitmentStages || defaultRecruitmentStages.join(", ")} />
+                </>,
+                <>
+                  <label className="flex items-center gap-2 text-sm sm:col-span-2">
+                    <Checkbox checked={Boolean(draft.careersToken)} onCheckedChange={(value) => set("careersToken", value === true ? (draft.careersToken || crypto.randomUUID()) : "")} />
+                    Publish a careers page with the job positions you&apos;re recruiting for; applications arrive in Recruitment as New.
+                  </label>
+                  {text("recruitmentStages", "Recruitment stages", { placeholder: defaultRecruitmentStages.join(", "), help: "The stages between New and Contract Signed, in order, comma separated.", wide: true })}
+                </>,
               )}
-              {section("hr-plans", "Onboarding and offboarding",
-                <><Row label="Onboarding plan" value={saved.onboardingPlan ? `${saved.onboardingPlan.split("\n").filter(Boolean).length} activities` : "Standard"} /><Row label="Offboarding plan" value={saved.offboardingPlan ? `${saved.offboardingPlan.split("\n").filter(Boolean).length} activities` : "Standard"} /></>,
+              {section("hr-plans", "Onboarding, appraisals and HR emails",
+                <><Row label="Onboarding plan" value={saved.onboardingPlan ? `${saved.onboardingPlan.split("\n").filter(Boolean).length} activities` : "Standard"} /><Row label="Offboarding plan" value={saved.offboardingPlan ? `${saved.offboardingPlan.split("\n").filter(Boolean).length} activities` : "Standard"} /><Row label="Appraisal templates" value={saved.appraisalEmployeeTemplate || saved.appraisalManagerTemplate ? "Set" : "None"} /><Row label="HR emails" value={saved.hrEmails || "On"} /></>,
                 <>
                   {textArea("onboardingPlan", "Onboarding plan", "One activity per line, created for each new hire.")}
                   {textArea("offboardingPlan", "Offboarding plan", "One activity per line, created when a departure is approved.")}
+                  {textArea("appraisalEmployeeTemplate", "Appraisal template: employee", "Questions that start each new appraisal's employee feedback.")}
+                  {textArea("appraisalManagerTemplate", "Appraisal template: manager", "Questions that start each new appraisal's manager feedback.")}
+                  {select("hrEmails", "HR emails", ["On", "Off"], "Managers get new requests by email; employees hear when theirs are approved or refused.")}
                 </>,
               )}
               {section("closing", "Close the books",

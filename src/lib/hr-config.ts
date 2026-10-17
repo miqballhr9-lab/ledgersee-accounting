@@ -62,6 +62,7 @@ export const hrModules: readonly CrmModule[] = [
       { key: "checkOut", label: "Check out", section: "Attendance", placeholder: "17:30" },
       { key: "hoursWorked", label: "Worked hours", type: "number", section: "Attendance", readOnly: true, help: "Worked out from check in and check out." },
       { key: "overtimeHours", label: "Overtime hours", type: "number", section: "Attendance", readOnly: true, help: "Hours beyond the working day set in Settings (8 by default)." },
+      { key: "sessionLog", label: "Sessions", section: "Attendance", readOnly: true, help: "Each check in and out from the kiosk or check-in page. Typing new times above replaces them." },
       { key: "status", label: "Status", type: "select", options: attendanceStatuses, section: "Attendance" },
       { key: "notes", label: "Notes", type: "textarea", section: "Attendance", wide: true },
     ],
@@ -261,6 +262,9 @@ export const hrModules: readonly CrmModule[] = [
       { key: "productivityRating", label: "Productivity (1–5)", type: "select", options: ["1", "2", "3", "4", "5"], section: "Skills" },
       { key: "teamworkRating", label: "Teamwork (1–5)", type: "select", options: ["1", "2", "3", "4", "5"], section: "Skills" },
       { key: "punctualityRating", label: "Punctuality (1–5)", type: "select", options: ["1", "2", "3", "4", "5"], section: "Skills" },
+      { key: "peerReviewers", label: "Colleagues asked", section: "360° feedback", placeholder: "e.g. Ali, Sara", help: "Peers, reports or customers who give feedback on the employee." },
+      { key: "peerFeedback", label: "360° feedback", type: "textarea", section: "360° feedback", wide: true },
+      { key: "peerRating", label: "Peer rating (1–5)", type: "select", options: ["1", "2", "3", "4", "5"], section: "360° feedback", help: "Counts in the skills score." },
       { key: "overallRating", label: "Skills score", type: "number", section: "Skills", readOnly: true },
       { key: "finalRating", label: "Final rating", type: "select", options: ["Needs improvement", "Meets expectations", "Exceeds expectations", "Strongly exceeds expectations"], section: "Skills" },
       { key: "newWage", label: "New wage (monthly)", type: "currency", section: "Salary review", help: "Set when the appraisal brings a raise. Marking it done updates the employee's wage for the next payroll." },
@@ -313,3 +317,19 @@ export const hrModules: readonly CrmModule[] = [
 
 /** Pages under /app/hr. Employees and payroll keep their own pages. */
 export const hrPages = hrModules.map((module) => module.key);
+
+/** The stages between New and Contract Signed when Settings names none, as in Odoo's default pipeline. */
+export const defaultRecruitmentStages = ["Initial Qualification", "First Interview", "Second Interview", "Contract Proposal"];
+
+/** Every application stage: New, the business's own stages (Settings > HR), then Contract Signed and Refused. */
+export function recruitmentStages(setting: string | undefined): string[] {
+  const middle = (setting ?? "").split(",").map((stage) => stage.trim()).filter((stage) => stage && !["New", "Contract Signed", "Refused"].includes(stage));
+  return ["New", ...[...new Set(middle.length ? middle : defaultRecruitmentStages)], "Contract Signed", "Refused"];
+}
+
+/** The module with the business's own recruitment stages on applications. */
+export function withRecruitmentStages(mod: CrmModule, setting: string | undefined): CrmModule {
+  if (mod.kind !== "hr-candidates") return mod;
+  const options = recruitmentStages(setting);
+  return { ...mod, fields: mod.fields.map((field) => (field.key === "stage" ? { ...field, options } : field)) };
+}

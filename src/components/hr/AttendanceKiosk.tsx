@@ -94,17 +94,14 @@ export default function AttendanceKiosk({ business, employees, myEmployeeId, can
     return (
       <div className="mx-auto w-full max-w-md rounded-lg border border-border bg-card p-8 text-center shadow-sm">
         <div className="flex justify-center"><Avatar name={employee.name} size="size-24 text-3xl" /></div>
-        <h2 className="mt-4 text-2xl font-semibold">{inside ? "Want to check out" : "Welcome"}, {employee.name}{inside ? "?" : "!"}</h2>
+        <h2 className="mt-4 text-2xl font-semibold">{inside ? "Want to check out" : employee.checkOut ? "Welcome back" : "Welcome"}, {employee.name}{inside ? "?" : "!"}</h2>
         <p className="mt-1 text-sm text-muted-foreground">{[employee.job, employee.department].filter(Boolean).join(" · ") || "Employee"}</p>
         {employee.checkIn ? <p className="mt-3 text-sm">Checked in at <strong>{employee.checkIn}</strong>{employee.checkOut ? <> · out at <strong>{employee.checkOut}</strong> · {employee.hours || "0"} h worked</> : null}</p> : <p className="mt-3 text-sm text-muted-foreground">Not checked in today.</p>}
-        {employee.checkOut ? <p className="mt-6 text-sm font-medium text-muted-foreground">Your day is done. See you tomorrow!</p> : (
-          <>
-          {!self && employee.needsPin ? <Input type="password" inputMode="numeric" autoComplete="off" maxLength={8} aria-label="Your PIN" placeholder="Enter your PIN" value={pin} onChange={(event) => setPin(event.target.value)} className="mx-auto mt-6 max-w-40 text-center tracking-[0.4em]" /> : null}
-          <Button type="button" disabled={busy || (!self && Boolean(employee.needsPin) && !pin)} onClick={() => check(employee, self)} className={`mt-6 h-auto w-full gap-3 py-5 text-lg text-white ${inside ? "bg-[#E4A900] hover:bg-[#c99500]" : "bg-[#21B799] hover:bg-[#1a9c82]"}`}>
-            {inside ? <LogOut size={22} /> : <LogIn size={22} />}{inside ? "Check out" : "Check in"}
-          </Button>
-          </>
-        )}
+        {employee.checkOut ? <p className="mt-2 text-xs text-muted-foreground">Back at work? Check in again; today&apos;s hours add up.</p> : null}
+        {!self && employee.needsPin ? <Input type="password" inputMode="numeric" autoComplete="off" maxLength={8} aria-label="Your PIN" placeholder="Enter your PIN" value={pin} onChange={(event) => setPin(event.target.value)} className="mx-auto mt-6 max-w-40 text-center tracking-[0.4em]" /> : null}
+        <Button type="button" disabled={busy || (!self && Boolean(employee.needsPin) && !pin)} onClick={() => check(employee, self)} className={`mt-6 h-auto w-full gap-3 py-5 text-lg text-white ${inside ? "bg-[#E4A900] hover:bg-[#c99500]" : "bg-[#21B799] hover:bg-[#1a9c82]"}`}>
+          {inside ? <LogOut size={22} /> : <LogIn size={22} />}{inside ? "Check out" : "Check in"}
+        </Button>
       </div>
     );
   }

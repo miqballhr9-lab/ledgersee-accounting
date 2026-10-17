@@ -40,8 +40,8 @@ export default async function HrSectionPage({ params, searchParams }: HrPageProp
   }
   if (!hrPages.includes(page)) notFound();
   const { open, job } = await searchParams;
-  const { store, currency, me, owners, weekend } = await loadHrData();
-  return <CrmWorkspace key={page} page={page} initialStore={store} currency={currency} me={me} owners={owners} weekend={weekend} openId={open} jobFilter={page === "applications" ? job : undefined} />;
+  const { store, currency, me, owners, weekend, recruitmentStages } = await loadHrData();
+  return <CrmWorkspace key={page} page={page} initialStore={store} currency={currency} me={me} owners={owners} weekend={weekend} recruitmentStages={recruitmentStages} openId={open} jobFilter={page === "applications" ? job : undefined} />;
 }
 
 const activeEmployees = (store: Awaited<ReturnType<typeof loadHrData>>["store"]) =>

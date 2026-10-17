@@ -8,7 +8,7 @@ import { saveCrmRecord } from "@/app/crm-actions";
 import { ActionError } from "@/lib/action-error";
 import { assertCanWrite, requireUser } from "@/lib/auth";
 import type { BookkeepingRecord, RecordKind } from "@/lib/bookkeeping-types";
-import { applyHrRules, leaveUsed, timeOffAllowance } from "@/lib/hr-rules";
+import { applyHrRules, attendanceSessions, leaveUsed, timeOffAllowance } from "@/lib/hr-rules";
 import { odooHrData } from "@/lib/hr-status";
 import { canAccess } from "@/lib/permissions";
 import { revalidatePath } from "@/lib/revalidate";
@@ -140,12 +140,19 @@ async function checkEmployee(me: Awaited<ReturnType<typeof requireUser>>, employ
   const byKind = (kind: string) => all.filter((row) => row.kind === kind);
   const existing = byKind("hr-attendance").find((row) => row.data.employeeId === employee.id && row.data.date === date);
   const who = self ? "You" : employee.data.name || "This employee";
-  if (direction === "in" && existing?.data.checkIn && !existing.data.checkOut) throw new ActionError(`${who} already checked in at ${existing.data.checkIn}.`);
-  if (direction === "in" && existing?.data.checkOut) throw new ActionError(`${who} already checked out today at ${existing.data.checkOut}.`);
-  if (direction === "out" && !existing?.data.checkIn) throw new ActionError("Check in first.");
+  // Each check in starts a session and each check out closes it, so people can step out and come back.
+  const sessions = attendanceSessions(existing?.data.sessions);
+  if (!sessions.length && existing?.data.checkIn) sessions.push({ in: existing.data.checkIn, out: existing.data.checkOut ?? "" });
+  const open = sessions.length > 0 && !sessions[sessions.length - 1].out;
+  if (direction === "in" && open) throw new ActionError(`${who} already checked in at ${sessions[sessions.length - 1].in}.`);
+  if (direction === "out" && !open) throw new ActionError("Check in first.");
+  if (direction === "in") sessions.push({ in: time, out: "" });
+  else sessions[sessions.length - 1].out = time;
   const data: Record<string, string> = {
     ...(existing?.data ?? { employee: employee.data.name ?? "", employeeId: employee.id, date, status: "Present" }),
-    ...(direction === "in" ? { checkIn: time } : { checkOut: time }),
+    checkIn: sessions[0].in,
+    checkOut: sessions[sessions.length - 1].out,
+    sessions: JSON.stringify(sessions),
   };
   applyHrRules("hr-attendance", data, existing?.data, { byKind, actor: me.name }, existing?.id);
   if (existing) await db.update(bookkeepingRecord).set({ data, updatedAt: new Date() }).where(eq(bookkeepingRecord.id, existing.id));
