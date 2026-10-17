@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { readableError } from "@/lib/action-error";
 import type { BillingAccess } from "@/lib/billing";
-import { featureLabels, planFor, plans, planPrice, TRIAL_MONTHS, type BillingInterval, type Feature } from "@/lib/plans";
+import { featureLabels, planFor, plans, planPrice, formatPlanPrice, TRIAL_MONTHS, type BillingInterval, type Feature } from "@/lib/plans";
 
 export interface BillingPayment {
   id: string;
@@ -131,8 +131,8 @@ export default function BillingWorkspace({ enabled, paymentsReady, canManage, ac
                   {highlight ? <Badge>{upgrade ? "Needed" : "Most popular"}</Badge> : null}
                 </div>
                 <p className="mt-1 text-sm text-muted-foreground">{plan.description}</p>
-                <p className="mt-4"><span className="text-3xl font-semibold tabular-nums">${planPrice(plan, interval)}</span><span className="text-sm text-muted-foreground"> / {interval === "year" ? "year" : "month"}</span></p>
-                {interval === "year" && plan.monthly * 12 > plan.yearly ? <p className="text-xs font-medium text-primary">Save ${plan.monthly * 12 - plan.yearly} a year</p> : null}
+                <p className="mt-4"><span className="text-3xl font-semibold tabular-nums">${formatPlanPrice(planPrice(plan, interval))}</span><span className="text-sm text-muted-foreground"> / {interval === "year" ? "year" : "month"}</span></p>
+                {interval === "year" && plan.monthly * 12 > plan.yearly ? <p className="text-xs font-medium text-primary">Save ${formatPlanPrice(plan.monthly * 12 - plan.yearly)} a year</p> : null}
                 <ul className="mt-4 flex-1 space-y-2 text-sm">
                   {plan.highlights.map((line) => <li key={line} className="flex gap-2"><Check size={16} className="mt-0.5 shrink-0 text-primary" />{line}</li>)}
                 </ul>

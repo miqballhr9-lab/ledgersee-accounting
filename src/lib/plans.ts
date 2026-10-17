@@ -1,5 +1,6 @@
 /**
- * Subscription plans. Prices are in US dollars, monthly and yearly. Change them here: Stripe Checkout charges whatever this
+ * Subscription plans. Prices are in US dollars; yearly is ten and a half months'
+ * price (a month and a half free). Change them here: Stripe Checkout charges whatever this
  * file says, so no prices need setting up in Stripe.
  */
 
@@ -29,7 +30,7 @@ export const plans: Plan[] = [
     name: "Starter",
     description: "Bookkeeping for a small business.",
     monthly: 5,
-    yearly: 70,
+    yearly: 52.5,
     users: 3,
     features: ["accounting"],
     highlights: ["Sales, purchases and banking", "Chart of accounts and journals", "Tax returns and all accounting reports", "Up to 3 users"],
@@ -39,7 +40,7 @@ export const plans: Plan[] = [
     name: "Business",
     description: "For a growing team that sells products.",
     monthly: 15,
-    yearly: 239,
+    yearly: 157.5,
     users: 6,
     features: ["accounting", "inventory", "crm"],
     highlights: ["Everything in Starter", "Inventory, warehouses, lots and serial numbers", "CRM: leads, deals, campaigns and cases", "Up to 6 users"],
@@ -49,7 +50,7 @@ export const plans: Plan[] = [
     name: "Enterprise",
     description: "The whole ERP, with HR and payroll.",
     monthly: 69,
-    yearly: 690,
+    yearly: 724.5,
     users: Number.POSITIVE_INFINITY,
     features: ["accounting", "inventory", "crm", "hr"],
     highlights: ["Everything in Business", "HRM: employees, time off, attendance, recruitment", "Payroll with salary slips", "Unlimited users"],
@@ -75,5 +76,8 @@ export function featureForKind(kind: string): Feature {
 export function daysUntil(iso: string | undefined) {
   return iso ? Math.max(0, Math.ceil((Date.parse(iso) - Date.now()) / 86_400_000)) : 0;
 }
+
+/** A price as shown: whole dollars without cents, otherwise two decimals. */
+export const formatPlanPrice = (amount: number) => (Number.isInteger(amount) ? String(amount) : amount.toFixed(2));
 
 export const planPrice = (plan: Plan, interval: BillingInterval) => (interval === "year" ? plan.yearly : plan.monthly);
