@@ -139,6 +139,7 @@ export const crmModules: readonly CrmModule[] = [
       { key: "fax", label: "Fax", section: "Lead information" },
       { key: "website", label: "Website", type: "url", section: "Lead information" },
       { key: "leadSource", label: "Lead source", type: "select", options: leadSources, section: "Lead information" },
+      { key: "territory", label: "Territory", section: "Lead information", placeholder: "e.g. Punjab", help: "Sales territory; leads from a territory in Settings go to its people." },
       { key: "leadStatus", label: "Lead status", type: "select", options: leadStatuses.filter((status) => status !== "Converted"), section: "Lead information" },
       { key: "industry", label: "Industry", type: "select", options: industries, section: "Lead information" },
       { key: "employees", label: "No. of employees", type: "number", section: "Lead information" },
@@ -192,6 +193,7 @@ export const crmModules: readonly CrmModule[] = [
     key: "deals", kind: "crm-deals", label: "Deal", plural: "Deals",
     description: "Every sale you're working on, stage by stage. Drag deals across the pipeline, then turn a won deal into a quote or an invoice.",
     titleKey: "dealName", statusKey: "stage", kanbanKey: "stage", kanbanAmountKey: "amount",
+    quickActions: [{ label: "Submit for approval", key: "approvalStatus", value: "Pending approval" }, { label: "Approve", key: "approvalStatus", value: "Approved", tone: "primary" }, { label: "Reject", key: "approvalStatus", value: "Rejected", tone: "danger" }],
     columns: ["dealName", "account", "amount", "stage", "closingDate", "contact", "owner"],
     fields: [
       { key: "owner", label: "Deal owner", type: "owner", section: "Deal information" },
@@ -209,6 +211,9 @@ export const crmModules: readonly CrmModule[] = [
       { key: "leadSource", label: "Lead source", type: "select", options: leadSources, section: "Deal information" },
       { key: "campaign", label: "Campaign source", type: "campaign", section: "Deal information" },
       { key: "lossReason", label: "Reason for loss", type: "select", options: ["Price", "Competitor", "No budget", "No decision", "Product fit", "Timing", "Other"], section: "Deal information" },
+      { key: "territory", label: "Territory", section: "Deal information", placeholder: "e.g. Punjab" },
+      { key: "approvalStatus", label: "Approval", type: "select", options: ["Not needed", "Pending approval", "Approved", "Rejected"], section: "Approval", help: "Deals at or above the amount in Settings need approval before they can be won." },
+      { key: "approvedBy", label: "Approved by", section: "Approval", readOnly: true },
       { key: "description", label: "Description", type: "textarea", section: "Description information", wide: true },
       { key: "attachment", label: "Attachment", type: "file", section: "Description information" },
     ],
@@ -334,6 +339,33 @@ export const crmModules: readonly CrmModule[] = [
     ],
   },
   {
+    key: "deal-products", kind: "crm-deal-products", label: "Deal product", plural: "Deal products",
+    description: "Products and services on each deal. The deal's amount is their total, and they become the lines of its quote or invoice.",
+    titleKey: "product",
+    columns: ["deal", "product", "quantity", "price", "discount", "total"],
+    fields: [
+      { key: "deal", label: "Deal", type: "deal", section: "Product", required: true },
+      { key: "product", label: "Product or service", section: "Product", required: true, help: "Use the name from Items & services so the invoice line picks up its accounts." },
+      { key: "quantity", label: "Quantity", type: "number", section: "Product", placeholder: "1" },
+      { key: "price", label: "List price", type: "currency", section: "Product", required: true },
+      { key: "discount", label: "Discount (%)", type: "percent", section: "Product" },
+      { key: "total", label: "Total", type: "currency", section: "Product", readOnly: true },
+      { key: "description", label: "Description", type: "textarea", section: "Product", wide: true },
+    ],
+  },
+  {
+    key: "targets", kind: "crm-targets", label: "Sales target", plural: "Sales targets",
+    description: "Quotas for each salesperson by month or quarter. The Quota vs forecast report compares them with won and open deals.",
+    titleKey: "owner",
+    columns: ["owner", "period", "target"],
+    fields: [
+      { key: "owner", label: "Salesperson", type: "owner", section: "Target", required: true },
+      { key: "period", label: "Period", section: "Target", required: true, placeholder: "2026-10 or 2026-Q4" },
+      { key: "target", label: "Target amount", type: "currency", section: "Target", required: true },
+      { key: "notes", label: "Notes", type: "textarea", section: "Target", wide: true },
+    ],
+  },
+  {
     key: "workflows", kind: "crm-workflows", label: "Workflow rule", plural: "Workflow rules",
     description: "Zoho-style rules: when a record is created or edited and meets a condition, update a field, create a task or send an email.",
     titleKey: "ruleName", statusKey: "active",
@@ -372,7 +404,7 @@ export function crmModuleByKind(kind: string): CrmModule | undefined {
 }
 
 /** Pages under /app/crm. Activities shows tasks, meetings and calls together. */
-export const crmPages = ["leads", "contacts", "accounts", "deals", "activities", "campaigns", "cases", "solutions", "workflows"] as const;
+export const crmPages = ["leads", "contacts", "accounts", "deals", "deal-products", "targets", "activities", "campaigns", "cases", "solutions", "workflows"] as const;
 export type CrmPage = (typeof crmPages)[number];
 
 export function fullName(data: Record<string, string>) {

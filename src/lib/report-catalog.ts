@@ -141,6 +141,7 @@ export const reportCategories: ReportCategory[] = [
     reports: [
       { key: "deal-forecast", label: "Sales Forecast", description: "Open deals by closing month, with expected revenue.", ready: true, engine: "list" },
       { key: "pipeline-by-owner", label: "Pipeline by Owner", description: "Open deals for each salesperson.", ready: true, engine: "list" },
+      { key: "quota-vs-forecast", label: "Quota vs Forecast", description: "Each salesperson's target against deals won and the open pipeline expected to close.", ready: true, engine: "list" },
       { key: "deals-won-lost", label: "Won and Lost Deals", description: "Deals closed in the period, with the reason a deal was lost.", ready: true, engine: "list" },
       { key: "leads-by-source", label: "Leads by Source", description: "Leads created in the period, by where they came from.", ready: true, engine: "list" },
       { key: "activities-by-owner", label: "Activities by Owner", description: "Tasks, meetings and calls in the period, by owner.", ready: true, engine: "list" },

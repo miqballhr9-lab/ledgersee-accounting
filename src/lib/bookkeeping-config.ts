@@ -555,6 +555,8 @@ export const navigationGroups: NavigationGroup[] = [
       { slug: "crm/contacts", label: "Contacts", icon: "Contact" },
       { slug: "crm/accounts", label: "Accounts", icon: "Building2" },
       { slug: "crm/deals", label: "Deals", icon: "Handshake" },
+      { slug: "crm/deal-products", label: "Deal products", icon: "Package" },
+      { slug: "crm/targets", label: "Sales targets", icon: "Target" },
       { slug: "crm/activities", label: "Activities", icon: "CalendarCheck" },
       { slug: "crm/campaigns", label: "Campaigns", icon: "Megaphone" },
       { slug: "crm/cases", label: "Cases", icon: "LifeBuoy" },

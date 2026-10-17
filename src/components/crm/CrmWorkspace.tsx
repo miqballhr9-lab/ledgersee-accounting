@@ -4,9 +4,9 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { ArrowDownToLine, CalendarDays, ChevronDown, Scale, Columns3, Ellipsis, KanbanSquare, List, Pencil, Plus, Search, SlidersHorizontal, Trash2, Upload, UserCheck, Users } from "lucide-react";
+import { ArrowDownToLine, CalendarDays, ChevronDown, Scale, Columns3, Ellipsis, KanbanSquare, List, Mail, Pencil, Plus, Search, SlidersHorizontal, Trash2, Upload, UserCheck, Users } from "lucide-react";
 
-import { deleteCrmRecords, importCrmRecords, updateCrmField } from "@/app/crm-actions";
+import { deleteCrmRecords, importCrmRecords, sendMassEmail, updateCrmField } from "@/app/crm-actions";
 import BulkActionsMenu from "@/components/bookkeeping/BulkActionsMenu";
 import { useNewRecordParam } from "@/hooks/use-new-record-param";
 import { Button } from "@/components/ui/button";
@@ -16,6 +16,7 @@ import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMe
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 import { parseCsv } from "@/lib/budget-utils";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
 import { crmModule, isClosedStage, type CrmModule, type CrmModuleKey, type CrmPage } from "@/lib/crm-config";
@@ -149,6 +150,7 @@ export default function CrmWorkspace({ page, initialStore, currency, me, owners,
   const [converting, setConverting] = useState<BookkeepingRecord | null>(null);
   const [busy, setBusy] = useState(false);
   const [massUpdate, setMassUpdate] = useState<{ key: string; value: string } | null>(null);
+  const [massEmail, setMassEmail] = useState<{ subject: string; body: string } | null>(null);
   const [dragging, setDragging] = useState<string | null>(null);
   const [marking, setMarking] = useState(false);
   const [shownKind, setShownKind] = useState(mod?.kind);
@@ -303,12 +305,13 @@ export default function CrmWorkspace({ page, initialStore, currency, me, owners,
     });
   }
 
-  type BulkKey = "update" | "export" | "delete";
+  type BulkKey = "update" | "export" | "delete" | "email";
   function bulkAction(key: BulkKey) {
     if (!mod) return;
     const rows = records.filter((record) => selected.includes(record.id));
     if (key === "export") exportRows(rows, "csv");
     if (key === "update") setMassUpdate({ key: mod.statusKey ?? "owner", value: "" });
+    if (key === "email") setMassEmail({ subject: "", body: "Hello {{name}},\n\n" });
     if (key === "delete") {
       if (!window.confirm(`Delete ${rows.length} ${rows.length === 1 ? mod.label.toLowerCase() : mod.plural.toLowerCase()}? Their notes are deleted too.`)) return;
       void run(async () => {
@@ -515,6 +518,7 @@ export default function CrmWorkspace({ page, initialStore, currency, me, owners,
                 onSelect={bulkAction}
                 items={[
                   { key: "update", label: "Mass update", icon: Pencil },
+                  ...(mod.kind === "crm-leads" || mod.kind === "crm-contacts" ? [{ key: "email" as const, label: "Send email", icon: Mail }] : []),
                   { key: "export", label: "Export selected", icon: ArrowDownToLine },
                   { key: "delete", label: "Delete", icon: Trash2, destructive: true },
                 ]}
@@ -788,6 +792,35 @@ export default function CrmWorkspace({ page, initialStore, currency, me, owners,
         onOpenChange={(open) => { if (!open) setConverting(null); }}
         onConverted={() => { setDetail(null); router.refresh(); }}
       />
+
+      <Dialog open={massEmail !== null} onOpenChange={(open) => { if (!open && !busy) setMassEmail(null); }}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Send email</DialogTitle>
+            <DialogDescription>One email to each of the {selected.length} selected {mod?.plural.toLowerCase()} with an email address, up to 50. {"{{name}}"} becomes each person&apos;s name.</DialogDescription>
+          </DialogHeader>
+          {massEmail ? (
+            <div className="space-y-4">
+              <div className="space-y-1.5"><Label htmlFor="mass-email-subject">Subject</Label><Input id="mass-email-subject" value={massEmail.subject} onChange={(event) => setMassEmail({ ...massEmail, subject: event.target.value })} /></div>
+              <div className="space-y-1.5"><Label htmlFor="mass-email-body">Message</Label><Textarea id="mass-email-body" rows={8} value={massEmail.body} onChange={(event) => setMassEmail({ ...massEmail, body: event.target.value })} /></div>
+            </div>
+          ) : null}
+          <DialogFooter>
+            <Button type="button" variant="outline" disabled={busy} onClick={() => setMassEmail(null)}>Cancel</Button>
+            <Button type="button" disabled={busy || !massEmail?.subject.trim() || !massEmail?.body.trim()} onClick={() => {
+              if (!massEmail || !mod) return;
+              void run(async () => {
+                const result = await sendMassEmail(mod.kind, selected, massEmail.subject, massEmail.body);
+                const extra = [result.skipped ? `${result.skipped} without an email skipped` : "", result.failed ? `${result.failed} couldn’t be sent` : ""].filter(Boolean).join(", ");
+                if (result.sent) toast.success(`Sent ${result.sent} ${result.sent === 1 ? "email" : "emails"}${extra ? ` · ${extra}` : ""}.`);
+                else toast.error(`No emails sent${extra ? `: ${extra}` : ""}.`);
+                setMassEmail(null);
+                setSelected([]);
+              });
+            }}>{busy ? "Sending…" : "Send"}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={massUpdate !== null} onOpenChange={(open) => { if (!open && !busy) setMassUpdate(null); }}>
         <DialogContent className="sm:max-w-md">

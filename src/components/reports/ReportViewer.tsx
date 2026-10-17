@@ -47,7 +47,7 @@ const sourceSlug: Record<string, string> = {
   journals: "journals", transactions: "transactions", accounts: "accounts", payroll: "payroll",
   customers: "customers", vendors: "vendors", estimates: "estimates", "sales-orders": "sales-orders", "purchase-orders": "purchase-orders", items: "items",
   employees: "employees", "recurring-transactions": "recurring", "inventory-movements": "inventory", deposits: "deposits", "time-activities": "time-activities", "delayed-charges": "delayed-charges", mileage: "mileage",
-  "crm-deals": "crm/deals", "crm-leads": "crm/leads", "crm-tasks": "crm/activities", "crm-meetings": "crm/activities", "crm-calls": "crm/activities",
+  "crm-deals": "crm/deals", "crm-targets": "crm/targets", "crm-deal-products": "crm/deal-products", "crm-leads": "crm/leads", "crm-tasks": "crm/activities", "crm-meetings": "crm/activities", "crm-calls": "crm/activities",
 };
 
 const asOfEngines = new Set(["bs", "trial-balance", "ar-ageing", "ap-ageing"]);

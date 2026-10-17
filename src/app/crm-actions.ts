@@ -1,6 +1,6 @@
 "use server";
 
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { revalidatePath } from "@/lib/revalidate";
 
 import { db } from "@/db";
@@ -11,7 +11,7 @@ import { assertCanWrite, requireUser } from "@/lib/auth";
 import type { BookkeepingRecord, RecordKind } from "@/lib/bookkeeping-types";
 import { paymentAccountLabel, paymentAccountType } from "@/lib/payment-accounts";
 import { recordAudit } from "@/lib/audit";
-import { sendEmailOrThrow } from "@/lib/email";
+import { sendEmail, sendEmailOrThrow } from "@/lib/email";
 import { withRecruitmentStages } from "@/lib/hr-config";
 import { afterHrSave, applyHrRules } from "@/lib/hr-rules";
 import {
@@ -193,12 +193,62 @@ function buildData(mod: CrmModule, input: Record<string, string>, context: Looku
     if (isClosedStage(data.stage) && !isClosedStage(existing?.stage)) data.closedOn = new Date().toISOString().slice(0, 10);
     if (!isClosedStage(data.stage)) data.closedOn = "";
   }
+  if (mod.kind === "crm-deals") dealRules(mod, data, existing, context.byKind("settings")[0]?.data ?? {}, ownerName);
+  if (mod.kind === "crm-deal-products") {
+    const quantity = data.quantity ? money(data.quantity) : 1;
+    if (!(quantity > 0)) throw new ActionError("Enter a quantity greater than zero.");
+    data.quantity = String(quantity);
+    data.total = (quantity * money(data.price) * (1 - money(data.discount) / 100)).toFixed(2);
+  }
+  if (mod.kind === "crm-targets" && !/^\d{4}-(0[1-9]|1[0-2]|Q[1-4])$/.test(data.period ?? "")) throw new ActionError("Enter the period as a month (2026-10) or a quarter (2026-Q4).");
   if (mod.kind === "crm-leads") data.leadScore = String(leadScore(data));
   if (mod.kind === "crm-workflows" && !data.active) data.active = "Active";
   if (mod.kind === "crm-deals" && !data.pipeline) data.pipeline = "Standard";
   if ((mod.kind === "crm-tasks") && data.status === "Completed" && existing?.status !== "Completed") data.completedOn = new Date().toISOString().slice(0, 10);
+  // A changed reminder is sent again at its new time.
+  if (mod.kind === "crm-tasks" && existing && (existing.reminder ?? "") !== (data.reminder ?? "")) data.reminderSentAt = "";
   if (mod.section === "hr") applyHrRules(mod.kind, data, existing, { byKind: context.byKind, actor: ownerName }, id);
   return data;
+}
+
+/**
+ * Zoho's approval process and Blueprint for deals: a deal at or above the
+ * approval amount (Settings) must be approved before it is won, and a stage
+ * can ask for fields before a deal moves into it ("Negotiation/Review: Next step, Amount").
+ */
+function dealRules(mod: CrmModule, data: Record<string, string>, existing: Record<string, string> | undefined, settings: Record<string, string>, actor: string) {
+  const threshold = money(settings.dealApprovalAmount);
+  const needsApproval = threshold > 0 && money(data.amount) >= threshold;
+  if (!needsApproval && (!data.approvalStatus || data.approvalStatus === "Pending approval")) data.approvalStatus = "Not needed";
+  if (needsApproval && (!data.approvalStatus || data.approvalStatus === "Not needed")) data.approvalStatus = "Pending approval";
+  if (data.approvalStatus === "Approved" && existing?.approvalStatus !== "Approved") data.approvedBy = actor;
+  if (data.approvalStatus !== "Approved") data.approvedBy = "";
+  const stageChanged = existing?.stage !== data.stage;
+  if (stageChanged && data.stage === "Closed Won" && needsApproval && data.approvalStatus !== "Approved") {
+    throw new ActionError(`Deals of ${threshold.toLocaleString()} or more need approval before they're won. Submit this deal for approval first.`);
+  }
+  if (!stageChanged) return;
+  for (const line of (settings.dealBlueprint ?? "").split("\n")) {
+    const [stage, fields] = line.split(":");
+    if (!fields || stage.trim().toLowerCase() !== (data.stage ?? "").toLowerCase()) continue;
+    const missing = fields.split(",").map((name) => name.trim()).filter(Boolean).filter((name) => {
+      const key = fieldKey(mod, name);
+      return key && !data[key]?.trim();
+    });
+    if (missing.length) throw new ActionError(`Before moving to ${data.stage}, fill in: ${missing.join(", ")}.`);
+  }
+}
+
+/** A deal with products is worth their total; its expected revenue follows. */
+async function syncDealAmount(userId: string, dealIds: string[]) {
+  for (const dealId of [...new Set(dealIds.filter(Boolean))]) {
+    const lines = await db.select().from(bookkeepingRecord).where(and(eq(bookkeepingRecord.userId, userId), eq(bookkeepingRecord.kind, "crm-deal-products"), sql`${bookkeepingRecord.data}->>'dealId' = ${dealId}`));
+    const [deal] = await db.select().from(bookkeepingRecord).where(and(eq(bookkeepingRecord.id, dealId), eq(bookkeepingRecord.userId, userId), eq(bookkeepingRecord.kind, "crm-deals"))).limit(1);
+    if (!deal || !lines.length) continue;
+    const amount = lines.reduce((sum, line) => sum + money(line.data.total), 0);
+    const data = { ...deal.data, amount: amount.toFixed(2), expectedRevenue: ((amount * money(deal.data.probability)) / 100).toFixed(2) };
+    await db.update(bookkeepingRecord).set({ data, updatedAt: new Date() }).where(eq(bookkeepingRecord.id, deal.id));
+  }
 }
 
 const workflowKinds: Record<string, string> = { Leads: "crm-leads", Contacts: "crm-contacts", Deals: "crm-deals", Tasks: "crm-tasks", Cases: "crm-cases" };
@@ -314,10 +364,15 @@ async function nextNumber(userId: string, kind: string, key: string, prefix: str
   return `${prefix}${String(highest + 1).padStart(4, "0")}`;
 }
 
-/** Assignment rule (Settings): new leads go to whichever listed person has the fewest open leads. */
-async function assignedOwner(userId: string, context: LookupContext, fallback: string) {
+/**
+ * Assignment rule (Settings): new leads go to whichever listed person has the fewest open leads.
+ * A lead in a territory (Settings: "Punjab: Ali, Sara") goes to that territory's people first.
+ */
+async function assignedOwner(userId: string, context: LookupContext, fallback: string, territory = "", territoryOnly = false) {
   const [settings] = await db.select().from(bookkeepingRecord).where(and(eq(bookkeepingRecord.userId, userId), eq(bookkeepingRecord.kind, "settings"))).limit(1);
-  const people = (settings?.data.leadAssignment ?? "").split(",").map((name) => name.trim()).filter(Boolean);
+  const territoryLine = territory.trim() ? (settings?.data.crmTerritories ?? "").split("\n").find((line) => line.split(":")[0]?.trim().toLowerCase() === territory.trim().toLowerCase()) : undefined;
+  if (territoryOnly && !territoryLine) return fallback;
+  const people = (territoryLine?.split(":")[1] ?? settings?.data.leadAssignment ?? "").split(",").map((name) => name.trim()).filter(Boolean);
   if (!people.length) return fallback;
   const open = (name: string) => context.byKind("crm-leads").filter((row) => row.data.owner === name && !["Converted", "Junk Lead", "Lost Lead", "Not Qualified"].includes(row.data.leadStatus ?? "")).length;
   return people.reduce((best, name) => (open(name) < open(best) ? name : best), people[0]);
@@ -340,6 +395,7 @@ export async function saveCrmRecord(kind: string, input: Record<string, string>,
     const [saved] = await db.update(bookkeepingRecord).set({ data, updatedAt: new Date() })
       .where(and(eq(bookkeepingRecord.id, existing.id), eq(bookkeepingRecord.userId, me.id))).returning();
     if (mod.section === "hr") await afterHrSave(me.id, kind, existing.data, saved);
+    if (kind === "crm-deal-products") await syncDealAmount(me.id, [existing.data.dealId, saved.data.dealId]);
     await recordAudit(me, "Edited", kind, saved.id, saved.data);
     await runWorkflows(me, kind, existing.data, saved);
     revalidatePath("/app", "layout");
@@ -350,10 +406,13 @@ export async function saveCrmRecord(kind: string, input: Record<string, string>,
     const twin = context.byKind(kind).find((row) => (row.data.email ?? "").trim().toLowerCase() === data.email.trim().toLowerCase());
     if (twin) throw new ActionError(`${mod.label} ${twin.data.fullName || twin.data.email} already has this email. Open it instead.`);
   }
-  if (kind === "crm-leads" && !input.owner?.trim()) data.owner = await assignedOwner(me.id, context, data.owner);
+  // Assignment rules decide the owner unless someone else was picked; a territory's people come first.
+  if (kind === "crm-leads" && !input.owner?.trim()) data.owner = await assignedOwner(me.id, context, data.owner, data.territory);
+  else if (kind === "crm-leads" && data.territory?.trim() && input.owner.trim() === me.name) data.owner = await assignedOwner(me.id, context, data.owner, data.territory, true);
   if (mod.numbering) data[mod.numbering.key] = await nextNumber(me.id, kind, mod.numbering.key, mod.numbering.prefix);
   const [created] = await db.insert(bookkeepingRecord).values({ userId: me.id, kind, data }).returning();
   if (mod.section === "hr") await afterHrSave(me.id, kind, undefined, created);
+  if (kind === "crm-deal-products") await syncDealAmount(me.id, [created.data.dealId]);
   await recordAudit(me, "Added", kind, created.id, created.data);
   await runWorkflows(me, kind, undefined, created);
   revalidatePath("/app", "layout");
@@ -410,6 +469,7 @@ export async function deleteCrmRecords(kind: string, ids: string[]): Promise<voi
     }
   });
   if (kind !== "crm-notes") for (const row of rows) await recordAudit(me, "Deleted", kind, row.id, row.data);
+  if (kind === "crm-deal-products") await syncDealAmount(me.id, rows.map((row) => row.data.dealId ?? ""));
   revalidatePath("/app", "layout");
 }
 
@@ -617,7 +677,18 @@ export async function createDocumentFromDeal(dealId: string, target: "estimates"
   const settings = rows.find((row) => row.kind === "settings")?.data;
   const customer = rows.find((row) => row.kind === "customers" && row.id === deal.data.accountId);
   const today = new Date().toISOString().slice(0, 10);
-  const lineItems = JSON.stringify([{ itemId: "", name: deal.data.dealName || "Deal", description: deal.data.description?.slice(0, 500) ?? "", quantity: "1", rate: amount.toFixed(2) }]);
+  // The deal's products become the document's lines, matched to Items & services by name.
+  const products = await db.select().from(bookkeepingRecord).where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "crm-deal-products"), sql`${bookkeepingRecord.data}->>'dealId' = ${deal.id}`));
+  const items = products.length ? await db.select().from(bookkeepingRecord).where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "items"))) : [];
+  const lineItems = JSON.stringify(products.length
+    ? products.map((line) => ({
+      itemId: items.find((item) => item.data.name?.trim().toLowerCase() === (line.data.product ?? "").trim().toLowerCase())?.id ?? "",
+      name: line.data.product || "Product",
+      description: line.data.description?.slice(0, 500) ?? "",
+      quantity: line.data.quantity || "1",
+      rate: (money(line.data.price) * (1 - money(line.data.discount) / 100)).toFixed(2),
+    }))
+    : [{ itemId: "", name: deal.data.dealName || "Deal", description: deal.data.description?.slice(0, 500) ?? "", quantity: "1", rate: amount.toFixed(2) }]);
   const existing = rows.filter((row) => row.kind === target);
   const common = {
     customer: customer?.data.name || deal.data.account,
@@ -711,4 +782,46 @@ export async function sendCrmEmail(kind: string, id: string, subject: string, bo
   }
   revalidatePath("/app", "layout");
   return toRecord(note);
+}
+
+/**
+ * Zoho's mass email: one message to each selected lead or contact with an email,
+ * {{name}} filled in for each. Kept to 50 at a time, since this mail service
+ * isn't for newsletters.
+ */
+export async function sendMassEmail(kind: string, ids: string[], subject: string, body: string): Promise<{ sent: number; skipped: number; failed: number }> {
+  const me = await requireUser();
+  if (!["crm-leads", "crm-contacts"].includes(kind)) throw new ActionError("Mass email works on leads and contacts.");
+  assertCanWrite(me, kind);
+  const cleanSubject = String(subject ?? "").trim().slice(0, 200);
+  const cleanBody = String(body ?? "").trim().slice(0, 8000);
+  if (!cleanSubject || !cleanBody) throw new ActionError("Write a subject and a message.");
+  const wanted = (Array.isArray(ids) ? ids : []).map(String);
+  if (!wanted.length) throw new ActionError("Select the records to email.");
+  if (wanted.length > 50) throw new ActionError("Send to up to 50 records at a time.");
+  const rows = await db.select().from(bookkeepingRecord).where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, kind), inArray(bookkeepingRecord.id, wanted)));
+  const [settings] = await db.select().from(bookkeepingRecord).where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "settings"))).limit(1);
+  const company = settings?.data.companyName || me.workspaceName;
+  const escape = (value: string) => value.replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character] ?? character);
+  let sent = 0;
+  let skipped = 0;
+  let failed = 0;
+  for (const row of rows) {
+    const to = (row.data.email ?? "").trim();
+    if (!to || row.data.emailOptOut === "true") {
+      skipped += 1;
+      continue;
+    }
+    const name = row.data.fullName || row.data.firstName || "there";
+    const text = cleanBody.replace(/\{\{\s*name\s*\}\}/gi, name);
+    const ok = await sendEmail({ to, subject: cleanSubject.replace(/\{\{\s*name\s*\}\}/gi, name), html: text.split(/\n{2,}/).map((part) => `<p>${escape(part).replace(/\n/g, "<br>")}</p>`).join(""), fromName: company, replyTo: me.email });
+    if (!ok) {
+      failed += 1;
+      continue;
+    }
+    sent += 1;
+    await db.insert(bookkeepingRecord).values({ userId: me.id, kind: "crm-notes", data: { parentKind: kind, parentId: row.id, title: `Mass email sent: ${cleanSubject}`, content: text, author: me.name, createdOn: nowStamp() } });
+  }
+  revalidatePath("/app", "layout");
+  return { sent, skipped, failed };
 }

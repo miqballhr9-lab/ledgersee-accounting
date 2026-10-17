@@ -9,7 +9,7 @@ import { deleteBookkeepingRecord, generateRecurringInvoice, saveBookkeepingRecor
 import { runDueRecurringTransactions } from "@/app/recurring-actions";
 import { ActionError } from "@/lib/action-error";
 import { assertAdmin, requireUser } from "@/lib/auth";
-import { sendEmailOrThrow } from "@/lib/email";
+import { sendEmail, sendEmailOrThrow } from "@/lib/email";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
 import { adjustedWorkedDays, parseSalaryRules, payrollAdjustments, salaryRuleAmounts } from "@/lib/payroll-adjustments";
 import { weekendDays } from "@/lib/weekend";
@@ -430,8 +430,46 @@ export async function runDueAutomations(): Promise<void> {
   const me = await requireUser();
   // Rules act for the whole business, so only its Admins set them off; the daily job covers the rest.
   if (me.role !== "Admin") return;
+  // Reminders people set on their own tasks go out whatever the automation mode.
+  await sendDueTaskReminders(me.id, me.name, me.email).catch(() => undefined);
   if ((await currentMode(me.id)) !== "Automation") return;
   await withoutRevalidation(() => runDueRules(me.id));
+}
+
+/** The current date and time where the business is (Settings time zone, Pakistan by default), as YYYY-MM-DDTHH:MM. */
+function businessNow(timeZone: string | undefined) {
+  try {
+    const parts = Object.fromEntries(new Intl.DateTimeFormat("en-CA", { timeZone: timeZone || "Asia/Karachi", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(new Date()).map((part) => [part.type, part.value]));
+    return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`;
+  } catch {
+    return new Date().toISOString().slice(0, 16);
+  }
+}
+
+/** Zoho's task reminders: when a task's reminder time arrives, its owner gets an email, once. */
+async function sendDueTaskReminders(userId: string, ownerName: string, ownerEmail: string) {
+  const [tasks, members, settingsRows] = await Promise.all([rowsOfKind(userId, "crm-tasks"), rowsOfKind(userId, "team-members"), rowsOfKind(userId, "settings")]);
+  const settings = settingsRows[0]?.data ?? {};
+  const now = businessNow(settings.timeZone);
+  for (const task of tasks) {
+    const reminder = (task.data.reminder ?? "").replace(" ", "T");
+    if (!reminder || reminder > now || task.data.reminderSentAt || task.data.status === "Completed") continue;
+    const owner = task.data.owner || ownerName;
+    const email = owner === ownerName ? ownerEmail : members.find((member) => member.data.name?.trim() === owner.trim())?.data.email;
+    // Claim it first so two open tabs don't both send it.
+    const claimed = await db.update(bookkeepingRecord)
+      .set({ data: { ...task.data, reminderSentAt: now }, updatedAt: new Date() })
+      .where(and(eq(bookkeepingRecord.id, task.id), eq(bookkeepingRecord.userId, userId), sql`coalesce(${bookkeepingRecord.data}->>'reminderSentAt', '') = ''`))
+      .returning();
+    if (!claimed[0] || !email) continue;
+    const escape = (value: string) => value.replace(/[&<>"]/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[character] ?? character);
+    await sendEmail({
+      to: email,
+      subject: `Reminder: ${task.data.subject || "Task"}`,
+      html: `<p>Hello ${escape(owner)},</p><p>This is your reminder for the task <strong>${escape(task.data.subject || "Task")}</strong>${task.data.dueDate ? `, due ${escape(task.data.dueDate)}` : ""}${task.data.related ? ` (${escape(task.data.related)})` : ""}.</p>${task.data.description ? `<p>${escape(task.data.description)}</p>` : ""}<p>${escape(settings.companyName || "CRM")}</p>`,
+      fromName: settings.companyName || undefined,
+    });
+  }
 }
 
 async function runDueRules(userId: string) {

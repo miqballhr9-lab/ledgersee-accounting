@@ -488,6 +488,36 @@ export function buildListReport(key: string, records: BookkeepingRecord[], ledge
       return forecast ? periodResult(columns, lines, options, "No open deals close in this period.") : asOfResult(columns, lines, asOf, "No open deals.");
     }
 
+    case "quota-vs-forecast": {
+      // A target's period is a month (2026-10) or a quarter (2026-Q4).
+      const span = (period: string): [string, string] => {
+        const quarter = /^(\d{4})-Q([1-4])$/.exec(period);
+        if (quarter) {
+          const first = (Number(quarter[2]) - 1) * 3 + 1;
+          return [`${quarter[1]}-${String(first).padStart(2, "0")}`, `${quarter[1]}-${String(first + 2).padStart(2, "0")}`];
+        }
+        return [period.slice(0, 7), period.slice(0, 7)];
+      };
+      const columns = [text("period", "Period"), amount("target", "Target"), amount("won", "Won"), amount("pipeline", "Open pipeline (expected)"), amount("forecast", "Forecast"), amount("attained", "Won % of target")];
+      const deals = records.filter((record) => record.kind === "crm-deals");
+      const targets = records.filter((record) => {
+        if (record.kind !== "crm-targets" || !record.data.period) return false;
+        const [start, end] = span(record.data.period);
+        return start <= options.to.slice(0, 7) && end >= options.from.slice(0, 7);
+      }).sort((a, b) => (a.data.owner ?? "").localeCompare(b.data.owner ?? "") || (a.data.period ?? "").localeCompare(b.data.period ?? ""));
+      const lines: ReportLine[] = targets.map((record) => {
+        const [start, end] = span(record.data.period);
+        const inSpan = (date: string | undefined) => Boolean(date) && date!.slice(0, 7) >= start && date!.slice(0, 7) <= end;
+        const mine = deals.filter((deal) => (deal.data.owner ?? "") === (record.data.owner ?? ""));
+        const won = mine.filter((deal) => deal.data.stage === "Closed Won" && inSpan(deal.data.closedOn || deal.data.closingDate)).reduce((sum, deal) => sum + num(deal.data.amount), 0);
+        const pipeline = mine.filter((deal) => !(deal.data.stage ?? "").startsWith("Closed") && inSpan(deal.data.closingDate)).reduce((sum, deal) => sum + num(deal.data.expectedRevenue), 0);
+        const target = num(record.data.target);
+        return { id: record.id, label: record.data.owner || "No owner", kind: "account" as const, depth: 0, values: [record.data.period, target, won, pipeline, won + pipeline, target ? Math.round((won / target) * 1000) / 10 : 0], source: src(record) };
+      });
+      if (lines.length) lines.push({ id: "total", label: "TOTAL", kind: "grand", depth: 0, values: ["", ...[1, 2, 3, 4].map((index) => lines.reduce((sum, line) => sum + Number(line.values[index] ?? 0), 0)), null] });
+      return periodResult(columns, lines, options, "No sales targets in this period. Add them in CRM > Sales targets.");
+    }
+
     case "deals-won-lost": {
       const columns = [text("closed", "Closed on"), text("deal", "Deal"), text("account", "Account"), text("owner", "Owner"), text("reason", "Reason for loss"), amount("amount", "Amount")];
       const deals = records.filter((record) => record.kind === "crm-deals" && (record.data.stage ?? "").startsWith("Closed") && inPeriod(record.data.closedOn || record.data.closingDate || "", options));
