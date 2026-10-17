@@ -7,7 +7,7 @@ import { cache } from "react";
 import { db } from "@/db";
 import { bookkeepingRecord } from "@/db/schema";
 import { ActionError } from "@/lib/action-error";
-import { planByKey, plans, TRIAL_DAYS, type Feature, type PlanKey } from "@/lib/plans";
+import { planByKey, plans, TRIAL_MONTHS, type Feature, type PlanKey } from "@/lib/plans";
 
 /**
  * Subscriptions, paid through Stripe. Billing is off until STRIPE_SECRET_KEY is
@@ -48,7 +48,9 @@ function exempt(email: string) {
 export async function subscriptionFor(ownerId: string) {
   const [row] = await db.select().from(bookkeepingRecord).where(and(eq(bookkeepingRecord.userId, ownerId), eq(bookkeepingRecord.kind, SUBSCRIPTION_KIND))).orderBy(asc(bookkeepingRecord.createdAt)).limit(1);
   if (row) return row;
-  const trialEndsAt = new Date(Date.now() + TRIAL_DAYS * 86_400_000).toISOString();
+  const end = new Date();
+  end.setUTCMonth(end.getUTCMonth() + TRIAL_MONTHS);
+  const trialEndsAt = end.toISOString();
   const [created] = await db.insert(bookkeepingRecord).values({ userId: ownerId, kind: SUBSCRIPTION_KIND, data: { plan: "enterprise", status: "trialing", trialEndsAt } }).returning();
   return created;
 }

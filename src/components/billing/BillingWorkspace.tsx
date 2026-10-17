@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { readableError } from "@/lib/action-error";
 import type { BillingAccess } from "@/lib/billing";
-import { featureLabels, planFor, plans, planPrice, TRIAL_DAYS, type BillingInterval, type Feature } from "@/lib/plans";
+import { featureLabels, planFor, plans, planPrice, TRIAL_MONTHS, type BillingInterval, type Feature } from "@/lib/plans";
 
 export interface BillingPayment {
   id: string;
@@ -71,7 +71,7 @@ export default function BillingWorkspace({ enabled, paymentsReady, canManage, ac
       <section>
         <p className="text-xs font-medium uppercase tracking-[0.12em] text-primary">Organization / Billing</p>
         <h1 className="mt-1 text-[26px] font-semibold tracking-tight sm:text-3xl">Plan and billing</h1>
-        <p className="mt-1.5 max-w-2xl text-sm text-muted-foreground">Choose the plan for your business. Every plan starts with a {TRIAL_DAYS}-day free trial of everything, and you can change or cancel at any time.</p>
+        <p className="mt-1.5 max-w-2xl text-sm text-muted-foreground">Choose the plan for your business. Every business starts with {TRIAL_MONTHS} months free, with everything included, and you can change or cancel at any time.</p>
       </section>
 
       {notice === "success" ? <p role="status" className="rounded-lg border border-primary/30 bg-primary/5 px-4 py-3 text-sm">Thank you! Your payment went through. Your plan updates here within a minute.</p> : null}

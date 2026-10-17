@@ -19,7 +19,8 @@ export interface Plan {
   highlights: string[];
 }
 
-export const TRIAL_DAYS = 14;
+/** Every new business gets six months of everything free before choosing a plan. */
+export const TRIAL_MONTHS = 6;
 export const BILLING_CURRENCY = "usd";
 
 export const plans: Plan[] = [
