@@ -162,12 +162,14 @@ export async function selfCheck(direction: "in" | "out"): Promise<string> {
 }
 
 /** Kiosk mode in Attendances: HR checks any employee in or out. Returns the time recorded. */
-export async function kioskCheck(employeeId: string, direction: "in" | "out"): Promise<string> {
+export async function kioskCheck(employeeId: string, direction: "in" | "out", pin = ""): Promise<string> {
   const me = await requireUser();
   assertCanWrite(me, "hr-attendance");
   if (direction !== "in" && direction !== "out") throw new ActionError("Choose check in or check out.");
   const [employee] = (await rows(me.id, ["employees"])).filter((row) => row.id === employeeId && row.data.status !== "Inactive");
   if (!employee) throw new ActionError("We couldn’t find that employee. Refresh and try again.");
+  // An employee with a kiosk PIN must enter it, so nobody checks in for someone else.
+  if (employee.data.kioskPin && String(pin).trim() !== employee.data.kioskPin) throw new ActionError("That PIN isn’t right. Try again.");
   return checkEmployee(me, employee, direction, false);
 }
 

@@ -105,7 +105,7 @@ async function CheckInPage() {
       canKiosk={canKiosk}
       employees={shown.map((employee) => {
         const row = attendance.find((entry) => entry.data.employeeId === employee.id);
-        return { id: employee.id, name: employee.data.name || "Employee", job: employee.data.designation ?? "", department: employee.data.department ?? "", checkIn: row?.data.checkIn ?? "", checkOut: row?.data.checkOut ?? "", hours: row?.data.hoursWorked ?? "" };
+        return { id: employee.id, name: employee.data.name || "Employee", job: employee.data.designation ?? "", department: employee.data.department ?? "", checkIn: row?.data.checkIn ?? "", checkOut: row?.data.checkOut ?? "", hours: row?.data.hoursWorked ?? "", needsPin: Boolean(employee.data.kioskPin) };
       })}
     />
   );

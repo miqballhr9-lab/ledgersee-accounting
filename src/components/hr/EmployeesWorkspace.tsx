@@ -195,7 +195,7 @@ export default function EmployeesWorkspace({ employees, departments, accounts, r
     "Work information": ["workLocation", "joiningDate", "workSchedule", "coach", "tags"],
     Resume: ["skills", "resume"],
     "Private information": ["cnic", "dateOfBirth", "emergencyContact", "emergencyPhone", "bankName", "bankAccountTitle", "bankAccountNumber", "address"],
-    "HR settings": ["employeeId", "employeeType", "status", "baseSalary", "socialDeduction", "overtimeRate", "paymentAccountId", "notes"],
+    "HR settings": ["employeeId", "employeeType", "status", "baseSalary", "socialDeduction", "overtimeRate", "kioskPin", "paymentAccountId", "notes"],
   };
 
   return (

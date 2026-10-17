@@ -474,6 +474,7 @@ export const modules: readonly ModuleDefinition[] = [
       { key: "paymentAccountId", label: "Salary paid from", type: "select", options: [], section: "HR settings", help: "Optional. The Cash, Bank or Credit card account used to pay this employee." },
       { key: "socialDeduction", label: "EOBI / PF per month", type: "number", help: "Withheld from each salary for EOBI or the provident fund." },
       { key: "overtimeRate", label: "Overtime rate per hour", type: "number", help: "Pays overtime hours from attendance on the salary sheet." },
+      { key: "kioskPin", label: "Kiosk PIN", placeholder: "e.g. 4821", help: "Asked for when checking in or out at the attendance kiosk." },
       { key: "coach", label: "Coach", help: "Who guides this employee day to day." },
       { key: "workSchedule", label: "Working hours", type: "select", options: ["Standard 40 hours/week", "Standard 48 hours/week (6 days)", "Part time 20 hours/week", "Flexible hours"] },
       { key: "tags", label: "Tags", help: "Comma separated, e.g. Sales team, Remote." },

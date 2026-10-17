@@ -19,6 +19,8 @@ export interface KioskEmployee {
   checkIn: string;
   checkOut: string;
   hours: string;
+  /** The employee set a kiosk PIN, asked for before checking in or out at the kiosk. */
+  needsPin?: boolean;
 }
 
 const tones = ["bg-[#714B67]", "bg-[#017E84]", "bg-[#E46F78]", "bg-[#21B799]", "bg-[#5B899E]", "bg-[#E4A900]", "bg-[#8F5FD8]"];
@@ -59,6 +61,7 @@ export default function AttendanceKiosk({ business, employees, myEmployeeId, can
   const [pickedId, setPickedId] = useState<string | null>(null);
   const [done, setDone] = useState<{ name: string; direction: "in" | "out"; time: string } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [pin, setPin] = useState("");
   const mine = employees.find((employee) => employee.id === myEmployeeId) ?? null;
   const picked = employees.find((employee) => employee.id === pickedId) ?? null;
 
@@ -72,7 +75,8 @@ export default function AttendanceKiosk({ business, employees, myEmployeeId, can
     const direction = isIn(employee) ? "out" : "in";
     setBusy(true);
     try {
-      const time = self ? await selfCheck(direction) : await kioskCheck(employee.id, direction);
+      const time = self ? await selfCheck(direction) : await kioskCheck(employee.id, direction, pin);
+      setPin("");
       setDone({ name: employee.name, direction, time });
       router.refresh();
     } catch (error) {
@@ -94,9 +98,12 @@ export default function AttendanceKiosk({ business, employees, myEmployeeId, can
         <p className="mt-1 text-sm text-muted-foreground">{[employee.job, employee.department].filter(Boolean).join(" · ") || "Employee"}</p>
         {employee.checkIn ? <p className="mt-3 text-sm">Checked in at <strong>{employee.checkIn}</strong>{employee.checkOut ? <> · out at <strong>{employee.checkOut}</strong> · {employee.hours || "0"} h worked</> : null}</p> : <p className="mt-3 text-sm text-muted-foreground">Not checked in today.</p>}
         {employee.checkOut ? <p className="mt-6 text-sm font-medium text-muted-foreground">Your day is done. See you tomorrow!</p> : (
-          <Button type="button" disabled={busy} onClick={() => check(employee, self)} className={`mt-6 h-auto w-full gap-3 py-5 text-lg text-white ${inside ? "bg-[#E4A900] hover:bg-[#c99500]" : "bg-[#21B799] hover:bg-[#1a9c82]"}`}>
+          <>
+          {!self && employee.needsPin ? <Input type="password" inputMode="numeric" autoComplete="off" maxLength={8} aria-label="Your PIN" placeholder="Enter your PIN" value={pin} onChange={(event) => setPin(event.target.value)} className="mx-auto mt-6 max-w-40 text-center tracking-[0.4em]" /> : null}
+          <Button type="button" disabled={busy || (!self && Boolean(employee.needsPin) && !pin)} onClick={() => check(employee, self)} className={`mt-6 h-auto w-full gap-3 py-5 text-lg text-white ${inside ? "bg-[#E4A900] hover:bg-[#c99500]" : "bg-[#21B799] hover:bg-[#1a9c82]"}`}>
             {inside ? <LogOut size={22} /> : <LogIn size={22} />}{inside ? "Check out" : "Check in"}
           </Button>
+          </>
         )}
       </div>
     );
