@@ -86,6 +86,25 @@ function parseColumns(text: string | null) {
   }
 }
 
+interface SavedView {
+  name: string;
+  search: string;
+  filter: ViewFilter;
+  status: string;
+  pipeline: string;
+  sort: { key: string; desc: boolean } | null;
+}
+
+function parseViews(text: string | null): SavedView[] {
+  if (!text) return [];
+  try {
+    const parsed = JSON.parse(text) as unknown;
+    return Array.isArray(parsed) ? parsed.filter((item): item is SavedView => Boolean(item) && typeof item === "object" && typeof (item as SavedView).name === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
 function isClosed(mod: CrmModule, record: BookkeepingRecord) {
   const value = mod.statusKey ? record.data[mod.statusKey] : "";
   if (mod.kind === "crm-deals") return isClosedStage(value);
@@ -138,6 +157,15 @@ export default function CrmWorkspace({ page, initialStore, currency, me, owners,
   const columnsKey = `crm-columns-${mod?.key ?? "accounts"}`;
   const savedColumns = useSyncExternalStore(subscribeToNothing, () => readSavedColumns(columnsKey), () => null);
   const [columnChoices, setColumnChoices] = useState<Record<string, string[]>>({});
+  // Saved views, as Zoho's custom views: a named search, filter, status, pipeline and sort, kept in this browser.
+  const viewsKey = `crm-views-${mod?.kind ?? "accounts"}`;
+  const savedViewsText = useSyncExternalStore(subscribeToNothing, () => readSavedColumns(viewsKey), () => null);
+  const [viewChoices, setViewChoices] = useState<Record<string, SavedView[]>>({});
+  const savedViews: SavedView[] = viewChoices[viewsKey] ?? parseViews(savedViewsText);
+  function storeViews(next: SavedView[]) {
+    setViewChoices((current) => ({ ...current, [viewsKey]: next }));
+    try { window.localStorage.setItem(viewsKey, JSON.stringify(next)); } catch { /* Views just won't be remembered. */ }
+  }
   const columns = columnChoices[columnsKey] ?? parseColumns(savedColumns) ?? [...(mod?.columns ?? [])];
   function setColumns(next: string[]) {
     setColumnChoices((current) => ({ ...current, [columnsKey]: next }));
@@ -395,6 +423,23 @@ export default function CrmWorkspace({ page, initialStore, currency, me, owners,
         ) : null}
         {mod ? (
           <>
+            <DropdownMenu>
+              <DropdownMenuTrigger render={<Button type="button" variant="outline" className="gap-1.5">Views<ChevronDown size={14} /></Button>} />
+              <DropdownMenuContent align="start" className="min-w-56">
+                <DropdownMenuLabel>Saved views</DropdownMenuLabel>
+                {savedViews.length ? savedViews.map((saved) => (
+                  <DropdownMenuItem key={saved.name} onClick={() => { setSearch(saved.search); setFilter(saved.filter); setStatusFilter(saved.status); setPipeline(saved.pipeline); setSort(saved.sort); }}>
+                    <span className="flex-1 truncate">{saved.name}</span>
+                    <span role="button" tabIndex={0} aria-label={`Delete view ${saved.name}`} className="rounded px-1 text-muted-foreground hover:bg-muted" onClick={(event) => { event.stopPropagation(); storeViews(savedViews.filter((item) => item.name !== saved.name)); }}>×</span>
+                  </DropdownMenuItem>
+                )) : <p className="px-2 py-1.5 text-xs text-muted-foreground">No saved views yet.</p>}
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => {
+                  const name = window.prompt("Name this view")?.trim();
+                  if (name) storeViews([...savedViews.filter((item) => item.name !== name), { name: name.slice(0, 60), search, filter, status: statusFilter, pipeline, sort }].slice(-20));
+                }}>Save current view…</DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
             <Select value={filter} onValueChange={(value) => setFilter((value ?? "all") as ViewFilter)}>
               <SelectTrigger className="w-[170px]" aria-label="View"><SlidersHorizontal size={14} /><SelectValue /></SelectTrigger>
               <SelectContent>

@@ -474,6 +474,52 @@ export function buildListReport(key: string, records: BookkeepingRecord[], ledge
       return asOfResult(columns, lines, asOf, "Nothing has changed in a filed period.");
     }
 
+    case "deal-forecast":
+    case "pipeline-by-owner": {
+      const forecast = key === "deal-forecast";
+      const columns = [text("deal", "Deal"), text("account", "Account"), text(forecast ? "owner" : "closing", forecast ? "Owner" : "Closing date"), text("stage", "Stage"), amount("amount", "Amount"), amount("expected", "Expected revenue")];
+      const deals = records.filter((record) => record.kind === "crm-deals" && !(record.data.stage ?? "").startsWith("Closed") && (!forecast || inPeriod(record.data.closingDate || "", options)))
+        .sort((a, b) => (a.data.closingDate ?? "").localeCompare(b.data.closingDate ?? ""));
+      const groupKey = (record: BookkeepingRecord) => (forecast ? (record.data.closingDate || "No date").slice(0, 7) : record.data.owner || "No owner");
+      const lines = grouped(columns, groupBy(deals, groupKey).map(([label, items]) => ({
+        label,
+        rows: items.map((record): Row => ({ values: [record.data.dealName ?? "", record.data.account ?? "", forecast ? record.data.owner ?? "" : record.data.closingDate ?? "", record.data.stage ?? "", num(record.data.amount), num(record.data.expectedRevenue)], source: src(record) })),
+      })));
+      return forecast ? periodResult(columns, lines, options, "No open deals close in this period.") : asOfResult(columns, lines, asOf, "No open deals.");
+    }
+
+    case "deals-won-lost": {
+      const columns = [text("closed", "Closed on"), text("deal", "Deal"), text("account", "Account"), text("owner", "Owner"), text("reason", "Reason for loss"), amount("amount", "Amount")];
+      const deals = records.filter((record) => record.kind === "crm-deals" && (record.data.stage ?? "").startsWith("Closed") && inPeriod(record.data.closedOn || record.data.closingDate || "", options));
+      const lines = grouped(columns, groupBy(deals, (record) => record.data.stage || "Closed").map(([label, items]) => ({
+        label,
+        rows: items.map((record): Row => ({ values: [record.data.closedOn || record.data.closingDate || "", record.data.dealName ?? "", record.data.account ?? "", record.data.owner ?? "", record.data.lossReason ?? "", num(record.data.amount)], source: src(record) })),
+      })));
+      return periodResult(columns, lines, options, "No deals closed in this period.");
+    }
+
+    case "leads-by-source": {
+      const columns = [text("created", "Created"), text("lead", "Lead"), text("company", "Company"), text("status", "Status"), text("owner", "Owner"), amount("score", "Score")];
+      const leads = records.filter((record) => record.kind === "crm-leads" && inPeriod(record.createdAt.slice(0, 10), options));
+      const lines = grouped(columns, groupBy(leads, (record) => record.data.leadSource || "Not specified").map(([label, items]) => ({
+        label,
+        rows: items.map((record): Row => ({ values: [record.createdAt.slice(0, 10), record.data.fullName || record.data.lastName || "", record.data.company ?? "", record.data.leadStatus ?? "", record.data.owner ?? "", num(record.data.leadScore)], source: src(record) })),
+      })));
+      return periodResult(columns, lines, options, "No leads created in this period.");
+    }
+
+    case "activities-by-owner": {
+      const columns = [text("date", "Date"), text("type", "Type"), text("subject", "Subject"), text("related", "Related to"), text("status", "Status"), amount("count", "Count")];
+      const typeOf: Record<string, string> = { "crm-tasks": "Task", "crm-meetings": "Meeting", "crm-calls": "Call" };
+      const dateOf = (record: BookkeepingRecord) => (record.data.dueDate || record.data.from || record.data.startTime || record.createdAt).slice(0, 10);
+      const items = records.filter((record) => typeOf[record.kind] && inPeriod(dateOf(record), options)).sort((a, b) => dateOf(a).localeCompare(dateOf(b)));
+      const lines = grouped(columns, groupBy(items, (record) => record.data.owner || "No owner").map(([label, rowsOf]) => ({
+        label,
+        rows: rowsOf.map((record): Row => ({ values: [dateOf(record), typeOf[record.kind], record.data.subject || record.data.title || "", record.data.related || record.data.contact || "", record.data.status || record.data.callStatus || "", 1], source: src(record) })),
+      })));
+      return periodResult(columns, lines, options, "No activities in this period.");
+    }
+
     case "unbilled-time":
     case "time-activities-by-employee": {
       const unbilled = key === "unbilled-time";

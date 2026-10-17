@@ -192,10 +192,97 @@ function buildData(mod: CrmModule, input: Record<string, string>, context: Looku
     if (!isClosedStage(data.stage)) data.closedOn = "";
   }
   if (mod.kind === "crm-leads") data.leadScore = String(leadScore(data));
+  if (mod.kind === "crm-workflows" && !data.active) data.active = "Active";
   if (mod.kind === "crm-deals" && !data.pipeline) data.pipeline = "Standard";
   if ((mod.kind === "crm-tasks") && data.status === "Completed" && existing?.status !== "Completed") data.completedOn = new Date().toISOString().slice(0, 10);
   if (mod.section === "hr") applyHrRules(mod.kind, data, existing, { byKind: context.byKind, actor: ownerName }, id);
   return data;
+}
+
+const workflowKinds: Record<string, string> = { Leads: "crm-leads", Contacts: "crm-contacts", Deals: "crm-deals", Tasks: "crm-tasks", Cases: "crm-cases" };
+const workflowRelated: Record<string, RelatedType> = { "crm-leads": "Lead", "crm-contacts": "Contact", "crm-deals": "Deal", "crm-cases": "Case" };
+
+/** A field on a module, found by its label as shown on the form or by its key. */
+function fieldKey(mod: CrmModule, name: string) {
+  const wanted = name.trim().toLowerCase();
+  return mod.fields.find((field) => field.label.toLowerCase() === wanted || field.key.toLowerCase() === wanted)?.key ?? "";
+}
+
+function workflowMatches(rule: Record<string, string>, mod: CrmModule, data: Record<string, string>) {
+  if (!rule.conditionField?.trim()) return true;
+  const key = fieldKey(mod, rule.conditionField);
+  if (!key) return false;
+  const value = (data[key] ?? "").trim();
+  const target = (rule.conditionValue ?? "").trim();
+  switch (rule.operator || "is") {
+    case "is": return value.toLowerCase() === target.toLowerCase();
+    case "is not": return value.toLowerCase() !== target.toLowerCase();
+    case "contains": return value.toLowerCase().includes(target.toLowerCase());
+    case "is greater than": return Number(value) > Number(target);
+    case "is less than": return Number(value) < Number(target);
+    case "is empty": return !value;
+    case "is not empty": return Boolean(value);
+    default: return false;
+  }
+}
+
+/**
+ * Runs the business's workflow rules (CRM > Workflow rules) after a save. An "Edited" rule runs only when
+ * its condition has just become true, so the same task or email isn't repeated on every edit.
+ * A rule that fails never stops the save itself.
+ */
+async function runWorkflows(me: Awaited<ReturnType<typeof requireUser>>, kind: string, before: Record<string, string> | undefined, after: StoredRow) {
+  const mod = crmModuleByKind(kind);
+  if (!mod) return;
+  const rules = (await db.select().from(bookkeepingRecord).where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "crm-workflows"))))
+    .filter((rule) => rule.data.active !== "Inactive" && workflowKinds[rule.data.module] === kind);
+  let data = after.data;
+  for (const rule of rules) {
+    const when = rule.data.trigger || "Created or edited";
+    if (before ? when === "Created" : when === "Edited") continue;
+    if (!workflowMatches(rule.data, mod, data)) continue;
+    if (before && workflowMatches(rule.data, mod, before)) continue;
+    try {
+      if (rule.data.action === "Update a field") {
+        const key = fieldKey(mod, rule.data.actionField ?? "");
+        if (!key || data[key] === rule.data.actionValue) continue;
+        data = withHistory({ ...data, [key]: rule.data.actionValue ?? "" }, [{ at: nowStamp(), by: `Workflow: ${rule.data.ruleName}`, text: `${mod.fields.find((field) => field.key === key)?.label ?? key} set to “${rule.data.actionValue ?? ""}”` }]);
+        await db.update(bookkeepingRecord).set({ data, updatedAt: new Date() }).where(eq(bookkeepingRecord.id, after.id));
+      } else if (rule.data.action === "Create a task") {
+        const due = new Date();
+        due.setUTCDate(due.getUTCDate() + Math.max(0, Number(rule.data.taskDueDays) || 0));
+        const relatedType = workflowRelated[kind];
+        await db.insert(bookkeepingRecord).values({
+          userId: me.id,
+          kind: "crm-tasks",
+          data: {
+            subject: rule.data.taskSubject || rule.data.ruleName || "Follow up",
+            dueDate: due.toISOString().slice(0, 10),
+            status: "Not Started",
+            priority: "High",
+            owner: data.owner || me.name,
+            ...(relatedType ? { relatedType, relatedId: after.id, related: crmTitle(mod, data) } : {}),
+            description: `Created by the workflow rule “${rule.data.ruleName}”.`,
+            history: JSON.stringify([{ at: nowStamp(), by: `Workflow: ${rule.data.ruleName}`, text: "Task created" }]),
+          },
+        });
+      } else if (rule.data.action === "Send an email to the record" && data.email) {
+        const name = crmTitle(mod, data);
+        const escape = (value: string) => value.replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character] ?? character);
+        const body = (rule.data.emailBody || "").replaceAll("{{name}}", name);
+        await sendEmailOrThrow({ to: data.email, subject: (rule.data.emailSubject || rule.data.ruleName || "").replaceAll("{{name}}", name), html: body.split(/\n{2,}/).map((part) => `<p>${escape(part).replace(/\n/g, "<br>")}</p>`).join(""), fromName: me.workspaceName });
+        await db.insert(bookkeepingRecord).values({ userId: me.id, kind: "crm-notes", data: { parentKind: kind, parentId: after.id, title: `Email sent by workflow: ${rule.data.emailSubject || rule.data.ruleName}`, content: body, author: `Workflow: ${rule.data.ruleName}`, createdOn: nowStamp() } });
+      }
+    } catch {
+      // A workflow that can't run (no email service, say) leaves the record as saved.
+    }
+  }
+}
+
+/** The row as stored now, after anything a workflow rule changed. */
+async function freshRow(row: StoredRow) {
+  const [fresh] = await db.select().from(bookkeepingRecord).where(eq(bookkeepingRecord.id, row.id)).limit(1);
+  return fresh ?? row;
 }
 
 /** Zoho-style lead score: how complete and how far along a lead is, out of 100. */
@@ -252,8 +339,9 @@ export async function saveCrmRecord(kind: string, input: Record<string, string>,
       .where(and(eq(bookkeepingRecord.id, existing.id), eq(bookkeepingRecord.userId, me.id))).returning();
     if (mod.section === "hr") await afterHrSave(me.id, kind, existing.data, saved);
     await recordAudit(me, "Edited", kind, saved.id, saved.data);
+    await runWorkflows(me, kind, existing.data, saved);
     revalidatePath("/app", "layout");
-    return toRecord(saved);
+    return toRecord(await freshRow(saved));
   }
   // As Zoho's duplicate check, a second lead or contact with the same email isn't added.
   if ((kind === "crm-leads" || kind === "crm-contacts") && data.email) {
@@ -265,8 +353,9 @@ export async function saveCrmRecord(kind: string, input: Record<string, string>,
   const [created] = await db.insert(bookkeepingRecord).values({ userId: me.id, kind, data }).returning();
   if (mod.section === "hr") await afterHrSave(me.id, kind, undefined, created);
   await recordAudit(me, "Added", kind, created.id, created.data);
+  await runWorkflows(me, kind, undefined, created);
   revalidatePath("/app", "layout");
-  return toRecord(created);
+  return toRecord(await freshRow(created));
 }
 
 /** Changes one field on several records at once: mass update, and moving cards on the Kanban board. */
@@ -289,7 +378,8 @@ export async function updateCrmField(kind: string, ids: string[], key: string, v
       .where(and(eq(bookkeepingRecord.id, row.id), eq(bookkeepingRecord.userId, me.id))).returning();
     if (mod.section === "hr") await afterHrSave(me.id, kind, row.data, updated);
     await recordAudit(me, "Edited", kind, updated.id, updated.data);
-    saved.push(toRecord(updated));
+    await runWorkflows(me, kind, row.data, updated);
+    saved.push(toRecord(await freshRow(updated)));
   }
   revalidatePath("/app", "layout");
   return saved;

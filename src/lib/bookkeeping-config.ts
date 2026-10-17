@@ -542,6 +542,7 @@ export const navigationGroups: NavigationGroup[] = [
       { slug: "crm/campaigns", label: "Campaigns", icon: "Megaphone" },
       { slug: "crm/cases", label: "Cases", icon: "LifeBuoy" },
       { slug: "crm/solutions", label: "Solutions", icon: "BookOpen" },
+      { slug: "crm/workflows", label: "Workflow rules", icon: "Workflow" },
     ],
   },
   {

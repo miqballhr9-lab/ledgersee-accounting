@@ -45,6 +45,7 @@ export const recordKinds = [
   "crm-cases",
   "crm-solutions",
   "crm-notes",
+  "crm-workflows",
   "hr-departments",
   "hr-attendance",
   "hr-leave-types",

@@ -333,6 +333,28 @@ export const crmModules: readonly CrmModule[] = [
       { key: "comments", label: "Comments", type: "textarea", section: "Solution details", wide: true },
     ],
   },
+  {
+    key: "workflows", kind: "crm-workflows", label: "Workflow rule", plural: "Workflow rules",
+    description: "Zoho-style rules: when a record is created or edited and meets a condition, update a field, create a task or send an email.",
+    titleKey: "ruleName", statusKey: "active",
+    columns: ["ruleName", "module", "trigger", "action", "active"],
+    fields: [
+      { key: "ruleName", label: "Rule name", section: "Rule", required: true },
+      { key: "module", label: "Module", type: "select", options: ["Leads", "Contacts", "Deals", "Tasks", "Cases"], section: "Rule", required: true },
+      { key: "trigger", label: "When", type: "select", options: ["Created", "Edited", "Created or edited"], section: "Rule", required: true },
+      { key: "active", label: "Status", type: "select", options: ["Active", "Inactive"], section: "Rule" },
+      { key: "conditionField", label: "Condition field", section: "Condition", placeholder: "e.g. Stage", help: "A field as named on the form. Leave empty to run for every record." },
+      { key: "operator", label: "Operator", type: "select", options: ["is", "is not", "contains", "is greater than", "is less than", "is empty", "is not empty"], section: "Condition" },
+      { key: "conditionValue", label: "Value", section: "Condition", placeholder: "e.g. Closed Won" },
+      { key: "action", label: "Action", type: "select", options: ["Update a field", "Create a task", "Send an email to the record"], section: "Action", required: true },
+      { key: "actionField", label: "Field to update", section: "Action", placeholder: "e.g. Lead status" },
+      { key: "actionValue", label: "New value", section: "Action" },
+      { key: "taskSubject", label: "Task subject", section: "Action", placeholder: "e.g. Call to welcome" },
+      { key: "taskDueDays", label: "Task due in (days)", type: "number", section: "Action" },
+      { key: "emailSubject", label: "Email subject", section: "Action" },
+      { key: "emailBody", label: "Email message", type: "textarea", section: "Action", wide: true, help: "{{name}} is replaced with the record's name." },
+    ],
+  },
 ];
 
 export const crmKinds = crmModules.map((module) => module.kind);
@@ -350,7 +372,7 @@ export function crmModuleByKind(kind: string): CrmModule | undefined {
 }
 
 /** Pages under /app/crm. Activities shows tasks, meetings and calls together. */
-export const crmPages = ["leads", "contacts", "accounts", "deals", "activities", "campaigns", "cases", "solutions"] as const;
+export const crmPages = ["leads", "contacts", "accounts", "deals", "activities", "campaigns", "cases", "solutions", "workflows"] as const;
 export type CrmPage = (typeof crmPages)[number];
 
 export function fullName(data: Record<string, string>) {
