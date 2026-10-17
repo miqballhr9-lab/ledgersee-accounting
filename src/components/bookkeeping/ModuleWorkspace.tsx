@@ -27,7 +27,7 @@ import {
   sendInvoiceRecord,
   toggleTransactionMatch,
 } from "@/app/actions";
-import { createInvoiceFromTime, refundCustomerCredit, sendCustomerStatement, sendInvoiceReminder } from "@/app/sales-actions";
+import { createInvoiceFromCharges, createInvoiceFromTime, refundCustomerCredit, sendCustomerStatement, sendInvoiceReminder } from "@/app/sales-actions";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -229,6 +229,7 @@ function createDefaults(module: ModuleDefinition, records: BookkeepingRecord[], 
     values.status = "Open";
   }
   if (module.kind === "expenses" || module.kind === "transactions" || module.kind === "journals") values.date = dateString(today);
+  if (module.kind === "delayed-charges") Object.assign(values, { date: dateString(today), chargeType: "Charge", quantity: "1", status: "Open" });
   if (module.kind === "employees") {
     values.employeeId = `EMP-${String(records.filter((record) => record.kind === "employees").length + 1).padStart(3, "0")}`;
     values.status = "Active";
@@ -335,6 +336,7 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
   const [bulkPending, setBulkPending] = useState(false);
   const [paymentAmount, setPaymentAmount] = useState("");
   const [paymentDate, setPaymentDate] = useState("");
+  const [paymentRate, setPaymentRate] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("");
   const [paymentError, setPaymentError] = useState("");
   const [expenseConversionRecord, setExpenseConversionRecord] = useState<BookkeepingRecord | null>(null);
@@ -573,7 +575,7 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
         ? { label: "Actions", items: [{ action: "pay", label: "Record payment" }, { action: "undo-payment", label: "Undo payment" }] }
         : module.kind === "credit-notes"
           ? { label: "Actions", items: [{ action: "apply-credit", label: "Apply credit" }, { action: "refund", label: "Refund to customer" }] }
-          : module.kind === "time-activities"
+          : module.kind === "time-activities" || module.kind === "delayed-charges"
             ? { label: "Actions", items: [{ action: "invoice-time", label: "Create invoice" }] }
           : module.kind === "supplier-credits"
             ? { label: "Actions", items: [{ action: "refund", label: "Record refund" }] }
@@ -642,8 +644,9 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
     if (action === "invoice-time") {
       setBulkPending(true);
       try {
-        const created = await createInvoiceFromTime(selectedRecords.map((record) => record.id));
-        toast.success(`Draft invoice ${created.number} created from ${selectedRecords.length} time ${selectedRecords.length === 1 ? "entry" : "entries"}.`);
+        const charges = module.kind === "delayed-charges";
+        const created = await (charges ? createInvoiceFromCharges : createInvoiceFromTime)(selectedRecords.map((record) => record.id));
+        toast.success(`Draft invoice ${created.number} created from ${selectedRecords.length} ${charges ? (selectedRecords.length === 1 ? "charge" : "charges") : `time ${selectedRecords.length === 1 ? "entry" : "entries"}`}.`);
         setSelectedIds(new Set());
         router.refresh();
       } catch (error) {
@@ -747,6 +750,7 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
       setPaymentAmount(remaining.toFixed(2));
       setPaymentDate(dateString(new Date()));
       setPaymentMethod(paymentAccounts[0]?.id ?? "");
+      setPaymentRate(record.data.exchangeRate || "1");
       setPaymentError("");
       return;
     }
@@ -849,13 +853,15 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
     }
   }
 
+  const paymentForeign = Boolean(paymentRecord?.data.currency && defaultCurrency && paymentRecord.data.currency !== defaultCurrency);
+
   async function submitPayment(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!paymentRecord) return;
     setPendingAction(true);
     setPaymentError("");
     try {
-      await recordInvoicePayment(paymentRecord.id, paymentAmount, paymentDate, paymentMethod);
+      await recordInvoicePayment(paymentRecord.id, paymentAmount, paymentDate, paymentMethod, "", paymentForeign ? paymentRate : "");
       setPaymentRecord(null);
       setActionMessage("Payment recorded and invoice balance updated.");
       toast.success("Payment recorded and invoice balance updated.");
@@ -1205,6 +1211,13 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
           <form id="invoice-payment-form" onSubmit={submitPayment} className="space-y-4">
             <div className="space-y-2"><Label htmlFor="payment-amount">Amount received</Label><Input id="payment-amount" type="number" min="0.01" step="0.01" value={paymentAmount} onChange={(event) => setPaymentAmount(event.target.value)} required /></div>
             <div className="space-y-2"><Label htmlFor="payment-date">Payment date</Label><Input id="payment-date" type="date" value={paymentDate} onChange={(event) => setPaymentDate(event.target.value)} required /></div>
+            {paymentForeign ? (
+              <div className="space-y-2">
+                <Label htmlFor="payment-rate">Exchange rate (1 {paymentRecord?.data.currency} = ? {defaultCurrency})</Label>
+                <Input id="payment-rate" type="number" min="0.000001" step="any" value={paymentRate} onChange={(event) => setPaymentRate(event.target.value)} required />
+                <p className="text-xs text-muted-foreground">Invoiced at {paymentRecord?.data.exchangeRate || "1"}. A different rate books the difference as an exchange gain or loss.</p>
+              </div>
+            ) : null}
             <div className="space-y-2">
               <Label htmlFor="payment-method">Deposit to account</Label>
               <Select value={paymentMethod || undefined} onValueChange={(value) => setPaymentMethod(value ?? "")}>

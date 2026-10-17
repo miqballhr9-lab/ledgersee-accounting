@@ -30,6 +30,7 @@ export const recordKinds = [
   "deposits",
   "tax-filings",
   "time-activities",
+  "delayed-charges",
   "mileage",
   "reconciliations",
   "automation-settings",

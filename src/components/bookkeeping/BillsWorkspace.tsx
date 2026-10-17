@@ -180,7 +180,7 @@ export default function BillsWorkspace({ records: initialRecords, vendors, accou
     await processBills(selectedBills, action);
   }
 
-  async function processBills(targets: BookkeepingRecord[], action: "pay" | "undo-payment" | "delete", payment?: { date: string; accountId: string; amount?: string }) {
+  async function processBills(targets: BookkeepingRecord[], action: "pay" | "undo-payment" | "delete", payment?: { date: string; accountId: string; amount?: string; exchangeRate?: string }) {
     setBulkPending(true);
     setActionMessage("");
     const done: string[] = [];
@@ -190,7 +190,7 @@ export default function BillsWorkspace({ records: initialRecords, vendors, accou
       try {
         if (action === "delete") await deleteBookkeepingRecord("bills", record.id);
         else if (action === "undo-payment") await undoBillPayments(record.id);
-        else if (payment) await recordBillPayment(record.id, payment.date, payment.accountId, payment.amount);
+        else if (payment) await recordBillPayment(record.id, payment.date, payment.accountId, payment.amount, "", payment.exchangeRate ?? "");
         done.push(record.id);
       } catch (error) {
         const message = error instanceof Error ? readableError(error) : "it couldn’t be updated.";
@@ -436,7 +436,8 @@ export default function BillsWorkspace({ records: initialRecords, vendors, accou
         paymentAccounts={paymentAccounts}
         pending={bulkPending}
         amountDue={paymentTargets?.length === 1 ? amountDue(paymentTargets[0]) : undefined}
-        onSubmit={(date, accountId, amount) => void processBills(paymentTargets ?? [], "pay", { date, accountId, amount })}
+        foreign={paymentTargets?.length === 1 && paymentTargets[0].data.currency && paymentTargets[0].data.currency !== currency ? { currency: paymentTargets[0].data.currency, baseCurrency: currency, rate: paymentTargets[0].data.exchangeRate || "1" } : undefined}
+        onSubmit={(date, accountId, amount, exchangeRate) => void processBills(paymentTargets ?? [], "pay", { date, accountId, amount, exchangeRate })}
       />
       {editorModule ? (
         <RecordDetailPanel

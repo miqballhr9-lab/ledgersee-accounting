@@ -106,6 +106,50 @@ export async function sendCustomerStatement(customerId: string): Promise<{ invoi
   return { invoices: open.length, balance: Math.round(total * 100) / 100 };
 }
 
+/** Open delayed charges and credits for one customer become one draft invoice: charges as lines, credits as its discount. */
+export async function createInvoiceFromCharges(ids: string[]): Promise<{ id: string; number: string }> {
+  const me = await requireUser();
+  assertCanWrite(me, "invoices");
+  assertCanWrite(me, "delayed-charges");
+  const wanted = new Set((Array.isArray(ids) ? ids : []).map(String).slice(0, 200));
+  const entries = (await rows(me.id, "delayed-charges")).filter((row) => wanted.has(row.id));
+  if (!entries.length) throw new ActionError("Select the charges to invoice.");
+  if (entries.some((row) => row.data.status === "Closed")) throw new ActionError("Only open charges can be invoiced. Untick closed ones.");
+  const customers = [...new Set(entries.map((row) => (row.data.customer ?? "").trim()))];
+  if (customers.length !== 1 || !customers[0]) throw new ActionError("Choose charges for one customer at a time.");
+  const charges = entries.filter((row) => row.data.chargeType !== "Credit");
+  const credit = entries.filter((row) => row.data.chargeType === "Credit").reduce((sum, row) => sum + (Number(row.data.amount) || 0), 0);
+  if (!charges.length) throw new ActionError("Add at least one charge; credits go on an invoice with charges.");
+  const chargeTotal = charges.reduce((sum, row) => sum + (Number(row.data.amount) || 0), 0);
+  if (credit > chargeTotal + 0.005) throw new ActionError("The credits are more than the charges. Pick more charges, or give the customer a credit note.");
+  const today = new Date().toISOString().slice(0, 10);
+  const invoices = await rows(me.id, "invoices");
+  const highest = invoices.reduce((max, row) => Math.max(max, Number(/^INV-(\d{1,6})$/.exec(row.data.invoiceNumber ?? "")?.[1] ?? 0)), 0);
+  const number = `INV-${String(highest + 1).padStart(4, "0")}`;
+  const lines = charges
+    .sort((a, b) => (a.data.date ?? "").localeCompare(b.data.date ?? ""))
+    .map((row) => ({ itemId: "", name: row.data.service || "Charge", description: [row.data.date, row.data.description].filter(Boolean).join(" · ").slice(0, 300), quantity: row.data.quantity || "1", rate: Number(row.data.rate).toFixed(2) }));
+  const due = new Date(`${today}T12:00:00Z`);
+  due.setUTCDate(due.getUTCDate() + 30);
+  const saved = await saveBookkeepingRecord("invoices", {
+    customer: customers[0],
+    invoiceNumber: number,
+    issueDate: today,
+    paymentTerms: "30 days",
+    dueDate: due.toISOString().slice(0, 10),
+    lineItems: JSON.stringify(lines),
+    ...(credit > 0 ? { discount: credit.toFixed(2) } : {}),
+    status: "Draft",
+    paymentMethod: "Credit",
+    memo: "Delayed charges",
+  });
+  for (const entry of entries) {
+    await db.update(bookkeepingRecord).set({ data: { ...entry.data, status: "Closed", invoiceId: saved.id, invoiceNumber: saved.data.invoiceNumber || number }, updatedAt: new Date() }).where(eq(bookkeepingRecord.id, entry.id));
+  }
+  revalidatePath("/app", "layout");
+  return { id: saved.id, number: saved.data.invoiceNumber || number };
+}
+
 /** QuickBooks' "Add billable time to an invoice": one draft invoice with a line per time entry, for one customer. */
 export async function createInvoiceFromTime(ids: string[]): Promise<{ id: string; number: string }> {
   const me = await requireUser();

@@ -107,6 +107,8 @@ export const reportCategories: ReportCategory[] = [
       { key: "purchases-by-product-detail", label: "Purchases by Product/Service Detail", description: "Each purchase, grouped by item.", ready: true, engine: "list" },
       { key: "open-purchase-order-list", label: "Open Purchase Order List", description: "Purchase orders not yet received.", ready: true, engine: "list" },
       { key: "transaction-list-by-supplier", label: "Transaction List by Supplier", description: "All transactions, grouped by supplier.", ready: true, engine: "list" },
+      { key: "contractor-1099-summary", label: "1099 Contractor Summary", description: "What you paid each 1099 contractor by cash or bank, with the 600 filing threshold.", ready: true, engine: "list" },
+      { key: "contractor-1099-detail", label: "1099 Transaction Detail", description: "Each cash or bank payment to a 1099 contractor.", ready: true, engine: "list" },
       { key: "supplier-contact-list", label: "Supplier Contact List", description: "Supplier names, emails and phone numbers.", ready: true, engine: "list" },
     ],
   },

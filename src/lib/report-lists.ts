@@ -591,6 +591,35 @@ export function buildListReport(key: string, records: BookkeepingRecord[], ledge
       return asOfResult(columns, lines, asOf, kind === "customers" ? "No customers yet." : "No suppliers yet.");
     }
 
+    case "contractor-1099-summary":
+    case "contractor-1099-detail": {
+      // Card payments are reported by the card company, so only cash and bank payments count.
+      const contractors = records.filter((record) => record.kind === "vendors" && record.data.track1099 === "true" && record.data.name?.trim());
+      const byName = new Map(contractors.map((record) => [record.data.name.trim().toLowerCase(), record]));
+      const cashAccounts = new Set([...ledger.accounts.values()].filter((account) => account.category === "Asset" && (account.accountType === "Bank" || /cash/i.test(account.accountType)) && !/undeposited/i.test(account.name)).map((account) => account.name));
+      const payments = ledger.postings.filter((posting) => posting.amount < 0 && cashAccounts.has(posting.account) && inPeriod(posting.date, options) && byName.has((posting.supplier || "").trim().toLowerCase()));
+      if (key === "contractor-1099-detail") {
+        const columns = [text("date", "Date"), text("type", "Transaction type"), text("no", "No."), text("account", "Paid from"), text("memo", "Memo"), amount("amount", "Amount")];
+        const lines = grouped(columns, groupBy(payments.sort((a, b) => a.date.localeCompare(b.date)), (posting) => byName.get(posting.supplier.trim().toLowerCase())?.data.name || posting.supplier).map(([label, items]) => ({
+          label,
+          rows: items.map((posting): Row => ({ values: [posting.date, posting.type, posting.number, posting.account, posting.memo, -posting.amount], source: { kind: posting.sourceKind, id: posting.sourceId } })),
+        })));
+        return periodResult(columns, lines, options, contractors.length ? "No payments to 1099 contractors in this period." : "No suppliers are set to track payments for 1099 yet. Tick it on a supplier.");
+      }
+      const totals = new Map<string, number>();
+      for (const posting of payments) {
+        const name = posting.supplier.trim().toLowerCase();
+        totals.set(name, (totals.get(name) ?? 0) - posting.amount);
+      }
+      const columns = [text("taxId", "Tax ID"), text("address", "Address"), text("threshold", "Over 600"), amount("total", "Total paid")];
+      const lines: ReportLine[] = contractors.sort((a, b) => a.data.name.localeCompare(b.data.name)).map((record) => {
+        const total = totals.get(record.data.name.trim().toLowerCase()) ?? 0;
+        return { id: record.id, label: record.data.name, kind: "account" as const, depth: 0, values: [record.data.taxId ?? "", addressOf(record), total >= 600 ? "Yes" : "No", total], source: src(record) };
+      });
+      if (lines.length) lines.push({ id: "total", label: "TOTAL", kind: "grand", depth: 0, values: ["", "", "", [...totals.values()].reduce((a, b) => a + b, 0)] });
+      return periodResult(columns, lines, options, "No suppliers are set to track payments for 1099 yet. Tick it on a supplier.");
+    }
+
     case "expenses-by-supplier-summary": {
       const expenseAccounts = [...ledger.accounts.values()].filter((account) => account.category === "Expense").map((account) => account.name);
       const expenseSet = new Set(expenseAccounts);

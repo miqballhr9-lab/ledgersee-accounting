@@ -26,7 +26,9 @@ interface PaymentDialogProps {
    */
   amountDue?: number;
   amountLabel?: string;
-  onSubmit: (date: string, accountId: string, amount?: string) => void;
+  /** A foreign-currency document: asks for the day's exchange rate, filled with the document's. */
+  foreign?: { currency: string; baseCurrency: string; rate: string };
+  onSubmit: (date: string, accountId: string, amount?: string, exchangeRate?: string) => void;
 }
 
 function today() {
@@ -34,18 +36,20 @@ function today() {
 }
 
 /** Asks for a date and the Cash, Bank or Credit card account a payment or refund went through. */
-export default function PaymentDialog({ open, onOpenChange, title, description, accountLabel = "Payment method / account", submitLabel, paymentAccounts, pending, amountDue, amountLabel = "Amount paid", onSubmit }: PaymentDialogProps) {
+export default function PaymentDialog({ open, onOpenChange, title, description, accountLabel = "Payment method / account", submitLabel, paymentAccounts, pending, amountDue, amountLabel = "Amount paid", foreign, onSubmit }: PaymentDialogProps) {
   const [date, setDate] = useState(today);
   const [accountId, setAccountId] = useState("");
   const [amount, setAmount] = useState("");
   const [amountFor, setAmountFor] = useState<string>("");
   const [error, setError] = useState("");
+  const [rate, setRate] = useState("");
   const selectedAccount = paymentAccounts.some((account) => account.id === accountId) ? accountId : paymentAccounts[0]?.id ?? "";
   // Start from the full balance each time the dialog opens for a document.
   const key = open && amountDue !== undefined ? `${title}-${description}-${amountDue}` : "";
   if (key !== amountFor) {
     setAmountFor(key);
     setAmount(amountDue !== undefined ? amountDue.toFixed(2) : "");
+    setRate(foreign?.rate || "1");
     setError("");
   }
 
@@ -56,7 +60,8 @@ export default function PaymentDialog({ open, onOpenChange, title, description, 
       const value = Number(amount);
       if (!Number.isFinite(value) || value <= 0) { setError("Enter an amount greater than zero."); return; }
       if (value > amountDue + 0.005) { setError(`That is more than the ${amountDue.toFixed(2)} still to pay.`); return; }
-      onSubmit(date, selectedAccount, value.toFixed(2));
+      if (foreign && !(Number(rate) > 0)) { setError("Enter an exchange rate greater than zero."); return; }
+      onSubmit(date, selectedAccount, value.toFixed(2), foreign ? rate : undefined);
       return;
     }
     onSubmit(date, selectedAccount);
@@ -81,6 +86,13 @@ export default function PaymentDialog({ open, onOpenChange, title, description, 
             <Label htmlFor="payment-dialog-date">Payment date</Label>
             <Input id="payment-dialog-date" type="date" value={date} onChange={(event) => setDate(event.target.value)} required />
           </div>
+          {foreign && amountDue !== undefined ? (
+            <div className="space-y-2">
+              <Label htmlFor="payment-dialog-rate">Exchange rate (1 {foreign.currency} = ? {foreign.baseCurrency})</Label>
+              <Input id="payment-dialog-rate" type="number" min="0.000001" step="any" value={rate} onChange={(event) => { setRate(event.target.value); setError(""); }} required />
+              <p className="text-xs text-muted-foreground">Recorded at {foreign.rate}. A different rate books the difference as an exchange gain or loss.</p>
+            </div>
+          ) : null}
           <div className="space-y-2">
             <Label htmlFor="payment-dialog-account">{accountLabel}</Label>
             <Select value={selectedAccount || undefined} onValueChange={(value) => setAccountId(value ?? "")}>

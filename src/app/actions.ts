@@ -377,6 +377,14 @@ async function saveRecord(
     // Billed time keeps its status; otherwise billable time waits to be invoiced.
     data = { ...data, status: data.status === "Billed" ? "Billed" : billable ? "Unbilled" : "Not billable" };
   }
+  if (kind === "delayed-charges") {
+    const quantity = data.quantity?.trim() ? Number(data.quantity) : 1;
+    const rate = Number(data.rate);
+    if (!Number.isFinite(quantity) || quantity <= 0) throw new ActionError("Enter a quantity greater than zero.");
+    if (!Number.isFinite(rate) || rate <= 0) throw new ActionError("Enter a rate greater than zero.");
+    // Invoiced charges stay closed; anything else waits for the next invoice.
+    data = { ...data, chargeType: data.chargeType === "Credit" ? "Credit" : "Charge", quantity: String(quantity), amount: (quantity * rate).toFixed(2), status: current?.data.status === "Closed" || data.status === "Closed" ? "Closed" : "Open" };
+  }
   if (kind === "recurring-transactions") data = recurringTemplateData(me, data);
   // A check is an expense paid from a bank account, with a check number.
   if (kind === "expenses" && data.docType && !["Check", "Credit card credit"].includes(data.docType)) data = { ...data, docType: "" };
@@ -1202,6 +1210,15 @@ async function deleteRecord(kind: string, id: string): Promise<void> {
   }
   if (kind === "credit-notes" || kind === "supplier-credits") await releaseAppliedCredit(me.id, kind, id);
   if (kind === "purchase-orders") await removeOrderReceipts(me.id, id);
+  // A deleted invoice puts its delayed charges and billed time back to be invoiced again.
+  if (kind === "invoices") {
+    const linked = await db.select().from(bookkeepingRecord)
+      .where(and(eq(bookkeepingRecord.userId, me.id), inArray(bookkeepingRecord.kind, ["delayed-charges", "time-activities"]), sql`${bookkeepingRecord.data}->>'invoiceId' = ${id}`));
+    for (const row of linked) {
+      const { invoiceId: _invoiceId, invoiceNumber: _invoiceNumber, ...rest } = row.data;
+      await db.update(bookkeepingRecord).set({ data: { ...rest, status: row.kind === "delayed-charges" ? "Open" : "Unbilled" }, updatedAt: new Date() }).where(eq(bookkeepingRecord.id, row.id));
+    }
+  }
   const [deleted] = await db
     .delete(bookkeepingRecord)
     .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, kind)))
@@ -1250,6 +1267,7 @@ export async function recordInvoicePayment(
   paymentDate: string,
   accountId: string,
   reference = "",
+  exchangeRate = "",
 ): Promise<void> {
   const me = await requireUser();
   assertCanWrite(me, "invoices");
@@ -1305,6 +1323,7 @@ export async function recordInvoicePayment(
       paymentAccountId: paymentAccount.id,
       paymentAccountName: paymentAccount.data.name || paymentAccount.data.code || "Account",
       ...(typeof reference === "string" && reference.trim() ? { referenceNumber: reference.trim().slice(0, 120) } : {}),
+      ...paymentRate(data, exchangeRate),
     },
   });
   await auditPayment(me, "invoices", id);
@@ -1399,12 +1418,20 @@ async function stockOnHand(userId: string) {
   return new Map([...summaries].map(([id, summary]) => [id, summary.onHand]));
 }
 
+/** A foreign-currency payment keeps the day's exchange rate, so the books can show the gain or loss against the document's rate. */
+function paymentRate(document: Record<string, string>, exchangeRate: string): Record<string, string> {
+  if (!document.currency || !exchangeRate.trim()) return {};
+  const rate = Number(exchangeRate);
+  if (!Number.isFinite(rate) || rate <= 0) throw new ActionError("Enter an exchange rate greater than zero.");
+  return Number(document.exchangeRate || 1) === rate ? {} : { exchangeRate: String(rate) };
+}
+
 function isPaymentDate(value: string) {
   return /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(`${value}T00:00:00Z`));
 }
 
 /** Pays all or part of a bill's remaining balance from a Cash, Bank or Credit card account and records where it came from. */
-export async function recordBillPayment(id: string, paymentDate: string, accountId: string, amountInput?: string, reference = ""): Promise<void> {
+export async function recordBillPayment(id: string, paymentDate: string, accountId: string, amountInput?: string, reference = "", exchangeRate = ""): Promise<void> {
   const me = await requireUser();
   assertCanWrite(me, "bills");
   if (!isPaymentDate(paymentDate)) throw new ActionError("Choose a payment date.");
@@ -1434,7 +1461,7 @@ export async function recordBillPayment(id: string, paymentDate: string, account
     await transaction.insert(bookkeepingRecord).values({
       userId: me.id,
       kind: "payments",
-      data: { billId: id, billNumber: bill.data.billNumber ?? "Bill", vendor: bill.data.vendor ?? "", amount: amount.toFixed(2), paymentDate, method, paymentAccountId: account.id, paymentAccountName: name, direction: "out", ...(typeof reference === "string" && reference.trim() ? { referenceNumber: reference.trim().slice(0, 120) } : {}) },
+      data: { billId: id, billNumber: bill.data.billNumber ?? "Bill", vendor: bill.data.vendor ?? "", amount: amount.toFixed(2), paymentDate, method, paymentAccountId: account.id, paymentAccountName: name, direction: "out", ...(typeof reference === "string" && reference.trim() ? { referenceNumber: reference.trim().slice(0, 120) } : {}), ...paymentRate(bill.data, exchangeRate) },
     });
   });
   await auditPayment(me, "bills", id);

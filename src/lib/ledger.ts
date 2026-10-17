@@ -105,6 +105,8 @@ interface DocPayment {
   amount: number;
   account: string;
   id: string;
+  /** The exchange rate on the day the money moved, when it differs from the document's. */
+  rate?: number;
 }
 
 export function buildLedger(allRecords: BookkeepingRecord[], method: AccountingMethod = "accrual"): Ledger {
@@ -154,6 +156,8 @@ export function buildLedger(allRecords: BookkeepingRecord[], method: AccountingM
   const employeeLoans = lazy(() => find((account) => account.category === "Asset" && /employee (loans|advances)|staff (loans|advances)|salary advance/i.test(account.name)) ?? ensure("Employee loans and advances", "Asset", "Current assets"));
   const reimbursements = lazy(() => find((account) => account.category === "Liability" && /reimburse/i.test(account.name)) ?? ensure("Employee reimbursements payable", "Liability", "Current liabilities"));
   const settlementExpense = lazy(() => find((account) => account.category === "Expense" && /gratuity|final settlement|severance/i.test(account.name)) ?? ensure("Gratuity and final settlement", "Expense", "Expenses"));
+  // Foreign currency paid at a different rate than invoiced or billed: the difference is a realized gain or loss.
+  const exchangeGainLoss = lazy(() => find((account) => /exchange gain|exchange loss|foreign exchange|fx gain/i.test(account.name)) ?? ensure("Exchange gain or loss", "Expense", "Other expense"));
   const employeeRecoveries = lazy(() => find((account) => account.category === "Income" && /fine|recover/i.test(account.name)) ?? ensure("Employee fines and recoveries", "Income", "Other income"));
 
   const recordById = new Map(records.map((record) => [record.id, record]));
@@ -271,7 +275,8 @@ export function buildLedger(allRecords: BookkeepingRecord[], method: AccountingM
     const target = record.data.invoiceId || record.data.billId || record.data.expenseId || record.data.payrollId;
     if (!target) continue;
     const list = paymentsFor.get(target) ?? [];
-    list.push({ date: record.data.paymentDate || record.createdAt.slice(0, 10), amount: num(record.data.amount), account: paymentAccountName(record.data, record.data.invoiceId ? "in" : "out"), id: record.id });
+    const rate = num(record.data.exchangeRate);
+    list.push({ date: record.data.paymentDate || record.createdAt.slice(0, 10), amount: num(record.data.amount), account: paymentAccountName(record.data, record.data.invoiceId ? "in" : "out"), id: record.id, ...(rate > 0 ? { rate } : {}) });
     paymentsFor.set(target, list);
   }
   /** Payments on a document; a paid amount with no payment records (older data) counts as one payment. */
@@ -286,6 +291,10 @@ export function buildLedger(allRecords: BookkeepingRecord[], method: AccountingM
   for (const record of records) {
     const data = record.data;
     const rate = rateOf(data, baseCurrency);
+    /** The rate a payment was made at: its own when recorded in a foreign currency, else the document's. */
+    const paidRate = (payment: DocPayment) => data.currency && data.currency !== baseCurrency && payment.rate ? payment.rate : rate;
+    /** A debit (loss) or credit (gain) to the exchange account, only when there is a difference. */
+    const fxLine = (amount: number): Array<[string, number]> => (Math.abs(amount) > 0.004 ? [[exchangeGainLoss(), amount]] : []);
 
     if (record.kind === "invoices") {
       if (["Draft", "Cancelled", "Void"].includes(data.status ?? "")) continue;
@@ -300,12 +309,14 @@ export function buildLedger(allRecords: BookkeepingRecord[], method: AccountingM
       if (method === "accrual") {
         post({ ...base, txnId: `inv-${record.id}`, date }, [[ar, total], ...incomeLines.map(([account, amount]) => [account, -amount] as [string, number]), [salesTax, -tax]]);
         for (const payment of docPayments(record, date)) {
-          post({ ...base, type: "Payment", txnId: `pay-${payment.id}-${record.id}`, date: payment.date }, [[payment.account, payment.amount * rate], [ar, -payment.amount * rate]]);
+          const received = payment.amount * paidRate(payment);
+          post({ ...base, type: "Payment", txnId: `pay-${payment.id}-${record.id}`, date: payment.date }, [[payment.account, received], [ar, -payment.amount * rate], ...fxLine(payment.amount * rate - received)]);
         }
       } else if (total > 0) {
         for (const payment of docPayments(record, date)) {
           const share = (payment.amount * rate) / total;
-          post({ ...base, type: "Payment", txnId: `pay-${payment.id}-${record.id}`, date: payment.date }, [[payment.account, payment.amount * rate], ...incomeLines.map(([account, amount]) => [account, -amount * share] as [string, number]), [salesTax, -tax * share]]);
+          const received = payment.amount * paidRate(payment);
+          post({ ...base, type: "Payment", txnId: `pay-${payment.id}-${record.id}`, date: payment.date }, [[payment.account, received], ...incomeLines.map(([account, amount]) => [account, -amount * share] as [string, number]), [salesTax, -tax * share], ...fxLine(payment.amount * rate - received)]);
         }
       }
       continue;
@@ -411,12 +422,14 @@ export function buildLedger(allRecords: BookkeepingRecord[], method: AccountingM
       if (method === "accrual") {
         post({ ...base, txnId: `bill-${record.id}`, date }, [...debitLines, [inputTax, tax], [ap, -total]]);
         for (const payment of docPayments(record, date)) {
-          post({ ...base, type: "Bill payment", txnId: `bp-${payment.id}-${record.id}`, date: payment.date }, [[ap, payment.amount * rate], [payment.account, -payment.amount * rate]]);
+          const spent = payment.amount * paidRate(payment);
+          post({ ...base, type: "Bill payment", txnId: `bp-${payment.id}-${record.id}`, date: payment.date }, [[ap, payment.amount * rate], [payment.account, -spent], ...fxLine(spent - payment.amount * rate)]);
         }
       } else if (total > 0) {
         for (const payment of docPayments(record, date)) {
           const share = (payment.amount * rate) / total;
-          post({ ...base, type: "Bill payment", txnId: `bp-${payment.id}-${record.id}`, date: payment.date }, [...debitLines.map(([account, amount]) => [account, amount * share] as [string, number]), [inputTax, tax * share], [payment.account, -payment.amount * rate]]);
+          const spent = payment.amount * paidRate(payment);
+          post({ ...base, type: "Bill payment", txnId: `bp-${payment.id}-${record.id}`, date: payment.date }, [...debitLines.map(([account, amount]) => [account, amount * share] as [string, number]), [inputTax, tax * share], [payment.account, -spent], ...fxLine(spent - payment.amount * rate)]);
         }
       }
       continue;
