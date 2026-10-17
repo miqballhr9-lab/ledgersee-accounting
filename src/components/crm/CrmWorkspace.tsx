@@ -12,7 +12,7 @@ import { useNewRecordParam } from "@/hooks/use-new-record-param";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -436,6 +436,7 @@ export default function CrmWorkspace({ page, initialStore, currency, me, owners,
             <DropdownMenu>
               <DropdownMenuTrigger render={<Button type="button" variant="outline" className="gap-1.5">Views<ChevronDown size={14} /></Button>} />
               <DropdownMenuContent align="start" className="min-w-56">
+                <DropdownMenuGroup>
                 <DropdownMenuLabel>Saved views</DropdownMenuLabel>
                 {savedViews.length ? savedViews.map((saved) => (
                   <DropdownMenuItem key={saved.name} onClick={() => { setSearch(saved.search); setFilter(saved.filter); setStatusFilter(saved.status); setPipeline(saved.pipeline); setSort(saved.sort); }}>
@@ -443,6 +444,7 @@ export default function CrmWorkspace({ page, initialStore, currency, me, owners,
                     <span role="button" tabIndex={0} aria-label={`Delete view ${saved.name}`} className="rounded px-1 text-muted-foreground hover:bg-muted" onClick={(event) => { event.stopPropagation(); storeViews(savedViews.filter((item) => item.name !== saved.name)); }}>×</span>
                   </DropdownMenuItem>
                 )) : <p className="px-2 py-1.5 text-xs text-muted-foreground">No saved views yet.</p>}
+                </DropdownMenuGroup>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={() => {
                   const name = window.prompt("Name this view")?.trim();
@@ -500,6 +502,7 @@ export default function CrmWorkspace({ page, initialStore, currency, me, owners,
               <DropdownMenu>
                 <DropdownMenuTrigger render={<Button type="button" variant="outline" className="gap-2"><Columns3 size={15} />Customise</Button>} />
                 <DropdownMenuContent align="end" className="max-h-80 min-w-56 overflow-y-auto">
+                  <DropdownMenuGroup>
                   <DropdownMenuLabel>Columns</DropdownMenuLabel>
                   {[...(mod.titleKey === "fullName" ? ["fullName"] : []), ...mod.fields.filter((field) => field.type !== "textarea").map((field) => field.key)].map((key) => (
                     <DropdownMenuCheckboxItem key={key} checked={columns.includes(key)} onCheckedChange={(checked) => {
@@ -509,6 +512,7 @@ export default function CrmWorkspace({ page, initialStore, currency, me, owners,
                       try { window.localStorage.setItem(columnsKey, JSON.stringify(next)); } catch { /* Column choices just won't be remembered. */ }
                     }}>{fieldFor(mod, key)?.label ?? key}</DropdownMenuCheckboxItem>
                   ))}
+                  </DropdownMenuGroup>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem onClick={() => { setColumns([...mod.columns]); try { window.localStorage.removeItem(columnsKey); } catch { /* Nothing saved to clear. */ } }}>Reset to default</DropdownMenuItem>
                 </DropdownMenuContent>
