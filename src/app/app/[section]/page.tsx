@@ -15,6 +15,7 @@ import PayrollWorkspace from "@/components/bookkeeping/PayrollWorkspace";
 import EmployeesWorkspace from "@/components/hr/EmployeesWorkspace";
 import { odooHrData } from "@/lib/hr-status";
 import { moduleBySlug, withCustomFields } from "@/lib/bookkeeping-config";
+import { weekendDays } from "@/lib/weekend";
 import { packFor } from "@/lib/tax-packs";
 import type { BookkeepingRecord, RecordKind } from "@/lib/bookkeeping-types";
 import { buildInventory, inventoryKinds } from "@/lib/inventory";
@@ -60,11 +61,11 @@ export default async function SectionPage({ params, searchParams }: SectionPageP
     const groups = await listBookkeepingRecordGroups(["payroll", "employees", "accounts", "settings", "hr-leaves", "hr-loans", "hr-attendance"]);
     const settingsData = groups.settings?.[0]?.data;
     const pack = packFor(settingsData?.taxCountry);
-    return <PayrollWorkspace records={groups.payroll ?? []} accounts={groups.accounts ?? []} employees={groups.employees ?? []} hr={{ leaves: groups["hr-leaves"] ?? [], loans: groups["hr-loans"] ?? [], attendance: groups["hr-attendance"] ?? [] }} asOfDate={new Date().toISOString().slice(0, 10)} dateRange={{ startDate, endDate }} currency={settingsData?.currency || pack?.currency || "PKR"} taxRule={pack?.payroll.incomeTax ?? "pakistan-slabs"} />;
+    return <PayrollWorkspace records={groups.payroll ?? []} accounts={groups.accounts ?? []} employees={groups.employees ?? []} hr={{ leaves: groups["hr-leaves"] ?? [], loans: groups["hr-loans"] ?? [], attendance: groups["hr-attendance"] ?? [], weekend: weekendDays(settingsData?.weekendDays) }} asOfDate={new Date().toISOString().slice(0, 10)} dateRange={{ startDate, endDate }} currency={settingsData?.currency || pack?.currency || "PKR"} taxRule={pack?.payroll.incomeTax ?? "pakistan-slabs"} />;
   }
 
   if (section === "employees") {
-    const relatedKinds = ["hr-leaves", "hr-attendance", "payroll", "hr-claims", "hr-appraisals", "hr-documents", "hr-loans"] as const;
+    const relatedKinds = ["hr-leaves", "hr-attendance", "payroll", "hr-claims", "hr-appraisals", "hr-documents", "hr-loans", "hr-contracts"] as const;
     const groups = await listBookkeepingRecordGroups(["employees", "hr-departments", "accounts", ...relatedKinds]);
     const related = Object.fromEntries(relatedKinds.map((kind) => [kind, (groups[kind] ?? []).map((record) => ({ ...record, data: odooHrData(kind, record.data) }))]));
     return <EmployeesWorkspace employees={groups.employees ?? []} departments={groups["hr-departments"] ?? []} accounts={groups.accounts ?? []} related={related} asOfDate={new Date().toISOString().slice(0, 10)} />;

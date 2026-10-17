@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { CalendarDays, Clock, FileBadge, HandCoins, LayoutGrid, List, Mail, Phone, Plus, ReceiptText, Search, Star, Wallet } from "lucide-react";
 import { toast } from "sonner";
 
-import { saveBookkeepingRecord } from "@/app/actions";
+import { getAttachmentUploadTarget, saveBookkeepingRecord } from "@/app/actions";
 import { useNewRecordParam, useOpenRecordParam } from "@/hooks/use-new-record-param";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
@@ -28,7 +28,7 @@ interface EmployeesWorkspaceProps {
   asOfDate: string;
 }
 
-const tabs = ["Work information", "Private information", "HR settings"] as const;
+const tabs = ["Work information", "Resume", "Private information", "HR settings"] as const;
 const ALL = "__all__";
 
 function initials(name: string) {
@@ -59,6 +59,27 @@ export default function EmployeesWorkspace({ employees, departments, accounts, r
   const [values, setValues] = useState<Record<string, string>>({});
   const [tab, setTab] = useState<(typeof tabs)[number]>("Work information");
   const [saving, setSaving] = useState(false);
+  const [uploading, setUploading] = useState(false);
+
+  /** The employee's photo, uploaded like any attachment and shown on the form and the kanban card. */
+  async function uploadPhoto(file: File | undefined) {
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      toast.error("Choose a picture (PNG, JPG or WebP).");
+      return;
+    }
+    setUploading(true);
+    try {
+      const target = await getAttachmentUploadTarget(file.name, file.type, file.size);
+      const response = await fetch(target.uploadUrl, { method: "PUT", headers: { "Content-Type": file.type }, body: file });
+      if (!response.ok) throw new Error("The upload didn’t finish. Please try again.");
+      setValues((current) => ({ ...current, photo: target.publicUrl }));
+    } catch (error) {
+      toast.error(error instanceof Error ? readableError(error) : "The photo couldn’t be uploaded.");
+    } finally {
+      setUploading(false);
+    }
+  }
 
   const departmentNames = useMemo(() => [...new Set([
     ...departments.map((row) => row.data.departmentName?.trim() ?? ""),
@@ -117,10 +138,10 @@ export default function EmployeesWorkspace({ employees, departments, accounts, r
         </Select>
       );
     }
-    if (entry.key === "manager") {
+    if (entry.key === "manager" || entry.key === "coach") {
       return (
-        <Select value={value || null} onValueChange={(next) => set("manager", next ?? "")}>
-          <SelectTrigger id={id} className="w-full"><SelectValue placeholder="Choose a manager" /></SelectTrigger>
+        <Select value={value || null} onValueChange={(next) => set(entry.key, next ?? "")}>
+          <SelectTrigger id={id} className="w-full"><SelectValue placeholder={entry.key === "coach" ? "Choose a coach" : "Choose a manager"} /></SelectTrigger>
           <SelectContent>{managers.map((name) => <SelectItem key={name} value={name}>{name}</SelectItem>)}</SelectContent>
         </Select>
       );
@@ -163,6 +184,7 @@ export default function EmployeesWorkspace({ employees, departments, accounts, r
   const smartButtons = editing ? [
     { label: "Time off", value: `${mine("hr-leaves").filter((row) => row.data.status === "Approved" && (row.data.fromDate ?? "").startsWith(year)).reduce((sum, row) => sum + Number(row.data.days || 0), 0)} days`, href: "/app/hr/time-off", icon: CalendarDays },
     { label: "Attendance", value: `${mine("hr-attendance").filter((row) => (row.data.date ?? "").startsWith(month)).reduce((sum, row) => sum + Number(row.data.hoursWorked || 0), 0).toFixed(1)} h`, href: "/app/hr/attendances", icon: Clock },
+    { label: "Contracts", value: mine("hr-contracts").find((row) => row.data.status === "Running")?.data.endDate ? `Ends ${mine("hr-contracts").find((row) => row.data.status === "Running")?.data.endDate}` : String(mine("hr-contracts").length), href: "/app/hr/contracts", icon: FileBadge },
     { label: "Payslips", value: String(mine("payroll").length), href: "/app/payroll", icon: Wallet },
     { label: "Expenses", value: String(mine("hr-claims").length), href: "/app/hr/expenses", icon: ReceiptText },
     { label: "Appraisals", value: String(mine("hr-appraisals").length), href: "/app/hr/appraisals", icon: Star },
@@ -170,9 +192,10 @@ export default function EmployeesWorkspace({ employees, departments, accounts, r
     { label: "Attachments", value: String(mine("hr-loans").length), href: "/app/hr/salary-attachments", icon: HandCoins },
   ] : [];
   const tabKeys: Record<(typeof tabs)[number], string[]> = {
-    "Work information": ["workLocation", "joiningDate"],
+    "Work information": ["workLocation", "joiningDate", "workSchedule", "coach", "tags"],
+    Resume: ["skills", "resume"],
     "Private information": ["cnic", "dateOfBirth", "emergencyContact", "emergencyPhone", "bankName", "bankAccountTitle", "bankAccountNumber", "address"],
-    "HR settings": ["employeeId", "employeeType", "status", "baseSalary", "paymentAccountId", "notes"],
+    "HR settings": ["employeeId", "employeeType", "status", "baseSalary", "socialDeduction", "paymentAccountId", "notes"],
   };
 
   return (
@@ -214,7 +237,10 @@ export default function EmployeesWorkspace({ employees, departments, accounts, r
           <section className="grid content-start gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
             {visible.map((employee) => (
               <button key={employee.id} type="button" onClick={() => open(employee)} className="flex gap-3 rounded-lg border border-border bg-card p-3 text-left shadow-sm transition-shadow hover:shadow-md">
-                <span className={`flex size-16 shrink-0 items-center justify-center rounded-md text-lg font-semibold ${avatarTone(employee.data.name ?? "")}`}>{initials(employee.data.name ?? "")}</span>
+                {employee.data.photo
+                  // eslint-disable-next-line @next/next/no-img-element
+                  ? <img src={employee.data.photo} alt="" className="size-16 shrink-0 rounded-md object-cover" />
+                  : <span className={`flex size-16 shrink-0 items-center justify-center rounded-md text-lg font-semibold ${avatarTone(employee.data.name ?? "")}`}>{initials(employee.data.name ?? "")}</span>}
                 <span className="min-w-0 space-y-0.5">
                   <span className="block truncate font-semibold">{employee.data.name}</span>
                   <span className="block truncate text-sm text-muted-foreground">{employee.data.designation || "—"}</span>
@@ -279,7 +305,14 @@ export default function EmployeesWorkspace({ employees, departments, accounts, r
                     <input id="employee-name" aria-label="Employee's name" value={values.name ?? ""} onChange={(event) => set("name", event.target.value)} placeholder="Employee's name" className="w-full border-0 border-b border-border bg-transparent pb-1 text-3xl! font-semibold outline-none focus:border-primary" />
                     <input id="employee-designation" aria-label="Job position" value={values.designation ?? ""} onChange={(event) => set("designation", event.target.value)} placeholder="Job position" className="mt-2 w-full border-0 border-b border-transparent bg-transparent pb-1 text-lg! text-muted-foreground outline-none focus:border-border" />
                   </div>
-                  <span className={`flex size-24 shrink-0 items-center justify-center rounded-md text-2xl font-semibold ${avatarTone(values.name ?? "")}`}>{initials(values.name ?? "")}</span>
+                  <label className="group relative size-24 shrink-0 cursor-pointer" title="Upload a photo">
+                    {values.photo
+                      // eslint-disable-next-line @next/next/no-img-element
+                      ? <img src={values.photo} alt="" className="size-24 rounded-md object-cover" />
+                      : <span className={`flex size-24 items-center justify-center rounded-md text-2xl font-semibold ${avatarTone(values.name ?? "")}`}>{initials(values.name ?? "")}</span>}
+                    <span className="absolute inset-x-0 bottom-0 rounded-b-md bg-black/50 py-0.5 text-center text-[11px] text-white opacity-0 group-hover:opacity-100">{uploading ? "Uploading…" : "Change photo"}</span>
+                    <input type="file" accept="image/png,image/jpeg,image/webp" className="sr-only" aria-label="Employee photo" onChange={(event) => { void uploadPhoto(event.target.files?.[0]); event.target.value = ""; }} />
+                  </label>
                 </div>
                 <div className="mt-6 grid gap-x-12 md:grid-cols-2">{["email", "mobile", "workPhone", "department", "manager"].map(row)}</div>
                 <div className="mt-8">

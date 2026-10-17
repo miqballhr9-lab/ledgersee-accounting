@@ -3,6 +3,7 @@ import { notFound, redirect } from "next/navigation";
 
 import CrmWorkspace from "@/components/crm/CrmWorkspace";
 import AttendanceKiosk from "@/components/hr/AttendanceKiosk";
+import OrgChart from "@/components/hr/OrgChart";
 import TimeOffDashboard, { type TimeOffBalance } from "@/components/hr/TimeOffDashboard";
 import { requireUser } from "@/lib/auth";
 import { hrModules, hrPages } from "@/lib/hr-config";
@@ -18,7 +19,7 @@ interface HrPageProps {
 
 export async function generateMetadata({ params }: HrPageProps): Promise<Metadata> {
   const { page } = await params;
-  const special: Record<string, string> = { "my-time-off": "My Time Off", "check-in": "Check in / out" };
+  const special: Record<string, string> = { "my-time-off": "My Time Off", "check-in": "Check in / out", "org-chart": "Org chart" };
   return { title: `${special[page] ?? hrModules.find((module) => module.key === page)?.plural ?? "HRM"} · HRM` };
 }
 
@@ -33,6 +34,10 @@ export default async function HrSectionPage({ params, searchParams }: HrPageProp
   if (renamed[page]) redirect(`/app/hr/${renamed[page]}`);
   if (page === "my-time-off") return <MyTimeOffPage />;
   if (page === "check-in") return <CheckInPage />;
+  if (page === "org-chart") {
+    const { store } = await loadHrData();
+    return <OrgChart people={activeEmployees(store).map((employee) => ({ id: employee.id, name: employee.data.name || "Employee", job: employee.data.designation ?? "", department: employee.data.department ?? "", manager: employee.data.manager ?? "", photo: employee.data.photo ?? "" }))} />;
+  }
   if (!hrPages.includes(page)) notFound();
   const { open, job } = await searchParams;
   const { store, currency, me, owners } = await loadHrData();

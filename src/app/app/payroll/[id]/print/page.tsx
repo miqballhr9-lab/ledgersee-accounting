@@ -56,6 +56,7 @@ export default async function PayrollSlipPage({ params }: PayrollSlipPageProps) 
     ["Advance deduction", amount(employee.advanceDeduction)],
     ["Loan deduction", amount(employee.loanDeduction)],
     ["Fine", amount(employee.fineDeduction)],
+    ["EOBI / PF", amount(employee.socialDeduction)],
     ["Adjustment", amount(employee.adjustment)],
     ["Payment account", employee.paymentAccountName ? `${employee.paymentMethod || "Account"} · ${employee.paymentAccountName}` : "Not set"],
     ["Final payable salary", amount(employee.payableSalary)],

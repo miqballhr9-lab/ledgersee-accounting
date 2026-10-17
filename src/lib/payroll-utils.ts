@@ -24,6 +24,8 @@ export interface PayrollValues {
   advanceDeduction: string;
   loanDeduction: string;
   fineDeduction: string;
+  /** EOBI, provident fund or other social security withheld from pay. */
+  socialDeduction: string;
   adjustment: string;
   description: string;
 }
@@ -41,7 +43,7 @@ export interface PayrollTotals {
 export const payrollCsvFields = [
   "reference", "employeeId", "employeeName", "employeeEmail", "cnic", "designation", "joiningDate", "month", "paymentAccountName", "paymentMethod", "baseSalary", "increment",
   "workingDays", "workedDays", "incentive", "overtimeAllowance", "gymAllowance", "medicalAllowance", "otherAllowance",
-  "taxDeduction", "advanceDeduction", "loanDeduction", "fineDeduction", "adjustment", "description",
+  "taxDeduction", "advanceDeduction", "loanDeduction", "fineDeduction", "socialDeduction", "adjustment", "description",
 ] as const satisfies readonly (keyof PayrollValues)[];
 
 const pakistanSalarySlabs = [
@@ -101,7 +103,7 @@ function amount(value: string): number {
 
 export function calculatePayroll(values: Pick<PayrollValues,
   "baseSalary" | "increment" | "workingDays" | "workedDays" | "incentive" | "overtimeAllowance" | "gymAllowance" | "medicalAllowance" | "otherAllowance" | "taxDeduction" | "advanceDeduction" | "loanDeduction" | "fineDeduction" | "adjustment"
->, taxRule: SalaryTaxRule = "pakistan-slabs"): PayrollTotals {
+> & Partial<Pick<PayrollValues, "socialDeduction">>, taxRule: SalaryTaxRule = "pakistan-slabs"): PayrollTotals {
   const revisedSalary = amount(values.baseSalary) + amount(values.increment);
   const workingDays = amount(values.workingDays);
   const workedDays = amount(values.workedDays);
@@ -110,7 +112,7 @@ export function calculatePayroll(values: Pick<PayrollValues,
   const estimatedTax = annualSalaryTax(taxRule, grossSalary * 12) / 12;
   const enteredTax = values.taxDeduction.trim() ? Math.max(0, amount(values.taxDeduction)) : estimatedTax;
   const taxDeduction = Math.round(enteredTax * 100) / 100;
-  const totalDeductions = taxDeduction + amount(values.advanceDeduction) + amount(values.loanDeduction) + amount(values.fineDeduction);
+  const totalDeductions = taxDeduction + amount(values.advanceDeduction) + amount(values.loanDeduction) + amount(values.fineDeduction) + amount(values.socialDeduction ?? "0");
   const payableSalary = grossSalary - totalDeductions + amount(values.adjustment);
 
   return {
@@ -150,6 +152,7 @@ export function emptyPayrollValues(month: string): PayrollValues {
     advanceDeduction: "0",
     loanDeduction: "0",
     fineDeduction: "0",
+    socialDeduction: "0",
     adjustment: "0",
     description: "",
   };

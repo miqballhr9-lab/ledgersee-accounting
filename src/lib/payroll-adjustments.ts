@@ -24,14 +24,14 @@ function dates(from: string, to: string) {
 
 const running = (status: string | undefined) => status === "Running" || status === "Approved";
 
-export function payrollAdjustments(month: string, employee: { id?: string; name?: string }, leaves: Row[], loans: Row[], attendance: Row[] = []) {
+export function payrollAdjustments(month: string, employee: { id?: string; name?: string }, leaves: Row[], loans: Row[], attendance: Row[] = [], weekend: number[] = [0]) {
   const matches = (data: Record<string, string>) => Boolean((employee.id && data.employeeId === employee.id) || (data.employee && data.employee === employee.name));
   const unpaidDates = new Set<string>();
   let unpaidDays = 0;
   for (const row of leaves) {
     if (row.data.status !== "Approved" || row.data.paid !== "false" || !matches(row.data) || !row.data.fromDate) continue;
     for (const date of dates(row.data.fromDate, row.data.toDate || row.data.fromDate)) {
-      if (!date.startsWith(month) || new Date(`${date}T12:00:00Z`).getUTCDay() === 0) continue;
+      if (!date.startsWith(month) || weekend.includes(new Date(`${date}T12:00:00Z`).getUTCDay())) continue;
       unpaidDates.add(date);
       unpaidDays += row.data.halfDay === "true" ? 0.5 : 1;
     }

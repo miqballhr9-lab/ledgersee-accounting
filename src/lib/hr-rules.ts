@@ -5,6 +5,7 @@ import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { bookkeepingRecord } from "@/db/schema";
 import { ActionError } from "@/lib/action-error";
+import { isWeekend, weekendDays } from "@/lib/weekend";
 import { isCompletedAttachment, isHiredStage, isRunningAttachment, isToApprove, odooHrData } from "@/lib/hr-status";
 
 /**
@@ -49,8 +50,8 @@ function dates(from: string, to: string) {
 }
 
 /** Working days in a leave: Sundays and holidays don't count. */
-export function leaveDays(from: string, to: string, halfDay: boolean, holidays: string[]) {
-  const counted = dates(from, to).filter((date) => new Date(`${date}T12:00:00Z`).getUTCDay() !== 0 && !holidays.includes(date)).length;
+export function leaveDays(from: string, to: string, halfDay: boolean, holidays: string[], weekend: number[] = [0]) {
+  const counted = dates(from, to).filter((date) => !isWeekend(date, weekend) && !holidays.includes(date)).length;
   return halfDay && from === to ? Math.min(counted, 0.5) : counted;
 }
 
@@ -103,7 +104,7 @@ export function applyHrRules(kind: string, data: Record<string, string>, existin
   if (kind === "hr-leaves") {
     if (data.toDate < data.fromDate) throw new ActionError("The leave can’t end before it starts.");
     const holidays = holidayDates(context.byKind("hr-holidays"));
-    const days = leaveDays(data.fromDate, data.toDate, data.halfDay === "true", holidays);
+    const days = leaveDays(data.fromDate, data.toDate, data.halfDay === "true", holidays, weekendDays(context.byKind("settings")[0]?.data.weekendDays));
     if (!days) throw new ActionError("Those dates are all Sundays or public holidays, so no time off is needed.");
     data.days = String(days);
     const type = context.byKind("hr-leave-types").find((row) => row.id === data.leaveTypeId);
@@ -152,6 +153,19 @@ export function applyHrRules(kind: string, data: Record<string, string>, existin
       data.startMonth = next.toISOString().slice(0, 7);
     }
     if (data.startMonth && !/^\d{4}-\d{2}$/.test(data.startMonth)) throw new ActionError("Enter the first deduction month as YYYY-MM.");
+  }
+
+  if (kind === "hr-candidates" && data.stage !== "Refused") data.refuseReason = "";
+
+  if (kind === "hr-contracts") {
+    if (!data.status) data.status = "New";
+    if (data.endDate && data.startDate && data.endDate < data.startDate) throw new ActionError("The contract can’t end before it starts.");
+    if (!data.reference) data.reference = `CON-${(data.employee || "Employee").replace(/\s+/g, " ").trim().slice(0, 30)}-${(data.startDate || "").slice(0, 7)}`;
+    // An employee has one running contract at a time, as in Odoo.
+    if (data.status === "Running") {
+      const other = context.byKind("hr-contracts").find((row) => row.id !== id && row.data.status === "Running" && sameEmployee(row.data, data));
+      if (other) throw new ActionError(`${data.employee} already has a running contract (${other.data.reference}). Expire it first.`);
+    }
   }
 
   if (kind === "hr-claims") {
@@ -253,6 +267,14 @@ export async function afterHrSave(userId: string, kind: string, before: Record<s
       const note = `Wage changed from ${employee.data.baseSalary || "0"} to ${fixed(money(data.newWage))}${data.wageEffectiveMonth ? ` from ${data.wageEffectiveMonth}` : ""} (appraisal ${data.period || data.reviewDate || ""}).`.replace(" ().", ".");
       await db.update(bookkeepingRecord).set({ data: { ...employee.data, baseSalary: fixed(money(data.newWage)), notes: [employee.data.notes, note].filter(Boolean).join("\n") }, updatedAt: new Date() }).where(eq(bookkeepingRecord.id, employee.id));
       return `${employee.data.name}'s wage is now ${fixed(money(data.newWage))}.`;
+    }
+  }
+  if (kind === "hr-contracts" && data.status === "Running" && data.employeeId && (before?.status !== "Running" || before?.wage !== data.wage)) {
+    // The running contract's wage and schedule become the employee's, for payroll.
+    const [employee] = await db.select().from(bookkeepingRecord).where(and(eq(bookkeepingRecord.id, data.employeeId), eq(bookkeepingRecord.userId, userId))).limit(1);
+    if (employee) {
+      await db.update(bookkeepingRecord).set({ data: { ...employee.data, baseSalary: fixed(money(data.wage)), workSchedule: data.workSchedule || employee.data.workSchedule || "", contractEnd: data.endDate || "" }, updatedAt: new Date() }).where(eq(bookkeepingRecord.id, employee.id));
+      return `${employee.data.name}'s wage is now ${fixed(money(data.wage))} from contract ${data.reference}.`;
     }
   }
   const settled = (status: string | undefined) => status === "Approved" || status === "Paid";

@@ -77,6 +77,7 @@ export const payrollBudgetHeads = [
   { head: "Tax", fields: ["taxDeduction"] },
   { head: "Advance / Loan", fields: ["advanceDeduction", "loanDeduction"] },
   { head: "Fine", fields: ["fineDeduction"] },
+  { head: "EOBI / PF", fields: ["socialDeduction"] },
   { head: "Other Adjustment", fields: ["adjustment"] },
   { head: "Payable Salary", fields: ["payableSalary"] },
 ] as const;

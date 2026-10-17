@@ -355,10 +355,12 @@ export default function CompanySettings({ settings, workspaceName }: CompanySett
                 <>
                   <Row label="First month of fiscal year" value={saved.fiscalYear} />
                   <Row label="Accounting method" value={saved.accountingMethod} />
+                  <Row label="Weekly days off" value={saved.weekendDays || "Sunday"} />
                 </>,
                 <>
                   {select("fiscalYear", "First month of fiscal year", months, "Reports use it for “This year” and retained earnings.")}
                   {select("accountingMethod", "Accounting method", ["Accrual", "Cash"], "The basis reports open with; you can still switch on each report.")}
+                  {select("weekendDays", "Weekly days off", ["Sunday", "Saturday, Sunday", "Friday", "Friday, Saturday"], "Time off and unpaid leave skip these days.")}
                 </>,
               )}
               {section("custom-fields", "Custom fields",

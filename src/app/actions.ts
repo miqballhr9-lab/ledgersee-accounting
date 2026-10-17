@@ -199,6 +199,7 @@ function normalizePayrollData(data: Record<string, string>, taxRule: SalaryTaxRu
     advanceDeduction: data.advanceDeduction || "0",
     loanDeduction: data.loanDeduction || "0",
     fineDeduction: data.fineDeduction || "0",
+    socialDeduction: data.socialDeduction || "0",
     adjustment: data.adjustment || "0",
     description: data.description || "",
   };
@@ -221,7 +222,7 @@ function normalizePayrollData(data: Record<string, string>, taxRule: SalaryTaxRu
 
   const numericFields: (keyof PayrollValues)[] = [
     "baseSalary", "increment", "workingDays", "workedDays", "incentive", "overtimeAllowance", "gymAllowance",
-    "medicalAllowance", "otherAllowance", "taxDeduction", "advanceDeduction", "loanDeduction", "fineDeduction", "adjustment",
+    "medicalAllowance", "otherAllowance", "taxDeduction", "advanceDeduction", "loanDeduction", "fineDeduction", "socialDeduction", "adjustment",
   ];
   for (const key of numericFields) {
     const value = values[key].trim();

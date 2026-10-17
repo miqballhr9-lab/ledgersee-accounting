@@ -1,6 +1,6 @@
 import Link from "next/link";
 import {
-  Banknote, BriefcaseBusiness, CalendarDays, CalendarCheck, Clock, FileBadge, HandCoins, ListChecks, LogOut, Network, PartyPopper, ReceiptText, Star, Users,
+  Banknote, BriefcaseBusiness, CalendarDays, CalendarCheck, Clock, FileBadge, FileSignature, HandCoins, ListChecks, LogOut, Network, PartyPopper, ReceiptText, Star, Users, Workflow,
 } from "lucide-react";
 
 import type { CrmStore } from "@/components/crm/crm-shared";
@@ -16,10 +16,16 @@ interface App {
 
 /** HRM home in Odoo's style: the apps menu, one tile per HR app. */
 export default function HrHome({ store }: { store: CrmStore; currency?: string; asOfDate?: string }) {
+  // Contracts and documents ending within 30 days need attention, as Odoo's activity warnings show.
+  const soonDate = new Date();
+  soonDate.setUTCDate(soonDate.getUTCDate() + 30);
+  const soon = soonDate.toISOString().slice(0, 10);
   const count = (kind: string, test: (data: Record<string, string>) => boolean) => (store[kind] ?? []).filter((record) => test(record.data)).length;
   const apps: App[] = [
     { label: "Employees", href: "/app/employees", icon: Users, colour: "#714B67" },
     { label: "Departments", href: "/app/hr/departments", icon: Network, colour: "#5B899E" },
+    { label: "Contracts", href: "/app/hr/contracts", icon: FileSignature, colour: "#6A5ACD", waiting: count("hr-contracts", (data) => data.status === "Running" && Boolean(data.endDate) && data.endDate <= soon) },
+    { label: "Org Chart", href: "/app/hr/org-chart", icon: Workflow, colour: "#2F6F8F" },
     { label: "Attendances", href: "/app/hr/check-in", icon: Clock, colour: "#017E84" },
     { label: "Time Off", href: "/app/hr/my-time-off", icon: CalendarDays, colour: "#21B799", waiting: count("hr-leaves", (data) => data.status === "To Approve") + count("hr-allocations", (data) => data.status === "To Approve") },
     { label: "Recruitment", href: "/app/hr/job-positions", icon: BriefcaseBusiness, colour: "#E46F78", waiting: count("hr-candidates", (data) => (data.stage || "New") === "New") },
@@ -29,7 +35,7 @@ export default function HrHome({ store }: { store: CrmStore; currency?: string; 
     { label: "Salary Attachments", href: "/app/hr/salary-attachments", icon: HandCoins, colour: "#B5651D", waiting: count("hr-loans", (data) => data.status === "To Approve") },
     { label: "Onboarding", href: "/app/hr/onboarding", icon: ListChecks, colour: "#3C6FB4", waiting: count("hr-onboarding", (data) => data.status === "To Do") },
     { label: "Departures", href: "/app/hr/departures", icon: LogOut, colour: "#9A4A4A" },
-    { label: "Documents", href: "/app/hr/documents", icon: FileBadge, colour: "#4F6D7A" },
+    { label: "Documents", href: "/app/hr/documents", icon: FileBadge, colour: "#4F6D7A", waiting: count("hr-documents", (data) => Boolean(data.expiryDate) && data.expiryDate <= soon) },
     { label: "Allocations", href: "/app/hr/allocations", icon: CalendarCheck, colour: "#2E8B7A" },
     { label: "Public Holidays", href: "/app/hr/public-holidays", icon: PartyPopper, colour: "#C2577A" },
   ];

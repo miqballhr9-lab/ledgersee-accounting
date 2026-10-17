@@ -19,6 +19,8 @@ export interface PayrollHrRecords {
   leaves: BookkeepingRecord[];
   loans: BookkeepingRecord[];
   attendance: BookkeepingRecord[];
+  /** Weekly days off (UTC day numbers), which unpaid time off doesn't count. */
+  weekend?: number[];
 }
 
 interface PayrollSheetProps {
@@ -41,7 +43,7 @@ interface PayrollSheetProps {
 /** The HR figures for a new line: worked days after unpaid time off and absences, and this month's loan installment. */
 function hrLine(month: string, employee: BookkeepingRecord, workingDays: string, hr?: PayrollHrRecords): Partial<SheetRow> {
   if (!hr) return {};
-  const adjustments = payrollAdjustments(month, { id: employee.id, name: employee.data.name }, hr.leaves, hr.loans, hr.attendance);
+  const adjustments = payrollAdjustments(month, { id: employee.id, name: employee.data.name }, hr.leaves, hr.loans, hr.attendance, hr.weekend);
   return { workedDays: adjustedWorkedDays(workingDays, adjustments), ...(adjustments.loanDeduction ? { loanDeduction: String(adjustments.loanDeduction) } : {}) };
 }
 
@@ -70,6 +72,7 @@ interface SheetRow {
   taxDeduction: string;
   loanDeduction: string;
   fineDeduction: string;
+  socialDeduction: string;
   adjustment: string;
   description: string;
 }
@@ -86,6 +89,7 @@ const deductionColumns = [
   // Advances and loans share one column; it saves to the loan deduction field.
   { key: "loanDeduction", label: "Advance / loan" },
   { key: "fineDeduction", label: "Fine" },
+  { key: "socialDeduction", label: "EOBI / PF" },
   { key: "adjustment", label: "Other adjustment" },
 ] as const;
 const amountKeys = ["baseSalary", "increment", ...allowanceColumns.map((column) => column.key), "taxDeduction", ...deductionColumns.map((column) => column.key)] as const;
@@ -130,7 +134,7 @@ function blankRow(id: number, workingDays: string): SheetRow {
   return {
     id, personKey: "", workedDays: workingDays, baseSalary: "", increment: "",
     incentive: "", overtimeAllowance: "", gymAllowance: "", medicalAllowance: "", otherAllowance: "",
-    taxDeduction: "", loanDeduction: "", fineDeduction: "", adjustment: "", description: "",
+    taxDeduction: "", loanDeduction: "", fineDeduction: "", socialDeduction: "", adjustment: "", description: "",
   };
 }
 

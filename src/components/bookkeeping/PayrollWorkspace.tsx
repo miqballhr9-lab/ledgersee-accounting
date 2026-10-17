@@ -247,6 +247,23 @@ export default function PayrollWorkspace({ records, accounts, employees = [], hr
     saveCsv("mikledger-payroll.csv", payrollExportRows());
   }
 
+  /** A salary transfer file for the bank: each unpaid salary in view with the employee's account. */
+  function exportBankFile() {
+    const rows = filteredRecords.flatMap((record) => {
+      const due = Math.max(0, Number(record.data.payableSalary || 0) - Number(record.data.paidAmount || 0));
+      if (due < 0.005) return [];
+      const employee = employees.find((item) => item.data.employeeId === record.data.employeeId) ?? employees.find((item) => item.data.name === record.data.employeeName);
+      return [[record.data.employeeName || "", employee?.data.bankAccountTitle || record.data.employeeName || "", employee?.data.bankAccountNumber || "", employee?.data.bankName || "", due.toFixed(2), record.data.reference || `SAL-${record.data.month}`, employee?.data.cnic || record.data.cnic || ""]];
+    });
+    if (!rows.length) {
+      toast.info("No unpaid salaries in view to send to the bank.");
+      return;
+    }
+    const missing = rows.filter((row) => !row[2]).length;
+    saveCsv("salary-bank-transfer.csv", [["Employee", "Account title", "Account number / IBAN", "Bank", "Amount", "Reference", "CNIC"], ...rows]);
+    if (missing) toast.warning(`${missing} ${missing === 1 ? "employee has" : "employees have"} no bank account number. Add it on the employee's Private information tab.`);
+  }
+
   async function exportPayrollExcel() {
     try {
       const XLSX = await import("xlsx");
@@ -446,6 +463,7 @@ export default function PayrollWorkspace({ records, accounts, employees = [], hr
                   <DropdownMenuLabel>Download</DropdownMenuLabel>
                   <DropdownMenuItem onClick={exportPayroll}><FileText size={15} />CSV file</DropdownMenuItem>
                   <DropdownMenuItem onClick={() => void exportPayrollExcel()}><FileSpreadsheet size={15} />Excel (.xlsx)</DropdownMenuItem>
+                  <DropdownMenuItem onClick={exportBankFile}><FileSpreadsheet size={15} />Bank transfer file (.csv)</DropdownMenuItem>
                   <DropdownMenuItem onClick={() => window.print()}><Printer size={15} />Print or save as PDF</DropdownMenuItem>
                 </DropdownMenuGroup>
               </DropdownMenuContent>
