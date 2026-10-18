@@ -399,7 +399,11 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
         return customer?.data.name ? { ...record, data: { ...record.data, customer: customer.data.name } } : record;
       })
     : visibleRecords;
-  const visibleColumns = listPreferences?.columns ?? module.columns;
+  // Documents that can be in another currency also show their amount in the home currency, next to Amount.
+  const listColumns = listPreferences?.columns ?? module.columns;
+  const visibleColumns = module.fields.some((field) => field.key === "currency") && listColumns.includes("amount") && !listColumns.includes("homeAmount")
+    ? listColumns.flatMap((key) => (key === "amount" ? ["amount", "homeAmount"] : [key]))
+    : listColumns;
   const listColumnLabels = customization ? Object.fromEntries(customization.options.map((option) => [option.key, option.label])) : undefined;
   const canExport = module.kind !== "settings";
   // The company's home currency; foreign documents are converted to it in the totals.
@@ -924,7 +928,7 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
   }
 
   function exportCsv() {
-    const rows = [visibleColumns.map((key) => listColumnLabels?.[key] ?? key), ...filteredRecords.map((record) => visibleColumns.map((key) => key === "address" ? formatCustomerAddress(record.data).replaceAll("\n", ", ") : record.data[key] ?? ""))];
+    const rows = [visibleColumns.map((key) => key === "homeAmount" ? `Amount (${currency})` : listColumnLabels?.[key] ?? key), ...filteredRecords.map((record) => visibleColumns.map((key) => key === "address" ? formatCustomerAddress(record.data).replaceAll("\n", ", ") : key === "homeAmount" ? ((Number(record.data.amount) || 0) * homeRate(record.data, currency)).toFixed(2) : record.data[key] ?? ""))];
     const csv = rows.map((row) => row.map(toCsvValue).join(",")).join("\r\n");
     const objectUrl = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
     const anchor = document.createElement("a");
@@ -1097,6 +1101,7 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
           records={tableRecords}
           columns={visibleColumns}
           columnLabels={listColumnLabels}
+          homeCurrency={currency}
           onEdit={openEditRecord}
           openOnRowClick={module.kind !== "settings"}
           onOpen={module.kind === "journals" ? undefined : (record) => setDetailId(record.id)}

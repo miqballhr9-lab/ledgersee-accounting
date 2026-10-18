@@ -273,14 +273,16 @@ export default function BillsWorkspace({ records: initialRecords, vendors, accou
   ] : [];
 
   function exportCsv() {
-    const headers = ["Bill number", "Vendor", "Bill date", "Due date", "Category", "Amount", "Paid", "Balance due", "Status"];
+    const headers = ["Bill number", "Vendor", "Bill date", "Due date", "Category", "Currency", "Amount", `Amount (${currency})`, "Paid", "Balance due", "Status"];
     const rows = filteredRecords.map((record) => [
       record.data.billNumber || "",
       record.data.vendor || "",
       record.data.billDate || "",
       record.data.dueDate || "",
       expenseCategoryLabel(record.data),
+      record.data.currency || currency,
       record.data.amount || "0",
+      home(record, Number(record.data.amount || 0)).toFixed(2),
       record.data.paidAmount || "0",
       amountDue(record).toFixed(2),
       billStatus(record, asOfDate),
@@ -375,7 +377,7 @@ export default function BillsWorkspace({ records: initialRecords, vendors, accou
                     onCheckedChange={(checked) => setSelectedIds(checked === true ? new Set(filteredRecords.map((record) => record.id)) : new Set())}
                   />
                 </TableHead>
-                {["Vendor", "Bill no.", "Bill date", "Due date", "Category", "Total", "Balance due", "Payment account", "Status", ""].map((heading) => (
+                {["Vendor", "Bill no.", "Bill date", "Due date", "Category", "Total", `Total (${currency})`, "Balance due", "Payment account", "Status", ""].map((heading) => (
                   <TableHead key={heading || "actions"} className="whitespace-nowrap text-xs font-medium text-muted-foreground">{heading || <span className="sr-only">Actions</span>}</TableHead>
                 ))}
               </TableRow>
@@ -392,11 +394,9 @@ export default function BillsWorkspace({ records: initialRecords, vendors, accou
                     <TableCell className="whitespace-nowrap text-[13px]">{formatDate(record.data.billDate || "")}</TableCell>
                     <TableCell className={`whitespace-nowrap text-[13px] ${status === "Overdue" ? "font-medium text-destructive" : ""}`}>{formatDate(record.data.dueDate || "")}</TableCell>
                     <TableCell className="max-w-[140px] truncate text-[13px] text-muted-foreground" title={expenseCategoryLabel(record.data)}>{expenseCategoryLabel(record.data) || "—"}</TableCell>
-                    <TableCell className="whitespace-nowrap text-right text-[13px] tabular-nums">
-                      {formatMoney(home(record, Number(record.data.amount || 0)), currency)}
-                      {homeRate(record.data, currency) !== 1 ? <span className="block text-[11px] text-muted-foreground">{formatMoney(Number(record.data.amount || 0), record.data.currency || currency)}</span> : null}
-                    </TableCell>
-                    <TableCell className="whitespace-nowrap text-right text-[13px] font-medium tabular-nums">{formatMoney(home(record, amountDue(record)), currency)}</TableCell>
+                    <TableCell className="whitespace-nowrap text-right text-[13px] tabular-nums">{formatMoney(Number(record.data.amount || 0), record.data.currency || currency)}</TableCell>
+                    <TableCell className="whitespace-nowrap text-right text-[13px] tabular-nums">{formatMoney(home(record, Number(record.data.amount || 0)), currency)}</TableCell>
+                    <TableCell className="whitespace-nowrap text-right text-[13px] font-medium tabular-nums">{formatMoney(amountDue(record), record.data.currency || currency)}</TableCell>
                     <TableCell className="max-w-[150px] truncate text-[13px] text-muted-foreground" title={record.data.paymentAccountName || ""}>{record.data.paymentAccountName ? `${record.data.paymentMethod} · ${record.data.paymentAccountName}` : "—"}</TableCell>
                     <TableCell className="whitespace-nowrap"><StatusBadge value={status} /></TableCell>
                     <TableCell className="whitespace-nowrap text-right">
@@ -418,7 +418,7 @@ export default function BillsWorkspace({ records: initialRecords, vendors, accou
               })}
               {!filteredRecords.length ? (
                 <TableRow>
-                  <TableCell colSpan={11} className="h-52 whitespace-normal text-center">
+                  <TableCell colSpan={12} className="h-52 whitespace-normal text-center">
                     <div className="sticky left-0 w-[calc(100vw-4.5rem)] sm:static sm:mx-auto sm:w-auto sm:max-w-sm">
                       <p className="text-sm font-medium">{records.length ? "No bills match these filters" : "No bills yet"}</p>
                       <p className="mt-1 text-sm text-muted-foreground">{records.length ? "Try a different search, status, or category." : "Add your first vendor bill to start tracking due dates and balances."}</p>

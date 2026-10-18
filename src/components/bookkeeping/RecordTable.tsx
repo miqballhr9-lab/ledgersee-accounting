@@ -10,6 +10,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import type { ModuleDefinition } from "@/lib/bookkeeping-config";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
 import { formatCustomerAddress } from "@/lib/customer-utils";
+import { homeRate } from "@/lib/invoice-utils";
 
 export type RecordActionKind = "refund" | "remind" | "progress" | "statement" | "void" | "convert" | "convert-expense" | "payment" | "send" | "send-rfq" | "confirm-order" | "receive-order" | "cancel-order" | "mark-paid" | "match" | "apply-credit" | "generate" | "duplicate" | "share" | "print" | "undo-payment";
 
@@ -19,6 +20,8 @@ interface RecordTableProps {
   columns?: readonly string[];
   /** Header names that replace the usual ones for this list. */
   columnLabels?: Record<string, string>;
+  /** The company's home currency, for the "homeAmount" column (the amount converted at the document's exchange rate). */
+  homeCurrency?: string;
   onEdit: (record: BookkeepingRecord) => void;
   /** When true, clicking anywhere on a row (outside its buttons and checkbox) opens it with onOpen, or onEdit without one. */
   openOnRowClick?: boolean;
@@ -107,7 +110,16 @@ const columnLabels: Record<string, string> = {
   nextInvoiceNumber: "Next number",
 };
 
-function displayValue(record: BookkeepingRecord, key: string) {
+function displayValue(record: BookkeepingRecord, key: string, homeCurrency = "") {
+  if (key === "homeAmount") {
+    const number = (Number(record.data.amount) || 0) * homeRate(record.data, homeCurrency);
+    const currency = homeCurrency || record.data.currency || "USD";
+    try {
+      return <span className="tabular-nums">{new Intl.NumberFormat(undefined, { style: "currency", currency, maximumFractionDigits: 2 }).format(number)}</span>;
+    } catch {
+      return <span className="tabular-nums">{currency} {number.toFixed(2)}</span>;
+    }
+  }
   const value = key === "address"
     ? formatCustomerAddress(record.data).replaceAll("\n", " · ")
     : key === "paymentMethod" && record.data.paymentAccountName
@@ -227,7 +239,7 @@ function RowMenu({ label, actions }: { label: string; actions: RecordMenuAction[
   );
 }
 
-export default function RecordTable({ module, records, columns = module.columns, columnLabels: headerLabels, onEdit, openOnRowClick = false, onOpen, onDelete, onAction, selection }: RecordTableProps) {
+export default function RecordTable({ module, records, columns = module.columns, columnLabels: headerLabels, homeCurrency = "", onEdit, openOnRowClick = false, onOpen, onDelete, onAction, selection }: RecordTableProps) {
   const allSelected = Boolean(selection) && records.length > 0 && records.every((record) => selection?.selectedIds.has(record.id));
   const someSelected = Boolean(selection) && records.some((record) => selection?.selectedIds.has(record.id));
   if (records.length === 0) {
@@ -256,7 +268,7 @@ export default function RecordTable({ module, records, columns = module.columns,
                 />
               </TableHead>
             ) : null}
-            {columns.map((key) => <TableHead key={key} className="whitespace-nowrap px-4 text-xs font-medium text-muted-foreground">{headerLabels?.[key] ?? columnLabels[key] ?? module.fields.find((field) => field.key === key)?.label ?? key}</TableHead>)}
+            {columns.map((key) => <TableHead key={key} className="whitespace-nowrap px-4 text-xs font-medium text-muted-foreground">{key === "homeAmount" ? `Amount (${homeCurrency})` : headerLabels?.[key] ?? columnLabels[key] ?? module.fields.find((field) => field.key === key)?.label ?? key}</TableHead>)}
             <TableHead className="w-12"><span className="sr-only">Actions</span></TableHead>
           </TableRow>
         </TableHeader>
@@ -283,7 +295,7 @@ export default function RecordTable({ module, records, columns = module.columns,
                 ) : null}
                 {columns.map((key, index) => (
                   <TableCell key={key} className={`max-w-[240px] px-4 py-3 text-sm ${key === "address" ? "whitespace-normal" : "whitespace-nowrap"}`}>
-                    {key === module.titleKey || index === 0 ? <span className="font-medium text-primary">{displayValue(record, key)}</span> : displayValue(record, key)}
+                    {key === module.titleKey || index === 0 ? <span className="font-medium text-primary">{displayValue(record, key, homeCurrency)}</span> : displayValue(record, key, homeCurrency)}
                   </TableCell>
                 ))}
                 <TableCell className="w-12 px-2 text-right">

@@ -39,8 +39,12 @@ interface SaleRow {
   number: string;
   customer: string;
   dueDate: string;
+  /** Balance and total in the home currency. */
   balance: number;
   total: number;
+  /** The total as entered, in the document's own currency. */
+  docTotal: number;
+  docCurrency: string;
   status: string;
   href: string;
   printHref: string;
@@ -130,6 +134,8 @@ export default function SalesHub({ invoices, estimates, salesOrders, creditNotes
         dueDate: receipt ? "" : invoice.data.dueDate || "",
         balance: balance * rate,
         total: (Number(invoice.data.amount) || 0) * rate,
+        docTotal: Number(invoice.data.amount) || 0,
+        docCurrency: invoice.data.currency || currency,
         status,
         href: `/app/invoices?open=${invoice.id}`,
         printHref: `/app/invoices/${invoice.id}/print`,
@@ -149,6 +155,8 @@ export default function SalesHub({ invoices, estimates, salesOrders, creditNotes
         dueDate: "",
         balance: 0,
         total: (Number(payment.data.amount) || 0) * homeRate({ currency: invoice.data.currency ?? "", exchangeRate: payment.data.exchangeRate || invoice.data.exchangeRate || "" }, currency),
+        docTotal: Number(payment.data.amount) || 0,
+        docCurrency: invoice.data.currency || currency,
         status: "Closed",
         href: `/app/invoices?open=${invoice.id}`,
         printHref: "",
@@ -161,7 +169,8 @@ export default function SalesHub({ invoices, estimates, salesOrders, creditNotes
     ];
     for (const [records, type, numberKey, dueKey, slug] of documents) {
       for (const record of records) {
-        const amount = (Number(record.data.amount) || 0) * homeRate(record.data, currency);
+        const entered = Number(record.data.amount) || 0;
+        const amount = entered * homeRate(record.data, currency);
         result.push({
           key: `${slug}-${record.id}`,
           type,
@@ -171,6 +180,8 @@ export default function SalesHub({ invoices, estimates, salesOrders, creditNotes
           dueDate: dueKey ? record.data[dueKey] || "" : "",
           balance: 0,
           total: type === "Credit note" ? -amount : amount,
+          docTotal: type === "Credit note" ? -entered : entered,
+          docCurrency: record.data.currency || currency,
           status: record.data.status || (type === "Credit note" ? "Open" : "Draft"),
           href: `/app/${slug}?open=${record.id}`,
           printHref: `/app/documents/${slug}/${record.id}/print`,
@@ -309,8 +320,8 @@ export default function SalesHub({ invoices, estimates, salesOrders, creditNotes
           <Table>
             <TableHeader>
               <TableRow className="bg-muted/40 hover:bg-muted/40">
-                {["Date", "Type", "No.", "Customer", "Due date", "Balance", "Total", "Status", "Action"].map((heading) => (
-                  <TableHead key={heading} className={`whitespace-nowrap text-xs font-medium text-muted-foreground ${["Balance", "Total", "Action"].includes(heading) ? "text-right" : ""}`}>{heading}</TableHead>
+                {["Date", "Type", "No.", "Customer", "Due date", `Balance (${currency})`, "Total", `Total (${currency})`, "Status", "Action"].map((heading) => (
+                  <TableHead key={heading} className={`whitespace-nowrap text-xs font-medium text-muted-foreground ${heading.startsWith("Balance") || heading.startsWith("Total") || heading === "Action" ? "text-right" : ""}`}>{heading}</TableHead>
                 ))}
               </TableRow>
             </TableHeader>
@@ -323,6 +334,7 @@ export default function SalesHub({ invoices, estimates, salesOrders, creditNotes
                   <TableCell className="max-w-[200px] text-[13px]"><span className="block truncate" title={row.customer}>{row.customer || "—"}</span></TableCell>
                   <TableCell className={`whitespace-nowrap text-[13px] ${row.status === "Overdue" ? "text-destructive" : ""}`}>{formatDate(row.dueDate)}</TableCell>
                   <TableCell className="text-right text-[13px] tabular-nums">{currencyAmount(row.balance, currency)}</TableCell>
+                  <TableCell className="text-right text-[13px] tabular-nums">{currencyAmount(row.docTotal, row.docCurrency)}</TableCell>
                   <TableCell className="text-right text-[13px] font-medium tabular-nums">{currencyAmount(row.total, currency)}</TableCell>
                   <TableCell className="text-[13px]"><StatusBadge value={row.status} /></TableCell>
                   <TableCell className="text-right">
@@ -351,7 +363,7 @@ export default function SalesHub({ invoices, estimates, salesOrders, creditNotes
               ))}
               {!pageRows.length ? (
                 <TableRow>
-                  <TableCell colSpan={9} className="h-40 whitespace-normal text-center">
+                  <TableCell colSpan={10} className="h-40 whitespace-normal text-center">
                     <p className="text-sm font-medium">{rows.length ? "No sales match these filters" : "No sales yet"}</p>
                     <p className="mt-1 text-sm text-muted-foreground">{rows.length ? "Change the type, status or dates to see more." : "Create an invoice or a sales receipt to get started."}</p>
                   </TableCell>
