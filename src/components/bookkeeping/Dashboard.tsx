@@ -15,6 +15,7 @@ import {
 import SetupChecklist, { type SetupProgress } from "@/components/bookkeeping/SetupChecklist";
 import { Button } from "@/components/ui/button";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
+import { homeRate } from "@/lib/invoice-utils";
 
 interface DashboardProps {
   records: BookkeepingRecord[];
@@ -26,9 +27,10 @@ function daysBetween(from: string, to: string) {
   return Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000);
 }
 
-function amount(record: BookkeepingRecord, key = "amount") {
+/** A document's amount in the company's home currency. */
+function homeAmount(record: BookkeepingRecord, key = "amount", homeCurrency = "") {
   const value = Number(record.data[key] ?? 0);
-  return Number.isFinite(value) ? value : 0;
+  return Number.isFinite(value) ? value * homeRate(record.data, homeCurrency) : 0;
 }
 
 function dateFor(record: BookkeepingRecord) {
@@ -37,6 +39,7 @@ function dateFor(record: BookkeepingRecord) {
 
 export default function Dashboard({ records, setup, asOfDate }: DashboardProps) {
   const currency = records.find((record) => record.kind === "settings")?.data.currency || "USD";
+  const amount = (record: BookkeepingRecord, key = "amount") => homeAmount(record, key, currency);
   const invoices = records.filter((record) => record.kind === "invoices" && !["Draft", "Cancelled"].includes(record.data.status ?? ""));
   const expenses = records.filter((record) => record.kind === "expenses");
   const bills = records.filter((record) => record.kind === "bills" && record.data.status !== "Cancelled");

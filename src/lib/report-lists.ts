@@ -701,7 +701,7 @@ export function buildListReport(key: string, records: BookkeepingRecord[], ledge
 
     case "tax-detail": {
       const taxes = records.filter((record) => record.kind === "taxes");
-      const lines = taxLines(records, taxes, [...customers.values(), ...vendors.values()], options.from, options.to);
+      const lines = taxLines(records, taxes, [...customers.values(), ...vendors.values()], options.from, options.to, records.find((record) => record.kind === "settings")?.data.currency ?? "");
       const columns = [text("date", "Date"), text("type", "Transaction type"), text("no", "No."), text("name", "Name"), text("tax", "Tax"), pct("rate", "Rate"), amount("taxable", "Taxable amount"), amount("amount", "Tax amount")];
       const byId = new Map(records.map((record) => [record.id, record]));
       const groups = (["Sales", "Purchases"] as const).map((side) => ({

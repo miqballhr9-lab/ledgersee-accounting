@@ -1,4 +1,5 @@
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
+import { homeRate } from "@/lib/invoice-utils";
 import type { CountryCode } from "@/lib/tax-packs";
 
 /**
@@ -57,7 +58,8 @@ function categoryFor(doc: BookkeepingRecord, rate: number, taxes: BookkeepingRec
   return { category: match?.data.type || "Standard", taxName: match?.data.name || `${rate}%` };
 }
 
-export function taxLines(records: BookkeepingRecord[], taxes: BookkeepingRecord[], parties: BookkeepingRecord[], from: string, to: string): TaxLine[] {
+/** Amounts are in the home currency: a foreign document is converted at its exchange rate. */
+export function taxLines(records: BookkeepingRecord[], taxes: BookkeepingRecord[], parties: BookkeepingRecord[], from: string, to: string, homeCurrency = ""): TaxLine[] {
   return records.flatMap((doc) => {
     const type = documentTypes[doc.kind];
     if (!type) return [];
@@ -79,8 +81,8 @@ export function taxLines(records: BookkeepingRecord[], taxes: BookkeepingRecord[
       partyTaxId: party?.data.taxId ?? "",
       rate,
       ...categoryFor(doc, rate, taxes, type.side),
-      taxable: subtotal * type.sign,
-      tax: tax * type.sign,
+      taxable: subtotal * type.sign * homeRate(doc.data, homeCurrency),
+      tax: tax * type.sign * homeRate(doc.data, homeCurrency),
     }];
   }).sort((a, b) => a.date.localeCompare(b.date));
 }

@@ -25,7 +25,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { moduleBySlug, withWarehouses, type ModuleDefinition } from "@/lib/bookkeeping-config";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
 import { expenseCategoryLabel, expenseLinesFromData } from "@/lib/expense-utils";
-import { dueDateForTerms } from "@/lib/invoice-utils";
+import { dueDateForTerms, homeRate } from "@/lib/invoice-utils";
 import { paymentAccountLabel, paymentAccountType } from "@/lib/payment-accounts";
 
 interface ExpensesWorkspaceProps {
@@ -170,10 +170,10 @@ export default function ExpensesWorkspace({ expenses: initialExpenses, bills: in
   const pageRecords = filteredRecords.slice((page - 1) * pageSize, page * pageSize);
   const outstandingBills = records
     .filter((record) => record.kind === "bills" && !["Paid", "Cancelled"].includes(record.data.status || ""))
-    .reduce((total, record) => total + Math.max(0, Number(record.data.amount || 0) - Number(record.data.paidAmount || 0) - Number(record.data.creditApplied || 0)), 0);
+    .reduce((total, record) => total + Math.max(0, Number(record.data.amount || 0) - Number(record.data.paidAmount || 0) - Number(record.data.creditApplied || 0)) * homeRate(record.data, currency), 0);
   const expensesTotal = records
     .filter((record) => record.kind === "expenses")
-    .reduce((total, record) => total + (Number(record.data.amount) || 0), 0);
+    .reduce((total, record) => total + (Number(record.data.amount) || 0) * homeRate(record.data, currency), 0);
 
   useEffect(() => setPage(1), [categoryFilter, customEnd, customStart, datePreset, search, statusFilter, typeFilter]);
 
@@ -516,7 +516,10 @@ export default function ExpensesWorkspace({ expenses: initialExpenses, bills: in
                     <TableCell className="max-w-[180px] text-[13px]"><span className="block truncate" title={payee || ""}>{payee || "—"}</span></TableCell>
                     <TableCell className="max-w-[200px] text-[13px]"><span className="block truncate" title={expenseCategoryLabel(record.data)}>{expenseCategoryLabel(record.data) || "—"}</span></TableCell>
                     <TableCell className="max-w-[200px] text-[13px]"><span className="block truncate" title={payment || ""}>{payment || "—"}</span></TableCell>
-                    <TableCell className="text-right text-[13px] font-medium tabular-nums">{formatMoney(record.data.amount || "", currency)}</TableCell>
+                    <TableCell className="text-right text-[13px] font-medium tabular-nums">
+                      {formatMoney(String((Number(record.data.amount) || 0) * homeRate(record.data, currency)), currency)}
+                      {homeRate(record.data, currency) !== 1 ? <span className="block text-[11px] font-normal text-muted-foreground">{formatMoney(record.data.amount || "", record.data.currency || currency)}</span> : null}
+                    </TableCell>
                     <TableCell className="text-[13px]">
                       <StatusBadge value={record.data.status || (isUnpaid(record) ? "Unpaid" : "Paid")} />
                     </TableCell>
@@ -615,7 +618,7 @@ export default function ExpensesWorkspace({ expenses: initialExpenses, bills: in
         open={Boolean(paymentTargets)}
         onOpenChange={(open) => { if (!open) setPaymentTargets(null); }}
         title="Record payment"
-        description={`${paymentTargets?.length ?? 0} ${paymentTargets?.length === 1 ? "transaction" : "transactions"} · ${formatMoney(String((paymentTargets ?? []).reduce((sum, record) => sum + stillDue(record), 0)), currency)} · paid from Bank, Cash or Credit card`}
+        description={`${paymentTargets?.length ?? 0} ${paymentTargets?.length === 1 ? "transaction" : "transactions"} · ${formatMoney(String((paymentTargets ?? []).reduce((sum, record) => sum + stillDue(record), 0)), paymentTargets?.length === 1 ? paymentTargets[0].data.currency || currency : currency)} · paid from Bank, Cash or Credit card`}
         submitLabel="Record payment"
         paymentAccounts={paymentAccounts}
         pending={bulkPending}

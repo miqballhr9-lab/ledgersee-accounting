@@ -17,6 +17,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { moduleBySlug, type ModuleDefinition } from "@/lib/bookkeeping-config";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
+import { homeRate } from "@/lib/invoice-utils";
 
 interface VendorsWorkspaceProps {
   records: BookkeepingRecord[];
@@ -28,9 +29,10 @@ interface VendorsWorkspaceProps {
 
 const pageSize = 10;
 
-function billBalance(bill: BookkeepingRecord) {
+/** What is still owed on a bill, in the home currency. */
+function billBalance(bill: BookkeepingRecord, currency: string) {
   if (["Paid", "Cancelled"].includes(bill.data.status || "")) return 0;
-  return Math.max(0, Number(bill.data.amount || 0) - Number(bill.data.paidAmount || 0) - Number(bill.data.creditApplied || 0));
+  return Math.max(0, Number(bill.data.amount || 0) - Number(bill.data.paidAmount || 0) - Number(bill.data.creditApplied || 0)) * homeRate(bill.data, currency);
 }
 
 function formatMoney(value: number, currency: string) {
@@ -63,12 +65,12 @@ export default function VendorsWorkspace({ records: initialRecords, bills, accou
   const summaries = useMemo(() => records.map((vendor) => {
     const normalizedName = vendor.data.name?.trim().toLocaleLowerCase() || "";
     const vendorBills = bills.filter((bill) => bill.data.vendor?.trim().toLocaleLowerCase() === normalizedName);
-    const openBills = vendorBills.filter((bill) => billBalance(bill) > 0);
+    const openBills = vendorBills.filter((bill) => billBalance(bill, currency) > 0);
     const overdueBills = openBills.filter((bill) => Boolean(bill.data.dueDate && bill.data.dueDate < asOfDate));
     const openingBalance = Number(vendor.data.openingBalance || 0) || 0;
-    const currentBalance = openingBalance + openBills.reduce((sum, bill) => sum + billBalance(bill), 0);
+    const currentBalance = openingBalance + openBills.reduce((sum, bill) => sum + billBalance(bill, currency), 0);
     return { vendor, vendorBills, openBills, overdueBills, openingBalance, currentBalance };
-  }), [asOfDate, bills, records]);
+  }), [asOfDate, bills, records, currency]);
 
   const filteredVendors = useMemo(() => {
     const normalizedSearch = search.trim().toLocaleLowerCase();
@@ -101,7 +103,7 @@ export default function VendorsWorkspace({ records: initialRecords, bills, accou
   }, [balanceFilter, search, summaries]);
 
   const totalPayables = summaries.reduce((sum, summary) => sum + Math.max(0, summary.currentBalance), 0);
-  const overduePayables = summaries.reduce((sum, summary) => sum + summary.overdueBills.reduce((billSum, bill) => billSum + billBalance(bill), 0), 0);
+  const overduePayables = summaries.reduce((sum, summary) => sum + summary.overdueBills.reduce((billSum, bill) => billSum + billBalance(bill, currency), 0), 0);
   const vendorsWithOpenBills = summaries.filter((summary) => summary.openBills.length > 0).length;
   const pageCount = Math.max(1, Math.ceil(filteredVendors.length / pageSize));
   const visibleVendors = filteredVendors.slice((page - 1) * pageSize, page * pageSize);
@@ -302,7 +304,7 @@ export default function VendorsWorkspace({ records: initialRecords, bills, accou
                   <thead><tr className="text-left text-xs text-muted-foreground"><th className="px-4 py-2 font-medium">Bill no.</th><th className="px-4 py-2 font-medium">Due date</th><th className="px-4 py-2 text-right font-medium">Balance</th><th className="px-4 py-2 font-medium">Status</th></tr></thead>
                   <tbody>
                     {detail.vendorBills.map((bill) => {
-                      const balance = billBalance(bill);
+                      const balance = billBalance(bill, currency);
                       const status = bill.data.status === "Cancelled" ? "Cancelled" : balance <= 0 ? "Paid" : bill.data.dueDate && bill.data.dueDate < asOfDate ? "Overdue" : "Open";
                       return (
                         <tr key={bill.id} className="border-t border-border">

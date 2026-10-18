@@ -1,5 +1,6 @@
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
 import { expenseLinesFromData } from "@/lib/expense-utils";
+import { homeRate } from "@/lib/invoice-utils";
 
 export type BudgetPeriod = "Monthly" | "Quarterly" | "Annual" | "Custom";
 export type BudgetLineType = "Income" | "Expense";
@@ -119,22 +120,24 @@ export function budgetActualRecords(line: BudgetLine, allRecords: BookkeepingRec
     });
 }
 
-export function budgetActual(line: BudgetLine, records: BookkeepingRecord[]) {
+/** The actual for a budget line, in the home currency (foreign documents converted at their exchange rate). */
+export function budgetActual(line: BudgetLine, records: BookkeepingRecord[], homeCurrency = "") {
   return budgetActualRecords(line, records).reduce((sum, record) => {
+    const rate = homeRate(record.data, homeCurrency);
     if (record.kind === "payroll") {
       const fields: readonly string[] = payrollBudgetHead(line.budgetHead)?.fields ?? ["grossSalary"];
       return sum + fields.reduce((fieldTotal, field) => fieldTotal + (Number(record.data[field]) || 0), 0);
     }
     // Income is counted before tax, as the Profit and Loss shows it.
-    if (record.kind === "invoices") return sum + Math.max(0, (Number(record.data.amount) || 0) - (Number(record.data.taxAmount) || 0) - (Number(record.data.creditApplied) || 0));
+    if (record.kind === "invoices") return sum + Math.max(0, (Number(record.data.amount) || 0) - (Number(record.data.taxAmount) || 0) - (Number(record.data.creditApplied) || 0)) * rate;
     if (record.kind === "expenses" || record.kind === "bills") {
       const budgetHead = line.budgetHead.trim().toLocaleLowerCase();
       const allCosts = ["expenses", "all expenses", "operating expenses", "all costs"].includes(budgetHead);
       return sum + expenseLinesFromData(record.data)
         .filter((expenseLine) => allCosts || expenseLine.category.toLocaleLowerCase() === budgetHead)
-        .reduce((expenseTotal, expenseLine) => expenseTotal + expenseLine.amount, 0);
+        .reduce((expenseTotal, expenseLine) => expenseTotal + expenseLine.amount, 0) * rate;
     }
-    return sum + (Number(record.data.amount) || 0);
+    return sum + (Number(record.data.amount) || 0) * rate;
   }, 0);
 }
 

@@ -94,3 +94,10 @@ export function currencyAmount(value: number, currency: string): string {
     return `${currency} ${value.toFixed(2)}`;
   }
 }
+
+/** The rate that turns a document's amounts into the company's home currency: 1 when it is already in it. */
+export function homeRate(data: Record<string, string>, homeCurrency = "") {
+  if (!data.currency || data.currency === homeCurrency) return 1;
+  const rate = Number(data.exchangeRate);
+  return Number.isFinite(rate) && rate > 0 ? rate : 1;
+}

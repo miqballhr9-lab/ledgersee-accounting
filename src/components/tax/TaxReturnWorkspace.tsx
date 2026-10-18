@@ -56,7 +56,7 @@ export default function TaxReturnWorkspace({ documents, taxes, parties, settings
   const [period, setPeriod] = useState<Period>("last-month");
   const [custom, setCustom] = useState<[string, string]>(() => range("this-month", asOfDate));
   const [from, to] = period === "custom" ? custom : range(period, asOfDate);
-  const lines = useMemo(() => taxLines(documents, taxes, parties, from, to), [documents, taxes, parties, from, to]);
+  const lines = useMemo(() => taxLines(documents, taxes, parties, from, to, settings.currency ?? ""), [documents, taxes, parties, from, to, settings.currency]);
   const rows = useMemo(() => returnRows(country, lines), [country, lines]);
   const [side, setSide] = useState<"Sales" | "Purchases">("Sales");
   const registration = pack.registrations.map((field) => (settings[field.key] ? `${field.label}: ${settings[field.key]}` : "")).filter(Boolean).join(" · ");

@@ -15,7 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { salesReceiptModule } from "@/lib/bookkeeping-config";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
-import { currencyAmount } from "@/lib/invoice-utils";
+import { currencyAmount, homeRate } from "@/lib/invoice-utils";
 
 interface SalesHubProps {
   invoices: BookkeepingRecord[];
@@ -119,6 +119,8 @@ export default function SalesHub({ invoices, estimates, salesOrders, creditNotes
       const draft = ["Draft", "Void", "Cancelled"].includes(invoice.data.status ?? "");
       const overdue = !receipt && !draft && balance > 0.005 && Boolean(invoice.data.dueDate) && invoice.data.dueDate < asOfDate;
       const status = receipt ? "Paid" : draft ? invoice.data.status : balance <= 0.005 ? "Paid" : overdue ? "Overdue" : (Number(invoice.data.paidAmount) || 0) > 0 ? "Partially paid" : "Open";
+      // Every amount here is in the home currency, whatever currency the invoice is in.
+      const rate = homeRate(invoice.data, currency);
       result.push({
         key: `invoice-${invoice.id}`,
         type: receipt ? "Sales receipt" : "Invoice",
@@ -126,8 +128,8 @@ export default function SalesHub({ invoices, estimates, salesOrders, creditNotes
         number: invoice.data.invoiceNumber || "",
         customer: invoice.data.customer || "",
         dueDate: receipt ? "" : invoice.data.dueDate || "",
-        balance,
-        total: Number(invoice.data.amount) || 0,
+        balance: balance * rate,
+        total: (Number(invoice.data.amount) || 0) * rate,
         status,
         href: `/app/invoices?open=${invoice.id}`,
         printHref: `/app/invoices/${invoice.id}/print`,
@@ -146,7 +148,7 @@ export default function SalesHub({ invoices, estimates, salesOrders, creditNotes
         customer: payment.data.customer || invoice.data.customer || "",
         dueDate: "",
         balance: 0,
-        total: Number(payment.data.amount) || 0,
+        total: (Number(payment.data.amount) || 0) * homeRate({ currency: invoice.data.currency ?? "", exchangeRate: payment.data.exchangeRate || invoice.data.exchangeRate || "" }, currency),
         status: "Closed",
         href: `/app/invoices?open=${invoice.id}`,
         printHref: "",
@@ -159,7 +161,7 @@ export default function SalesHub({ invoices, estimates, salesOrders, creditNotes
     ];
     for (const [records, type, numberKey, dueKey, slug] of documents) {
       for (const record of records) {
-        const amount = Number(record.data.amount) || 0;
+        const amount = (Number(record.data.amount) || 0) * homeRate(record.data, currency);
         result.push({
           key: `${slug}-${record.id}`,
           type,
@@ -176,13 +178,13 @@ export default function SalesHub({ invoices, estimates, salesOrders, creditNotes
       }
     }
     return result.sort((left, right) => right.date.localeCompare(left.date) || left.key.localeCompare(right.key));
-  }, [invoices, payments, estimates, salesOrders, creditNotes, invoiceById, asOfDate]);
+  }, [invoices, payments, estimates, salesOrders, creditNotes, invoiceById, asOfDate, currency]);
 
   // The money bar, over the last 365 days like QuickBooks.
   const yearAgo = shiftDate(asOfDate, 365);
   const monthAgo = shiftDate(asOfDate, 30);
   const unbilled = estimates.filter((estimate) => !["Converted", "Declined"].includes(estimate.data.status ?? "") && (estimate.data.date || estimate.createdAt.slice(0, 10)) >= yearAgo);
-  const unbilledTotal = unbilled.reduce((sum, estimate) => sum + (Number(estimate.data.amount) || 0), 0);
+  const unbilledTotal = unbilled.reduce((sum, estimate) => sum + (Number(estimate.data.amount) || 0) * homeRate(estimate.data, currency), 0);
   const openRows = rows.filter((row) => row.type === "Invoice" && row.balance > 0.005 && !["Draft", "Void", "Cancelled"].includes(row.status) && row.date >= yearAgo);
   const overdueRows = openRows.filter((row) => row.status === "Overdue");
   const overdueTotal = overdueRows.reduce((sum, row) => sum + row.balance, 0);

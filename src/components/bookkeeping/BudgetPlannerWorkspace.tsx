@@ -15,6 +15,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectSeparator, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { homeRate } from "@/lib/invoice-utils";
 import { budgetActual, budgetActualRecords, budgetExpectedTotal, budgetPresetRange, budgetVariance, csvCell, parseBudgetLines, payrollBudgetHeads, parseCsv, recordsWithinBudgetDates, type BudgetCategory, type BudgetLine, type BudgetPeriod } from "@/lib/budget-utils";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
 
@@ -123,10 +124,10 @@ function sourceRecordLabel(record: BookkeepingRecord) {
   return record.data.description || record.data.payee || record.data.category || "Expense";
 }
 
-function sourceRecordAmount(record: BookkeepingRecord) {
+function sourceRecordAmount(record: BookkeepingRecord, currency: string) {
   if (record.kind === "payroll") return Number(record.data.grossSalary) || 0;
-  if (record.kind === "invoices") return Math.max(0, (Number(record.data.amount) || 0) - (Number(record.data.creditApplied) || 0));
-  return Number(record.data.amount) || 0;
+  if (record.kind === "invoices") return Math.max(0, (Number(record.data.amount) || 0) - (Number(record.data.creditApplied) || 0)) * homeRate(record.data, currency);
+  return (Number(record.data.amount) || 0) * homeRate(record.data, currency);
 }
 
 function saveCsv(filename: string, rows: (string | number)[][]) {
@@ -210,7 +211,7 @@ export default function BudgetPlannerWorkspace({ budgets, financialRecords, acco
     () => recordsWithinBudgetDates(financialRecords, dateRange.startDate, dateRange.endDate),
     [dateRange.endDate, dateRange.startDate, financialRecords],
   );
-  const actuals = useMemo(() => lines.map((line) => budgetActual(resolveBudgetLine(line, accountHeads), periodRecords)), [accountHeads, lines, periodRecords]);
+  const actuals = useMemo(() => lines.map((line) => budgetActual(resolveBudgetLine(line, accountHeads), periodRecords, currency)), [accountHeads, lines, periodRecords, currency]);
   const activeActualRecords = activeActualLine ? budgetActualRecords(resolveBudgetLine(activeActualLine, accountHeads), periodRecords) : [];
   const expectedTotal = budgetExpectedTotal(lines);
   const actualTotal = actuals.reduce((sum, amount) => sum + amount, 0);
@@ -219,7 +220,7 @@ export default function BudgetPlannerWorkspace({ budgets, financialRecords, acco
   const budgetSummaries = useMemo(() => savedBudgets.map((record) => {
     const budgetLines = parseBudgetLines(record.data.lines).map((line) => resolveBudgetLine(line, accountHeads));
     const records = recordsWithinBudgetDates(financialRecords, record.data.startDate || "", record.data.endDate || "");
-    const lineActuals = budgetLines.map((line) => budgetActual(line, records));
+    const lineActuals = budgetLines.map((line) => budgetActual(line, records, currency));
     return {
       record,
       lineCount: budgetLines.length,
@@ -281,7 +282,7 @@ export default function BudgetPlannerWorkspace({ budgets, financialRecords, acco
     const records = recordsWithinBudgetDates(financialRecords, previous.startDate, previous.endDate);
     const factor = 1 + percent / 100;
     const planned = (line: BudgetLine) => {
-      const actual = budgetActual(resolveBudgetLine(line, accountHeads), records);
+      const actual = budgetActual(resolveBudgetLine(line, accountHeads), records, currency);
       return actual > 0 ? String(Math.round(actual * factor * 100) / 100) : "";
     };
     const kept = currentLines.filter((line) => line.budgetHead.trim()).map((line) => ({ ...line, expected: planned(line) || line.expected }));
@@ -396,7 +397,7 @@ export default function BudgetPlannerWorkspace({ budgets, financialRecords, acco
     const records = recordsWithinBudgetDates(financialRecords, budget.data.startDate || "", budget.data.endDate || "");
     const rows: (string | number)[][] = [["name", "period", "startDate", "endDate", "category", "budgetHead", "expected", "actual", "variance", "description"]];
     budgetLines.forEach((line) => {
-      const actual = budgetActual(line, records);
+      const actual = budgetActual(line, records, currency);
       rows.push([budget.data.name || "", budget.data.period || "", budget.data.startDate || "", budget.data.endDate || "", line.category, line.budgetHead, Number(line.expected) || 0, actual, budgetVariance(line, actual), line.description]);
     });
     return rows;
@@ -853,7 +854,7 @@ export default function BudgetPlannerWorkspace({ budgets, financialRecords, acco
                   <p className="mt-1 text-xs text-muted-foreground">{record.kind === "payroll" ? "Payroll" : record.kind === "invoices" ? "Sales invoice" : record.kind === "bills" ? "Bill" : "Expense"} · {sourceRecordDate(record)}</p>
                 </div>
                 <div className="flex shrink-0 items-center justify-between gap-3 sm:justify-end">
-                  <span className="text-sm font-medium tabular-nums">{formatAmount(sourceRecordAmount(record), currency)}</span>
+                  <span className="text-sm font-medium tabular-nums">{formatAmount(sourceRecordAmount(record, currency), currency)}</span>
                   <Button type="button" variant="outline" size="sm" nativeButton={false} render={<Link href={sourceHref(record.kind, activeActualLine)} />}>
                     Open <ExternalLink size={14} />
                   </Button>

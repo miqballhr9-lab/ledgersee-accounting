@@ -37,7 +37,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { navigationGroups, type ModuleDefinition } from "@/lib/bookkeeping-config";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
 import { formatCustomerAddress } from "@/lib/customer-utils";
-import { currencyAmount, dueDateForTerms } from "@/lib/invoice-utils";
+import { currencyAmount, dueDateForTerms, homeRate } from "@/lib/invoice-utils";
 import { paymentAccountLabel, paymentAccountType, receivingAccountType } from "@/lib/payment-accounts";
 import { budgetActualRecords, recordsWithinBudgetDates, type BudgetLine } from "@/lib/budget-utils";
 import JournalEntryEditor from "@/components/bookkeeping/JournalEntryEditor";
@@ -281,7 +281,14 @@ function partyCentre(kind: "customers" | "vendors", party: BookkeepingRecord, re
   const docs = related.filter((record) => record.kind !== "payments" && isTheirs(record.data));
   const docIds = new Set(docs.map((doc) => doc.id));
   const payments = related.filter((record) => record.kind === "payments" && docIds.has(record.data.invoiceId || record.data.billId || record.data.expenseId || ""));
-  const balance = (data: Record<string, string>) => Math.max(0, Number(data.amount || 0) - Number(data.paidAmount || 0) - Number(data.creditApplied || 0));
+  // Balances are in the home currency; a payment converts at its document's rate.
+  const docById = new Map(docs.map((doc) => [doc.id, doc]));
+  const rateFor = (record: BookkeepingRecord) => {
+    if (record.kind !== "payments") return homeRate(record.data, currency);
+    const doc = docById.get(record.data.invoiceId || record.data.billId || record.data.expenseId || "");
+    return doc ? homeRate({ currency: doc.data.currency ?? "", exchangeRate: record.data.exchangeRate || doc.data.exchangeRate || "" }, currency) : 1;
+  };
+  const balance = (data: Record<string, string>) => Math.max(0, Number(data.amount || 0) - Number(data.paidAmount || 0) - Number(data.creditApplied || 0)) * homeRate(data, currency);
   const openDocs = docs.filter((doc) => (doc.kind === "invoices" || doc.kind === "bills") && !["Draft", "Void", "Cancelled", "Paid", "Pending approval"].includes(doc.data.status ?? ""));
   const open = openDocs.reduce((sum, doc) => sum + balance(doc.data), 0);
   const overdue = openDocs.filter((doc) => doc.data.dueDate && doc.data.dueDate < today).reduce((sum, doc) => sum + balance(doc.data), 0);
@@ -306,7 +313,7 @@ function partyCentre(kind: "customers" | "vendors", party: BookkeepingRecord, re
                     <td className="px-4 py-2 tabular-nums">{dateOf(record.data)}</td>
                     <td className="px-4 py-2"><a href={page(record)} className="text-primary hover:underline">{typeOf(record)}</a></td>
                     <td className="px-4 py-2">{numberOf(record.data)}</td>
-                    <td className="px-4 py-2 text-right tabular-nums">{money(Number(record.data.amount || 0))}</td>
+                    <td className="px-4 py-2 text-right tabular-nums">{money(Number(record.data.amount || 0) * rateFor(record))}</td>
                     <td className="px-4 py-2 text-right tabular-nums">{record.kind === "invoices" || record.kind === "bills" ? money(balance(record.data)) : "—"}</td>
                     <td className="px-4 py-2">{record.kind === "payments" ? "Received" : record.data.status || "—"}</td>
                   </tr>
@@ -395,14 +402,15 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
   const visibleColumns = listPreferences?.columns ?? module.columns;
   const listColumnLabels = customization ? Object.fromEntries(customization.options.map((option) => [option.key, option.label])) : undefined;
   const canExport = module.kind !== "settings";
-  const currency = records.find((record) => record.data.currency)?.data.currency || defaultCurrency || "USD";
+  // The company's home currency; foreign documents are converted to it in the totals.
+  const currency = defaultCurrency || records.find((record) => record.data.currency)?.data.currency || "USD";
   const [detailId, setDetailId] = useState<string | null>(null);
   const detailRecord = detailId ? records.find((record) => record.id === detailId) ?? null : null;
   const groupLabel = navigationGroups.find((group) => group.items.some((item) => item.slug === module.slug))?.label ?? "Books";
   const summaryCards = useMemo(() => {
     const money = (value: number) => formatCurrency(value, currency);
-    const total = (list: BookkeepingRecord[]) => list.reduce((sum, record) => sum + Number(record.data.amount || 0), 0);
-    const balanceOf = (record: BookkeepingRecord) => Math.max(0, Number(record.data.amount || 0) - Number(record.data.paidAmount || 0) - Number(record.data.creditApplied || 0));
+    const total = (list: BookkeepingRecord[]) => list.reduce((sum, record) => sum + Number(record.data.amount || 0) * homeRate(record.data, currency), 0);
+    const balanceOf = (record: BookkeepingRecord) => Math.max(0, Number(record.data.amount || 0) - Number(record.data.paidAmount || 0) - Number(record.data.creditApplied || 0)) * homeRate(record.data, currency);
     const thisMonth = new Date().toISOString().slice(0, 7);
     const withStatus = (...statuses: string[]) => records.filter((record) => statuses.includes(record.data.status ?? ""));
     const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
@@ -414,7 +422,7 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
       return [
         { label: module.kind === "invoices" ? "Open balance" : "Outstanding", value: money(open.reduce((sum, record) => sum + balanceOf(record), 0)), note: count(open.length, "unpaid", "unpaid") },
         { label: "Overdue", value: money(overdue.reduce((sum, record) => sum + balanceOf(record), 0)), note: count(overdue.length, module.label.toLowerCase(), module.plural.toLowerCase()), tone: overdue.length ? "bad" : undefined },
-        { label: "Paid this month", value: money(paidThisMonth.reduce((sum, record) => sum + Number(record.data.paidAmount || record.data.amount || 0), 0)), note: count(paidThisMonth.length, module.label.toLowerCase(), module.plural.toLowerCase()) },
+        { label: "Paid this month", value: money(paidThisMonth.reduce((sum, record) => sum + Number(record.data.paidAmount || record.data.amount || 0) * homeRate(record.data, currency), 0)), note: count(paidThisMonth.length, module.label.toLowerCase(), module.plural.toLowerCase()) },
         { label: "Drafts", value: String(withStatus("Draft").length), note: "Not sent yet" },
       ] satisfies Card[];
     }

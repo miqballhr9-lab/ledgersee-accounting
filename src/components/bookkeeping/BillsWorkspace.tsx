@@ -25,7 +25,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { moduleBySlug, withWarehouses, type ModuleDefinition } from "@/lib/bookkeeping-config";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
 import { expenseCategoryLabel, expenseLinesFromData } from "@/lib/expense-utils";
-import { dueDateForTerms } from "@/lib/invoice-utils";
+import { dueDateForTerms, homeRate } from "@/lib/invoice-utils";
 
 interface BillsWorkspaceProps {
   records: BookkeepingRecord[];
@@ -113,9 +113,11 @@ export default function BillsWorkspace({ records: initialRecords, vendors, accou
     }).sort((left, right) => (right.data.billDate || right.createdAt).localeCompare(left.data.billDate || left.createdAt));
   }, [asOfDate, categoryFilter, records, search, statusFilter]);
 
-  const outstanding = records.filter((record) => !["Paid", "Cancelled"].includes(billStatus(record, asOfDate))).reduce((sum, record) => sum + amountDue(record), 0);
-  const overdue = records.filter((record) => billStatus(record, asOfDate) === "Overdue").reduce((sum, record) => sum + amountDue(record), 0);
-  const paidTotal = records.reduce((sum, record) => sum + Number(record.data.paidAmount || 0), 0);
+  // Totals are in the home currency, whatever currency each bill is in.
+  const home = (record: BookkeepingRecord, value: number) => value * homeRate(record.data, currency);
+  const outstanding = records.filter((record) => !["Paid", "Cancelled"].includes(billStatus(record, asOfDate))).reduce((sum, record) => sum + home(record, amountDue(record)), 0);
+  const overdue = records.filter((record) => billStatus(record, asOfDate) === "Overdue").reduce((sum, record) => sum + home(record, amountDue(record)), 0);
+  const paidTotal = records.reduce((sum, record) => sum + home(record, Number(record.data.paidAmount || 0)), 0);
 
   /** `added` counts a bill saved a moment ago that the list doesn't hold yet (Save and new). */
   function openNewBill(added = 0) {
@@ -390,8 +392,11 @@ export default function BillsWorkspace({ records: initialRecords, vendors, accou
                     <TableCell className="whitespace-nowrap text-[13px]">{formatDate(record.data.billDate || "")}</TableCell>
                     <TableCell className={`whitespace-nowrap text-[13px] ${status === "Overdue" ? "font-medium text-destructive" : ""}`}>{formatDate(record.data.dueDate || "")}</TableCell>
                     <TableCell className="max-w-[140px] truncate text-[13px] text-muted-foreground" title={expenseCategoryLabel(record.data)}>{expenseCategoryLabel(record.data) || "—"}</TableCell>
-                    <TableCell className="whitespace-nowrap text-right text-[13px] tabular-nums">{formatMoney(Number(record.data.amount || 0), currency)}</TableCell>
-                    <TableCell className="whitespace-nowrap text-right text-[13px] font-medium tabular-nums">{formatMoney(amountDue(record), currency)}</TableCell>
+                    <TableCell className="whitespace-nowrap text-right text-[13px] tabular-nums">
+                      {formatMoney(home(record, Number(record.data.amount || 0)), currency)}
+                      {homeRate(record.data, currency) !== 1 ? <span className="block text-[11px] text-muted-foreground">{formatMoney(Number(record.data.amount || 0), record.data.currency || currency)}</span> : null}
+                    </TableCell>
+                    <TableCell className="whitespace-nowrap text-right text-[13px] font-medium tabular-nums">{formatMoney(home(record, amountDue(record)), currency)}</TableCell>
                     <TableCell className="max-w-[150px] truncate text-[13px] text-muted-foreground" title={record.data.paymentAccountName || ""}>{record.data.paymentAccountName ? `${record.data.paymentMethod} · ${record.data.paymentAccountName}` : "—"}</TableCell>
                     <TableCell className="whitespace-nowrap"><StatusBadge value={status} /></TableCell>
                     <TableCell className="whitespace-nowrap text-right">
@@ -432,8 +437,8 @@ export default function BillsWorkspace({ records: initialRecords, vendors, accou
         onOpenChange={(open) => { if (!open) setPaymentTargets(null); }}
         title="Record bill payment"
         description={paymentTargets?.length === 1
-          ? `${paymentTargets[0].data.billNumber || "Bill"} · ${paymentTargets[0].data.vendor || "Supplier"} · ${formatMoney(amountDue(paymentTargets[0]), currency)} due`
-          : `${paymentTargets?.length ?? 0} bills · ${formatMoney((paymentTargets ?? []).reduce((sum, record) => sum + amountDue(record), 0), currency)} due`}
+          ? `${paymentTargets[0].data.billNumber || "Bill"} · ${paymentTargets[0].data.vendor || "Supplier"} · ${formatMoney(amountDue(paymentTargets[0]), paymentTargets[0].data.currency || currency)} due`
+          : `${paymentTargets?.length ?? 0} bills · ${formatMoney((paymentTargets ?? []).reduce((sum, record) => sum + home(record, amountDue(record)), 0), currency)} due`}
         submitLabel="Record payment"
         paymentAccounts={paymentAccounts}
         pending={bulkPending}
