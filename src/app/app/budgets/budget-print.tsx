@@ -3,7 +3,9 @@ import { and, desc, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { bookkeepingRecord } from "@/db/schema";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
-import { budgetActual, budgetExpectedTotal, budgetTotals, budgetVariance, parseBudgetLines, recordsWithinBudgetDates } from "@/lib/budget-utils";
+import { budgetActual, budgetExpectedTotal, budgetTotals, budgetVariance, parseBudgetLines, recordsWithinBudgetDates, resolveBudgetLineAccount } from "@/lib/budget-utils";
+import { isRecordKind } from "@/lib/bookkeeping-types";
+import { buildLedger } from "@/lib/ledger";
 
 function toRecord(row: typeof bookkeepingRecord.$inferSelect): BookkeepingRecord {
   return { id: row.id, kind: row.kind as BookkeepingRecord["kind"], data: row.data, createdAt: row.createdAt.toISOString(), updatedAt: row.updatedAt.toISOString() };
@@ -15,11 +17,12 @@ export async function loadBudgetsForPrint(userId: string, ids: string[]) {
     ids.length
       ? db.select().from(bookkeepingRecord).where(and(eq(bookkeepingRecord.userId, userId), eq(bookkeepingRecord.kind, "budgets"), inArray(bookkeepingRecord.id, ids)))
       : Promise.resolve([]),
-    db.select().from(bookkeepingRecord).where(and(eq(bookkeepingRecord.userId, userId), inArray(bookkeepingRecord.kind, ["invoices", "bills", "expenses", "payroll"]))),
+    // Everything the books are built from, so actuals match the Profit and Loss.
+    db.select().from(bookkeepingRecord).where(eq(bookkeepingRecord.userId, userId)),
     db.select().from(bookkeepingRecord).where(and(eq(bookkeepingRecord.userId, userId), eq(bookkeepingRecord.kind, "settings"))).orderBy(desc(bookkeepingRecord.updatedAt)).limit(1),
   ]);
   const ordered = ids.flatMap((id) => budgets.filter((budget) => budget.id === id));
-  return { budgets: ordered.map(toRecord), sources: sources.map(toRecord), settings: settings[0]?.data ?? {} };
+  return { budgets: ordered.map(toRecord), sources: sources.filter((row) => isRecordKind(row.kind) && row.kind !== "budgets").map(toRecord), settings: settings[0]?.data ?? {} };
 }
 
 /** One budget-versus-actual sheet; several print one after another, each on its own page. */
@@ -27,9 +30,13 @@ export function BudgetPrintSheet({ budget, sources, settings, fallbackCompany }:
   const data = budget.data;
   const companyName = settings.companyName || fallbackCompany;
   const currency = data.currency || settings.currency || "USD";
-  const records = recordsWithinBudgetDates(sources, data.startDate || "", data.endDate || "");
-  const lines = parseBudgetLines(data.lines).map((line) => {
-    const actual = budgetActual(line, records);
+  const records = recordsWithinBudgetDates(sources.filter((record) => ["invoices", "bills", "expenses", "payroll"].includes(record.kind)), data.startDate || "", data.endDate || "");
+  const ledger = buildLedger(sources, settings.accountingMethod === "Cash" ? "cash" : "accrual");
+  const books = { ledger, records: sources, startDate: data.startDate || "", endDate: data.endDate || "" };
+  const homeCurrency = settings.currency || "";
+  const lines = parseBudgetLines(data.lines).map((budgetLine) => {
+    const line = resolveBudgetLineAccount(budgetLine, sources);
+    const actual = budgetActual(line, records, homeCurrency, books);
     return { line, actual, variance: budgetVariance(line, actual) };
   });
   const money = (value: number) => {

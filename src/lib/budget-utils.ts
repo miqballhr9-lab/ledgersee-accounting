@@ -1,6 +1,7 @@
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
 import { expenseLinesFromData } from "@/lib/expense-utils";
 import { homeRate } from "@/lib/invoice-utils";
+import type { Ledger, Posting } from "@/lib/ledger";
 
 export type BudgetPeriod = "Monthly" | "Quarterly" | "Annual" | "Custom";
 export type BudgetLineType = "Income" | "Expense";
@@ -81,6 +82,7 @@ export const payrollBudgetHeads = [
   { head: "EOBI / PF", fields: ["socialDeduction"] },
   { head: "Other Adjustment", fields: ["adjustment"] },
   { head: "Payable Salary", fields: ["payableSalary"] },
+  { head: "Employer Contributions", fields: ["employerContribution"] },
 ] as const;
 
 export function payrollBudgetHead(name: string) {
@@ -93,7 +95,65 @@ function outsideBooks(record: BookkeepingRecord) {
   return ["Draft", "Cancelled", "Void", "Pending approval"].includes(record.data.status ?? "") || record.data.docType === "Opening balance" || record.data.awaitingApproval === "true";
 }
 
-export function budgetActualRecords(line: BudgetLine, allRecords: BookkeepingRecord[]) {
+/**
+ * The books a budget is compared with: the ledger (every posting, as the
+ * Profit and Loss uses), the budget's dates, and the records behind postings.
+ */
+export interface BudgetBooks {
+  ledger: Ledger;
+  records: BookkeepingRecord[];
+  startDate: string;
+  endDate: string;
+}
+
+const allIncomeHeads = ["sales", "income", "revenue", "all sales", "all income"];
+const allCostHeads = ["expenses", "all expenses", "operating expenses", "all costs"];
+
+/**
+ * The postings behind a budget line, from the ledger: the chart account the
+ * head names, all income or all costs for the general heads, or a customer's
+ * income. Payroll heads are worked out from the salaries themselves (null).
+ */
+export function budgetActualPostings(line: BudgetLine, books: BudgetBooks): Posting[] | null {
+  if (line.category === "Payroll") return null;
+  const head = line.budgetHead.trim().toLocaleLowerCase();
+  if (!head) return [];
+  const category = line.type === "Income" ? "Income" : "Expense";
+  const categoryOf = (name: string) => books.ledger.accounts.get(name.trim().toLowerCase())?.category;
+  const within = books.ledger.postings.filter((posting) => (!books.startDate || posting.date >= books.startDate) && (!books.endDate || posting.date <= books.endDate) && categoryOf(posting.account) === category);
+  const named = books.ledger.accounts.get(head);
+  if (named?.category === category) return within.filter((posting) => posting.account.trim().toLowerCase() === head);
+  if (category === "Income") {
+    if (allIncomeHeads.includes(head)) return within;
+    if (head === "revenue · invoices") return within.filter((posting) => posting.sourceKind === "invoices" || posting.sourceKind === "credit-notes");
+    return within.filter((posting) => posting.customer.trim().toLocaleLowerCase() === head);
+  }
+  // All costs leave salaries out: payroll has its own heads on the budget.
+  return allCostHeads.includes(head) ? within.filter((posting) => posting.sourceKind !== "payroll") : [];
+}
+
+/**
+ * A line whose head is a chart account (saved as "account:<id>") with that
+ * account's current name and type, as the budget screen shows it.
+ */
+export function resolveBudgetLineAccount(line: BudgetLine, accounts: BookkeepingRecord[]): BudgetLine {
+  const reference = (value: string) => {
+    const trimmed = value.trim();
+    const id = trimmed.startsWith("account:") ? trimmed.slice("account:".length) : /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i.test(trimmed) ? trimmed : "";
+    return id ? accounts.find((account) => account.kind === "accounts" && account.id === id && (account.data.type === "Income" || account.data.type === "Expense") && account.data.name?.trim()) : undefined;
+  };
+  const account = reference(line.headKey ?? "") ?? reference(line.budgetHead);
+  if (!account) return line;
+  const type = account.data.type === "Income" ? "Income" : "Expense";
+  return { ...line, category: type === "Income" ? "Sales" : "Expenses", type, budgetHead: account.data.name.trim(), headKey: `account:${account.id}` };
+}
+
+export function budgetActualRecords(line: BudgetLine, allRecords: BookkeepingRecord[], books?: BudgetBooks) {
+  const postings = books ? budgetActualPostings(line, books) : null;
+  if (books && postings) {
+    const ids = new Set(postings.map((posting) => posting.sourceId.split("#")[0]));
+    return books.records.filter((record) => ids.has(record.id));
+  }
   const records = allRecords.filter((record) => !outsideBooks(record));
   const budgetHead = line.budgetHead.trim().toLocaleLowerCase();
   if (!budgetHead) return [];
@@ -120,8 +180,17 @@ export function budgetActualRecords(line: BudgetLine, allRecords: BookkeepingRec
     });
 }
 
-/** The actual for a budget line, in the home currency (foreign documents converted at their exchange rate). */
-export function budgetActual(line: BudgetLine, records: BookkeepingRecord[], homeCurrency = "") {
+/**
+ * The actual for a budget line, in the home currency. With the books, it is
+ * what the ledger posted to the head's account in the budget's dates, as the
+ * Profit and Loss shows it; payroll heads add up the salaries' own fields.
+ */
+export function budgetActual(line: BudgetLine, records: BookkeepingRecord[], homeCurrency = "", books?: BudgetBooks) {
+  const postings = books ? budgetActualPostings(line, books) : null;
+  if (postings) {
+    const total = postings.reduce((sum, posting) => sum + posting.amount, 0);
+    return Math.round((line.type === "Income" ? -total : total) * 100) / 100;
+  }
   return budgetActualRecords(line, records).reduce((sum, record) => {
     const rate = homeRate(record.data, homeCurrency);
     if (record.kind === "payroll") {

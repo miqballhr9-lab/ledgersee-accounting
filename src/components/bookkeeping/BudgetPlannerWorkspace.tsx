@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowDownToLine, ArrowUpDown, ChevronDown, Copy, Ellipsis, ExternalLink, FileSpreadsheet, FileText, FileUp, GripVertical, ListChecks, Pencil, Plus, Printer, Save, Send, Trash2, Sparkles } from "lucide-react";
@@ -16,12 +16,17 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectSeparator, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { homeRate } from "@/lib/invoice-utils";
-import { budgetActual, budgetActualRecords, budgetExpectedTotal, budgetPresetRange, budgetTotals, budgetVariance, csvCell, parseBudgetLines, payrollBudgetHeads, parseCsv, recordsWithinBudgetDates, type BudgetCategory, type BudgetLine, type BudgetPeriod } from "@/lib/budget-utils";
+import { budgetActual, budgetActualPostings, budgetActualRecords, budgetExpectedTotal, budgetPresetRange, budgetTotals, budgetVariance, csvCell, parseBudgetLines, payrollBudgetHeads, parseCsv, recordsWithinBudgetDates, type BudgetCategory, type BudgetLine, type BudgetBooks, type BudgetPeriod } from "@/lib/budget-utils";
+import { buildLedger } from "@/lib/ledger";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
 
 interface BudgetPlannerWorkspaceProps {
   budgets: BookkeepingRecord[];
   financialRecords: BookkeepingRecord[];
+  /** Every record the books are built from, so actuals match the Profit and Loss. */
+  ledgerRecords?: BookkeepingRecord[];
+  /** "Cash" or "Accrual", from Settings. */
+  accountingMethod?: string;
   accounts: BookkeepingRecord[];
   currency: string;
   asOfDate: string;
@@ -144,7 +149,7 @@ function errorMessage(error: unknown) {
   return error instanceof Error ? readableError(error) : "We couldn’t save that budget. Please try again.";
 }
 
-export default function BudgetPlannerWorkspace({ budgets, financialRecords, accounts, currency, asOfDate, automationMode = false }: BudgetPlannerWorkspaceProps) {
+export default function BudgetPlannerWorkspace({ budgets, financialRecords, ledgerRecords, accountingMethod, accounts, currency, asOfDate, automationMode = false }: BudgetPlannerWorkspaceProps) {
   const router = useRouter();
   const uploadRef = useRef<HTMLInputElement>(null);
   const [savedBudgets, setSavedBudgets] = useState(budgets);
@@ -211,8 +216,13 @@ export default function BudgetPlannerWorkspace({ budgets, financialRecords, acco
     () => recordsWithinBudgetDates(financialRecords, dateRange.startDate, dateRange.endDate),
     [dateRange.endDate, dateRange.startDate, financialRecords],
   );
-  const actuals = useMemo(() => lines.map((line) => budgetActual(resolveBudgetLine(line, accountHeads), periodRecords, currency)), [accountHeads, lines, periodRecords, currency]);
-  const activeActualRecords = activeActualLine ? budgetActualRecords(resolveBudgetLine(activeActualLine, accountHeads), periodRecords) : [];
+  const ledger = useMemo(() => (ledgerRecords ? buildLedger(ledgerRecords, accountingMethod === "Cash" ? "cash" : "accrual") : null), [ledgerRecords, accountingMethod]);
+  /** The books for a budget's dates; without them actuals come from the documents alone. */
+  const booksFor = useCallback((startDate: string, endDate: string): BudgetBooks | undefined => (ledger && ledgerRecords ? { ledger, records: ledgerRecords, startDate, endDate } : undefined), [ledger, ledgerRecords]);
+  const actuals = useMemo(() => lines.map((line) => budgetActual(resolveBudgetLine(line, accountHeads), periodRecords, currency, booksFor(dateRange.startDate, dateRange.endDate))), [accountHeads, lines, periodRecords, currency, booksFor, dateRange.startDate, dateRange.endDate]);
+  const activeBooks = booksFor(dateRange.startDate, dateRange.endDate);
+  const activeActualPostings = activeActualLine && activeBooks ? budgetActualPostings(resolveBudgetLine(activeActualLine, accountHeads), activeBooks) : null;
+  const activeActualRecords = activeActualLine && !activeActualPostings ? budgetActualRecords(resolveBudgetLine(activeActualLine, accountHeads), periodRecords) : [];
   const totals = budgetTotals(lines, actuals);
   // Every line added up, as the budget showed before the profit and loss view.
   const expectedTotal = budgetExpectedTotal(lines);
@@ -221,7 +231,7 @@ export default function BudgetPlannerWorkspace({ budgets, financialRecords, acco
   const budgetSummaries = useMemo(() => savedBudgets.map((record) => {
     const budgetLines = parseBudgetLines(record.data.lines).map((line) => resolveBudgetLine(line, accountHeads));
     const records = recordsWithinBudgetDates(financialRecords, record.data.startDate || "", record.data.endDate || "");
-    const lineActuals = budgetLines.map((line) => budgetActual(line, records, currency));
+    const lineActuals = budgetLines.map((line) => budgetActual(line, records, currency, booksFor(record.data.startDate || "", record.data.endDate || "")));
     const { profit, variance } = budgetTotals(budgetLines, lineActuals);
     return {
       record,
@@ -233,7 +243,7 @@ export default function BudgetPlannerWorkspace({ budgets, financialRecords, acco
       actualProfit: profit.actual,
       variance,
     };
-  }), [accountHeads, financialRecords, savedBudgets]);
+  }), [accountHeads, booksFor, currency, financialRecords, savedBudgets]);
   const selectedBudgets = savedBudgets.filter((record) => selectedIds.has(record.id));
   const filteredBudgets = budgetSummaries.filter(({ record }) => !search.trim() || `${record.data.name} ${record.data.description} ${record.data.period}`.toLowerCase().includes(search.trim().toLowerCase()));
 
@@ -287,7 +297,7 @@ export default function BudgetPlannerWorkspace({ budgets, financialRecords, acco
     const records = recordsWithinBudgetDates(financialRecords, previous.startDate, previous.endDate);
     const factor = 1 + percent / 100;
     const planned = (line: BudgetLine) => {
-      const actual = budgetActual(resolveBudgetLine(line, accountHeads), records, currency);
+      const actual = budgetActual(resolveBudgetLine(line, accountHeads), records, currency, booksFor(previous.startDate, previous.endDate));
       return actual > 0 ? String(Math.round(actual * factor * 100) / 100) : "";
     };
     const kept = currentLines.filter((line) => line.budgetHead.trim()).map((line) => ({ ...line, expected: planned(line) || line.expected }));
@@ -402,7 +412,7 @@ export default function BudgetPlannerWorkspace({ budgets, financialRecords, acco
     const records = recordsWithinBudgetDates(financialRecords, budget.data.startDate || "", budget.data.endDate || "");
     const rows: (string | number)[][] = [["name", "period", "startDate", "endDate", "category", "budgetHead", "expected", "actual", "variance", "description"]];
     budgetLines.forEach((line) => {
-      const actual = budgetActual(line, records, currency);
+      const actual = budgetActual(line, records, currency, booksFor(budget.data.startDate || "", budget.data.endDate || ""));
       rows.push([budget.data.name || "", budget.data.period || "", budget.data.startDate || "", budget.data.endDate || "", line.category, line.budgetHead, Number(line.expected) || 0, actual, budgetVariance(line, actual), line.description]);
     });
     return rows;
@@ -783,7 +793,7 @@ export default function BudgetPlannerWorkspace({ budgets, financialRecords, acco
                     const resolvedLine = resolveBudgetLine(line, accountHeads);
                     const directSourceKind: BookkeepingRecord["kind"] | null = resolvedLine.category === "Payroll"
                       ? "payroll"
-                      : resolvedLine.category === "Sales"
+                      : resolvedLine.category === "Sales" && !ledger
                         ? "invoices"
                         : null;
                     const variance = budgetVariance(line, actual);
@@ -899,9 +909,24 @@ export default function BudgetPlannerWorkspace({ budgets, financialRecords, acco
         <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>{activeActualLine ? `${activeActualLine.budgetHead} actual` : "Actual details"}</DialogTitle>
-            <DialogDescription>Records included from {dateRange.startDate || "the beginning"} to {dateRange.endDate || "today"}.</DialogDescription>
+            <DialogDescription>{activeActualPostings ? "What the books posted to this head" : "Records included"} from {dateRange.startDate || "the beginning"} to {dateRange.endDate || "today"}.</DialogDescription>
           </DialogHeader>
-          {activeActualRecords.length ? <div className="divide-y divide-border rounded-md border border-border">
+          {activeActualPostings ? (activeActualPostings.length ? <div className="divide-y divide-border rounded-md border border-border">
+            {activeActualPostings.map((posting, index) => (
+              <div key={`${posting.txnId}-${index}`} className="flex flex-col gap-3 p-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium">{[posting.type, posting.number, posting.name || posting.customer || posting.supplier].filter(Boolean).join(" · ")}</p>
+                  <p className="mt-1 truncate text-xs text-muted-foreground">{posting.account} · {posting.date}{posting.memo ? ` · ${posting.memo}` : ""}</p>
+                </div>
+                <div className="flex shrink-0 items-center justify-between gap-3 sm:justify-end">
+                  <span className="text-sm font-medium tabular-nums">{formatAmount(activeActualLine?.type === "Income" ? -posting.amount : posting.amount, currency)}</span>
+                  <Button type="button" variant="outline" size="sm" nativeButton={false} render={<Link href={`/app/reports/transaction-report?${new URLSearchParams({ z: JSON.stringify({ accounts: [posting.account], from: dateRange.startDate, to: dateRange.endDate || asOfDate }), back: "/app/budgets", title: `Transaction Report · ${posting.account}`, ...(accountingMethod === "Cash" ? { method: "cash" } : {}) }).toString()}`} />}>
+                    Ledger <ExternalLink size={14} />
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div> : <p className="rounded-md border border-dashed border-border p-5 text-center text-sm text-muted-foreground">Nothing was posted to this budget head in these dates yet.</p>) : activeActualRecords.length ? <div className="divide-y divide-border rounded-md border border-border">
             {activeActualLine ? activeActualRecords.map((record) => (
               <div key={record.id} className="flex flex-col gap-3 p-3 sm:flex-row sm:items-center sm:justify-between">
                 <div className="min-w-0">

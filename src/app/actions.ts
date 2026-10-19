@@ -23,9 +23,10 @@ import { paymentAccountType, receivingAccountType } from "@/lib/payment-accounts
 import { recurringKinds, type RecurringKind } from "@/lib/recurring";
 import { accountCategoryForType, accountDetailsForType } from "@/lib/account-types";
 import { standardAccounts } from "@/lib/standard-accounts";
-import { budgetActual, budgetExpectedTotal, payrollBudgetHead, budgetVariance, parseBudgetLines, parseCsv, recordsWithinBudgetDates, type BudgetCategory, type BudgetLine, type BudgetLineType, type BudgetPeriod } from "@/lib/budget-utils";
+import { budgetActual, budgetExpectedTotal, payrollBudgetHead, budgetVariance, parseBudgetLines, parseCsv, recordsWithinBudgetDates, resolveBudgetLineAccount, type BudgetCategory, type BudgetLine, type BudgetLineType, type BudgetPeriod } from "@/lib/budget-utils";
 import { calculatePayroll, payrollCsvFields, serializePayroll, type EmployerContribution, type PayrollValues, type SalaryTaxRule } from "@/lib/payroll-utils";
 import { packFor } from "@/lib/tax-packs";
+import { buildLedger } from "@/lib/ledger";
 import type { PayrollLiabilityKind } from "@/lib/payroll-liabilities";
 import { supplierCategoryForBankLine } from "@/lib/supplier-memory";
 import { MAX_ITEM_IMPORT_ROWS, type ItemImportData, type ItemImportRow } from "@/lib/item-import";
@@ -1122,14 +1123,15 @@ export async function sendBudgetSummary(id: string, recipient: string): Promise<
   if (!budgetRow) throw new ActionError("That budget wasn’t found. Save it and try again.");
 
   const budget = serializeRow(budgetRow);
-  const sourceRows = await db
-    .select()
-    .from(bookkeepingRecord)
-    .where(and(eq(bookkeepingRecord.userId, me.id), inArray(bookkeepingRecord.kind, ["invoices", "bills", "expenses", "payroll", "settings"])));
-  const records = sourceRows.map(serializeRow);
-  const budgetData = recordsWithinBudgetDates(records, budget.data.startDate ?? "", budget.data.endDate ?? "");
-  const lines = parseBudgetLines(budget.data.lines);
-  const currency = budget.data.currency || records.find((record) => record.kind === "settings")?.data.currency || "USD";
+  // Everything the books are built from, so the emailed actuals match the budget screen and the Profit and Loss.
+  const sourceRows = await db.select().from(bookkeepingRecord).where(eq(bookkeepingRecord.userId, me.id));
+  const records = sourceRows.filter((row) => isRecordKind(row.kind) && row.kind !== "budgets").map(serializeRow);
+  const settings = records.find((record) => record.kind === "settings")?.data ?? {};
+  const budgetData = recordsWithinBudgetDates(records.filter((record) => ["invoices", "bills", "expenses", "payroll"].includes(record.kind)), budget.data.startDate ?? "", budget.data.endDate ?? "");
+  const books = { ledger: buildLedger(records, settings.accountingMethod === "Cash" ? "cash" : "accrual"), records, startDate: budget.data.startDate ?? "", endDate: budget.data.endDate ?? "" };
+  const lines = parseBudgetLines(budget.data.lines).map((line) => resolveBudgetLineAccount(line, records));
+  const actualOf = (line: BudgetLine) => budgetActual(line, budgetData, settings.currency || "", books);
+  const currency = budget.data.currency || settings.currency || "USD";
   const formatAmount = (amount: number) => {
     try {
       return new Intl.NumberFormat(undefined, { style: "currency", currency, maximumFractionDigits: 2 }).format(amount);
@@ -1138,12 +1140,12 @@ export async function sendBudgetSummary(id: string, recipient: string): Promise<
     }
   };
   const rows = lines.map((line) => {
-    const actual = budgetActual(line, budgetData);
+    const actual = actualOf(line);
     const variance = budgetVariance(line, actual);
     return `<tr><td>${escapeBudgetHtml(line.category)}</td><td>${escapeBudgetHtml(line.budgetHead)}</td><td>${formatAmount(Number(line.expected) || 0)}</td><td>${formatAmount(actual)}</td><td>${formatAmount(variance)}</td><td>${escapeBudgetHtml(line.description)}</td></tr>`;
   }).join("");
   const subject = `Budget: ${budget.data.name || "Budget"}`;
-  const html = `<div style="font-family:Arial,sans-serif;color:#13263b;max-width:900px;margin:0 auto"><h1>${escapeBudgetHtml(subject)}</h1><p>${escapeBudgetHtml(budget.data.period || "Custom")} · ${escapeBudgetHtml(budget.data.startDate || "")} to ${escapeBudgetHtml(budget.data.endDate || "")}</p><p>${escapeBudgetHtml(budget.data.description || "Budget overview")}</p><p>Positive variance means favorable: under plan for expenses or above plan for income.</p><table style="width:100%;border-collapse:collapse"><thead><tr><th align="left">Category</th><th align="left">Budget Head</th><th align="right">Expected</th><th align="right">Actual</th><th align="right">Variance</th><th align="left">Description</th></tr></thead><tbody>${rows}</tbody><tfoot><tr><th align="left" colspan="2">Totals</th><th align="right">${formatAmount(budgetExpectedTotal(lines))}</th><th align="right">${formatAmount(lines.reduce((sum, line) => sum + budgetActual(line, budgetData), 0))}</th><th align="right">${formatAmount(lines.reduce((sum, line) => sum + budgetVariance(line, budgetActual(line, budgetData)), 0))}</th><td></td></tr></tfoot></table></div>`;
+  const html = `<div style="font-family:Arial,sans-serif;color:#13263b;max-width:900px;margin:0 auto"><h1>${escapeBudgetHtml(subject)}</h1><p>${escapeBudgetHtml(budget.data.period || "Custom")} · ${escapeBudgetHtml(budget.data.startDate || "")} to ${escapeBudgetHtml(budget.data.endDate || "")}</p><p>${escapeBudgetHtml(budget.data.description || "Budget overview")}</p><p>Positive variance means favorable: under plan for expenses or above plan for income.</p><table style="width:100%;border-collapse:collapse"><thead><tr><th align="left">Category</th><th align="left">Budget Head</th><th align="right">Expected</th><th align="right">Actual</th><th align="right">Variance</th><th align="left">Description</th></tr></thead><tbody>${rows}</tbody><tfoot><tr><th align="left" colspan="2">Totals</th><th align="right">${formatAmount(budgetExpectedTotal(lines))}</th><th align="right">${formatAmount(lines.reduce((sum, line) => sum + actualOf(line), 0))}</th><th align="right">${formatAmount(lines.reduce((sum, line) => sum + budgetVariance(line, actualOf(line)), 0))}</th><td></td></tr></tfoot></table></div>`;
   await sendEmailOrThrow({ to: email, subject, html, fromName: "MIKLEDGER" });
 }
 

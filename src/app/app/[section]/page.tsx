@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 
-import { listBookkeepingRecordGroups } from "@/app/actions";
+import { listAllBookkeepingRecords, listBookkeepingRecordGroups } from "@/app/actions";
 import CompanySettings from "@/components/settings/CompanySettings";
 import { requireUser } from "@/lib/auth";
 import ChartOfAccountsWorkspace from "@/components/bookkeeping/ChartOfAccountsWorkspace";
@@ -86,12 +86,14 @@ export default async function SectionPage({ params, searchParams }: SectionPageP
   }
 
   if (section === "budgets") {
-    const groups = await listBookkeepingRecordGroups(["budgets", "invoices", "bills", "expenses", "payroll", "settings", "accounts", "automation-settings"]);
+    const [groups, allRecords] = await Promise.all([listBookkeepingRecordGroups(["budgets", "invoices", "bills", "expenses", "payroll", "settings", "accounts", "automation-settings"]), listAllBookkeepingRecords()]);
     const records = [...(groups.invoices ?? []), ...(groups.bills ?? []), ...(groups.expenses ?? []), ...(groups.payroll ?? [])];
     return (
       <BudgetPlannerWorkspace
         budgets={groups.budgets ?? []}
         financialRecords={records}
+        ledgerRecords={allRecords}
+        accountingMethod={groups.settings?.[0]?.data.accountingMethod}
         accounts={groups.accounts ?? []}
         currency={groups.settings?.[0]?.data.currency || "USD"}
         asOfDate={new Date().toISOString().slice(0, 10)}
