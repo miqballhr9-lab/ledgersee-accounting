@@ -1,12 +1,13 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Banknote, CreditCard, Minus, Package, Plus, Printer, ReceiptText, ScanBarcode, Search, ShoppingCart, Trash2, X } from "lucide-react";
+import { Banknote, Camera, CreditCard, Minus, Package, Plus, Printer, ReceiptText, ScanBarcode, Search, ShoppingCart, Trash2, X } from "lucide-react";
 
 import { saveBookkeepingRecord } from "@/app/actions";
+import CameraScanner from "@/components/bookkeeping/CameraScanner";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -93,7 +94,7 @@ export default function PosWorkspace({ items, customers, accounts, taxes, receip
   const shown = products.filter((item) => {
     const needle = search.trim().toLowerCase();
     if (category !== "All" && item.data.category?.trim() !== category) return false;
-    return !needle || [item.data.name, item.data.sku, item.data.category].some((value) => value?.toLowerCase().includes(needle));
+    return !needle || [item.data.name, item.data.sku, item.data.barcode, item.data.category].some((value) => value?.toLowerCase().includes(needle));
   });
 
   const tax = salesTaxes.find((entry) => entry.id === taxId);
@@ -130,16 +131,52 @@ export default function PosWorkspace({ items, customers, accounts, taxes, receip
     setCart((current) => (quantity <= 0 ? current.filter((line) => line.itemId !== itemId) : current.map((line) => (line.itemId === itemId ? { ...line, quantity } : line))));
   }
 
-  /** Enter in the search box adds the product whose barcode or SKU matches, as a scanner does. */
-  function scan() {
-    const code = search.trim().toLowerCase();
-    if (!code) return;
-    const match = products.find((item) => item.data.sku?.trim().toLowerCase() === code) ?? (shown.length === 1 ? shown[0] : undefined);
-    if (match) {
-      add(match);
-      setSearch("");
-    } else toast.error(`No product with code “${search.trim()}”.`, { position: "top-center" });
+  /** Adds the product whose barcode or SKU is this code; false when there is none. */
+  function addByCode(raw: string) {
+    const code = raw.trim().toLowerCase();
+    const match = code ? products.find((item) => item.data.barcode?.trim().toLowerCase() === code || item.data.sku?.trim().toLowerCase() === code) : undefined;
+    if (match) add(match);
+    return Boolean(match);
   }
+
+  /** Enter in the search box adds the product whose barcode or SKU matches, as a scanner does; else the only product found. */
+  function scan() {
+    const code = search.trim();
+    if (!code) return;
+    if (addByCode(code)) setSearch("");
+    else if (shown.length === 1) {
+      add(shown[0]);
+      setSearch("");
+    } else toast.error(`No product with barcode or SKU “${code}”.`, { position: "top-center" });
+  }
+
+  // A USB or Bluetooth scanner types the code fast and presses Enter. Caught anywhere on the page,
+  // so a scan works even when the cursor isn't in the search box.
+  const addByCodeRef = useRef(addByCode);
+  useEffect(() => {
+    addByCodeRef.current = addByCode;
+  });
+  useEffect(() => {
+    let buffer = "";
+    let lastKey = 0;
+    const onKey = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target?.closest("input, textarea, select, [contenteditable=true], [role=dialog]")) return;
+      const now = Date.now();
+      if (now - lastKey > 60) buffer = "";
+      lastKey = now;
+      if (event.key === "Enter") {
+        if (buffer.length >= 3) {
+          event.preventDefault();
+          if (!addByCodeRef.current(buffer)) toast.error(`No product with barcode or SKU “${buffer}”.`, { position: "top-center" });
+        }
+        buffer = "";
+      } else if (event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey) buffer += event.key;
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+  const [cameraOpen, setCameraOpen] = useState(false);
 
   function startPayment(method: "cash" | "card") {
     if (!cart.length) return;
@@ -250,7 +287,8 @@ export default function PosWorkspace({ items, customers, accounts, taxes, receip
       <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[minmax(0,1fr)_400px]">
         <section className="flex min-h-0 flex-col rounded-xl border border-border bg-card" aria-label="Products">
           <div className="space-y-3 border-b border-border p-3">
-            <div className="relative">
+            <div className="flex gap-2">
+            <div className="relative min-w-0 flex-1">
               <ScanBarcode size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
               <Input
                 ref={searchRef}
@@ -262,6 +300,8 @@ export default function PosWorkspace({ items, customers, accounts, taxes, receip
                 className="h-11 pl-9"
                 aria-label="Search or scan products"
               />
+            </div>
+            <Button type="button" variant="outline" className="h-11 gap-2" onClick={() => setCameraOpen(true)} aria-label="Scan with camera"><Camera size={16} /><span className="hidden sm:inline">Camera</span></Button>
             </div>
             {categories.length ? (
               <div className="flex gap-1.5 overflow-x-auto pb-0.5">
@@ -373,6 +413,8 @@ export default function PosWorkspace({ items, customers, accounts, taxes, receip
           </div>
         </aside>
       </div>
+
+      <CameraScanner open={cameraOpen} onOpenChange={setCameraOpen} onCode={(code) => { if (!addByCode(code)) toast.error(`No product with barcode “${code}”.`, { position: "top-center" }); }} />
 
       <Dialog open={Boolean(paying)} onOpenChange={(open) => { if (!open && !saving) setPaying(null); }}>
         <DialogContent className="sm:max-w-md">

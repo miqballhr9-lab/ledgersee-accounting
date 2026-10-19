@@ -125,6 +125,7 @@ export const modules: readonly ModuleDefinition[] = [
       { key: "name", label: "Name", required: true },
       { key: "category", label: "Category", help: "Group products and services, e.g. Hardware, Services." },
       { key: "sku", label: "SKU" },
+      { key: "barcode", label: "Barcode", placeholder: "e.g. 8964000123456", help: "The number under the product's barcode (EAN or UPC). Scanning it at the POS register adds this product." },
       { key: "itemType", label: "Type", type: "select", options: ["Inventory", "Non-inventory", "Service", "Bundle"], help: "Inventory items track quantity on hand and cost of goods sold; non-inventory and services don’t. A bundle sells several items together." },
       { key: "rate", label: "Sales price / rate", type: "number", required: true },
       { key: "unit", label: "Unit", placeholder: "piece, box, hour" },
