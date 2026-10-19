@@ -4,9 +4,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Banknote, Camera, CreditCard, Minus, Package, Plus, Printer, ReceiptText, ScanBarcode, Search, ShoppingCart, Trash2, X } from "lucide-react";
+import { Banknote, Camera, CreditCard, Minus, Package, Plus, Printer, ReceiptText, ScanBarcode, Search, ShoppingCart, Trash2, Undo2, Warehouse, X } from "lucide-react";
 
 import { saveBookkeepingRecord } from "@/app/actions";
+import PosReturnDialog from "@/components/bookkeeping/PosReturnDialog";
 import CameraScanner from "@/components/bookkeeping/CameraScanner";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -26,6 +27,14 @@ interface PosWorkspaceProps {
   taxes: BookkeepingRecord[];
   /** Sales receipts, for today's takings and the next receipt number. */
   receipts: BookkeepingRecord[];
+  /** Returns already taken at the till (credit notes made from a receipt). */
+  returns?: BookkeepingRecord[];
+  /** Warehouse names, the default first; empty when the business has none. */
+  warehouses?: string[];
+  /** Stock of each item in each warehouse. */
+  stockAt?: Record<string, Record<string, number>>;
+  /** Serial numbers in stock, and where. */
+  serials?: Array<{ itemId: string; number: string; warehouse: string }>;
   settings: Record<string, string>;
   currency: string;
   today: string;
@@ -36,6 +45,8 @@ interface CartLine {
   name: string;
   price: number;
   quantity: number;
+  /** For items tracked by serial number: the one sold for each unit. */
+  serials?: string[];
 }
 
 interface CompletedSale {
@@ -65,7 +76,9 @@ const escapeHtml = (value: string) => value.replace(/[&<>"']/g, (char) => ({ "&"
  * cash or card, and the sale is saved as a paid sales receipt, so stock, the
  * ledger and every report follow. Prints a narrow receipt for a slip printer.
  */
-export default function PosWorkspace({ items, customers, accounts, taxes, receipts, settings, currency, today }: PosWorkspaceProps) {
+const bySerial = (item: BookkeepingRecord) => item.data.tracking === "Serial number";
+
+export default function PosWorkspace({ items, customers, accounts, taxes, receipts, returns = [], warehouses = [], stockAt = {}, serials = [], settings, currency, today }: PosWorkspaceProps) {
   const router = useRouter();
   const searchRef = useRef<HTMLInputElement>(null);
   const products = useMemo(() => items.filter((item) => item.data.name?.trim() && item.data.itemType !== "Bundle" && item.data.active !== "false"), [items]);
@@ -86,10 +99,18 @@ export default function PosWorkspace({ items, customers, accounts, taxes, receip
   const [saving, setSaving] = useState(false);
   const [done, setDone] = useState<CompletedSale | null>(null);
   const [lastNumber, setLastNumber] = useState(0);
+  const [warehouse, setWarehouse] = useState(warehouses[0] ?? "");
+  const [returning, setReturning] = useState(false);
 
   const money = (value: number) => currencyAmount(value, currency);
-  const stockOf = (item: BookkeepingRecord) => num(item.data.qtyOnHand ?? item.data.openingQty);
+  // With warehouses, only what the chosen one holds can be sold.
+  const stockOf = (item: BookkeepingRecord) => (warehouses.length ? stockAt[item.id]?.[warehouse] ?? 0 : num(item.data.qtyOnHand ?? item.data.openingQty));
   const inCart = (itemId: string) => cart.find((line) => line.itemId === itemId)?.quantity ?? 0;
+  /** Serial numbers of the item in stock here and not already in the sale. */
+  const freeSerials = (itemId: string) => {
+    const taken = new Set(cart.find((line) => line.itemId === itemId)?.serials ?? []);
+    return serials.filter((entry) => entry.itemId === itemId && (!warehouses.length || entry.warehouse.toLowerCase() === warehouse.toLowerCase()) && !taken.has(entry.number)).map((entry) => entry.number);
+  };
 
   const shown = products.filter((item) => {
     const needle = search.trim().toLowerCase();
@@ -110,30 +131,58 @@ export default function PosWorkspace({ items, customers, accounts, taxes, receip
   const todays = receipts.filter((receipt) => receipt.data.posSale === "true" && receipt.data.issueDate === today);
   const takings = todays.reduce((sum, receipt) => sum + num(receipt.data.amount), 0);
   const byMethod = (method: string) => todays.filter((receipt) => receipt.data.posPayment === method).reduce((sum, receipt) => sum + num(receipt.data.amount), 0);
+  const todaysReturns = returns.filter((credit) => credit.data.date === today && credit.data.status === "Refunded").reduce((sum, credit) => sum + num(credit.data.amount), 0);
   const nextNumber = Math.max(lastNumber, ...receipts.map((receipt) => Number(/^POS-(\d+)$/.exec(receipt.data.invoiceNumber ?? "")?.[1] ?? 0))) + 1;
 
-  function add(item: BookkeepingRecord) {
+  /** Adds one unit; a serial-numbered item takes the serial scanned, else the next one in stock. */
+  function add(item: BookkeepingRecord, serial?: string) {
     if (isStocked(item) && inCart(item.id) + 1 > stockOf(item)) {
-      toast.error(`Only ${stockOf(item)} of ${item.data.name} in stock.`, { position: "top-center" });
+      toast.error(`Only ${stockOf(item)} of ${item.data.name} in stock${warehouses.length ? ` in ${warehouse}` : ""}.`, { position: "top-center" });
       return;
     }
+    let number = "";
+    if (bySerial(item)) {
+      const free = freeSerials(item.id);
+      number = serial && free.includes(serial) ? serial : serial ? "" : free[0] ?? "";
+      if (!number) {
+        toast.error(serial ? `Serial ${serial} is already in this sale or not in stock here.` : `No serial number of ${item.data.name} is in stock${warehouses.length ? ` in ${warehouse}` : ""}.`, { position: "top-center" });
+        return;
+      }
+    }
     setCart((current) => current.some((line) => line.itemId === item.id)
-      ? current.map((line) => (line.itemId === item.id ? { ...line, quantity: line.quantity + 1 } : line))
-      : [...current, { itemId: item.id, name: item.data.name.trim(), price: num(item.data.rate), quantity: 1 }]);
+      ? current.map((line) => (line.itemId === item.id ? { ...line, quantity: line.quantity + 1, ...(number ? { serials: [...(line.serials ?? []), number] } : {}) } : line))
+      : [...current, { itemId: item.id, name: item.data.name.trim(), price: num(item.data.rate), quantity: 1, ...(number ? { serials: [number] } : {}) }]);
   }
 
   function setQuantity(itemId: string, quantity: number) {
     const item = products.find((entry) => entry.id === itemId);
     if (item && isStocked(item) && quantity > stockOf(item)) {
-      toast.error(`Only ${stockOf(item)} of ${item.data.name} in stock.`, { position: "top-center" });
+      toast.error(`Only ${stockOf(item)} of ${item.data.name} in stock${warehouses.length ? ` in ${warehouse}` : ""}.`, { position: "top-center" });
       return;
     }
-    setCart((current) => (quantity <= 0 ? current.filter((line) => line.itemId !== itemId) : current.map((line) => (line.itemId === itemId ? { ...line, quantity } : line))));
+    // Serial-numbered items gain or drop serial numbers with the quantity.
+    if (item && bySerial(item) && quantity > inCart(itemId)) {
+      const extra = freeSerials(itemId).slice(0, quantity - inCart(itemId));
+      if (extra.length < quantity - inCart(itemId)) {
+        toast.error(`Not enough serial numbers of ${item.data.name} in stock.`, { position: "top-center" });
+        return;
+      }
+      setCart((current) => current.map((line) => (line.itemId === itemId ? { ...line, quantity, serials: [...(line.serials ?? []), ...extra] } : line)));
+      return;
+    }
+    setCart((current) => (quantity <= 0 ? current.filter((line) => line.itemId !== itemId) : current.map((line) => (line.itemId === itemId ? { ...line, quantity, ...(line.serials ? { serials: line.serials.slice(0, quantity) } : {}) } : line))));
   }
 
   /** Adds the product whose barcode or SKU is this code; false when there is none. */
   function addByCode(raw: string) {
     const code = raw.trim().toLowerCase();
+    // A scanned serial number adds that very unit.
+    const serial = code ? serials.find((entry) => entry.number.toLowerCase() === code && (!warehouses.length || entry.warehouse.toLowerCase() === warehouse.toLowerCase())) : undefined;
+    const bySerialNumber = serial ? products.find((item) => item.id === serial.itemId) : undefined;
+    if (serial && bySerialNumber) {
+      add(bySerialNumber, serial.number);
+      return true;
+    }
     const match = code ? products.find((item) => item.data.barcode?.trim().toLowerCase() === code || item.data.sku?.trim().toLowerCase() === code) : undefined;
     if (match) add(match);
     return Boolean(match);
@@ -208,7 +257,8 @@ export default function PosWorkspace({ items, customers, accounts, taxes, receip
         paymentMethod: accountId,
         currency,
         exchangeRate: "1",
-        lineItems: JSON.stringify(cart.map((line) => ({ itemId: line.itemId, name: line.name, description: "", quantity: String(line.quantity), rate: line.price.toFixed(2) }))),
+        lineItems: JSON.stringify(cart.map((line) => ({ itemId: line.itemId, name: line.name, description: "", quantity: String(line.quantity), rate: line.price.toFixed(2), ...(line.serials?.length ? { serials: line.serials.join(", ") } : {}) }))),
+        ...(warehouses.length ? { warehouse } : {}),
         taxRate: String(taxRate),
         taxName: tax?.data.name ?? "",
         discount: discountValue ? discountValue.toFixed(2) : "",
@@ -259,7 +309,7 @@ export default function PosWorkspace({ items, customers, accounts, taxes, receip
       @page{size:80mm auto;margin:4mm}</style></head><body>
       <h1>${escapeHtml(company)}</h1>${address ? `<p>${escapeHtml(address)}</p>` : ""}${taxId ? `<p>Tax no. ${escapeHtml(taxId)}</p>` : ""}
       <div class="line"></div><p>Receipt ${escapeHtml(sale.number)}</p><p>${escapeHtml(sale.at)}</p><p>${escapeHtml(sale.customer)}</p><div class="line"></div>
-      <table>${sale.lines.map((line) => `${row(line.name, money(line.price * line.quantity))}<tr><td colspan="2">&nbsp;&nbsp;${line.quantity} × ${escapeHtml(money(line.price))}</td></tr>`).join("")}</table>
+      <table>${sale.lines.map((line) => `${row(line.name, money(line.price * line.quantity))}<tr><td colspan="2">&nbsp;&nbsp;${line.quantity} × ${escapeHtml(money(line.price))}${line.serials?.length ? `<br>&nbsp;&nbsp;SN ${escapeHtml(line.serials.join(", "))}` : ""}</td></tr>`).join("")}</table>
       <div class="line"></div><table>${row("Subtotal", money(sale.subtotal))}${sale.discount ? row("Discount", `-${money(sale.discount)}`) : ""}${sale.tax ? row(sale.taxLabel, money(sale.tax)) : ""}${row("TOTAL", money(sale.total), true)}
       ${row(sale.paidWith, money(sale.tendered))}${sale.change ? row("Change", money(sale.change)) : ""}</table>
       <div class="line"></div><p>Thank you for shopping with us</p>
@@ -275,7 +325,17 @@ export default function PosWorkspace({ items, customers, accounts, taxes, receip
           <h1 className="mt-1 text-2xl font-semibold tracking-tight">Register</h1>
         </div>
         <div className="flex flex-wrap gap-2 text-sm">
-          {[["Today's sales", String(todays.length)], ["Takings", money(takings)], ["Cash", money(byMethod("Cash"))], ["Card", money(byMethod("Card"))]].map(([label, value]) => (
+          {warehouses.length ? (
+            <div className="rounded-lg border border-border bg-card px-3 py-1.5">
+              <Label htmlFor="pos-warehouse" className="flex items-center gap-1 text-[11px] font-normal text-muted-foreground"><Warehouse size={11} />Selling from</Label>
+              <Select value={warehouse} onValueChange={(value) => setWarehouse(value ?? warehouses[0])} disabled={cart.length > 0}>
+                <SelectTrigger id="pos-warehouse" className="h-7 min-w-36 border-0 px-0 font-semibold shadow-none" title={cart.length ? "Finish or clear the sale to change warehouse" : undefined}><SelectValue /></SelectTrigger>
+                <SelectContent>{warehouses.map((name) => <SelectItem key={name} value={name}>{name}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+          ) : null}
+          <Button type="button" variant="outline" className="h-auto gap-2 self-stretch" onClick={() => setReturning(true)} disabled={!receipts.length}><Undo2 size={15} />Return / refund</Button>
+          {[["Today's sales", String(todays.length)], ["Takings", money(takings)], ["Cash", money(byMethod("Cash"))], ["Card", money(byMethod("Card"))], ...(todaysReturns ? [["Refunds", `−${money(todaysReturns)}`]] : [])].map(([label, value]) => (
             <div key={label} className="rounded-lg border border-border bg-card px-3 py-2">
               <p className="text-[11px] text-muted-foreground">{label}</p>
               <p className="font-semibold tabular-nums">{value}</p>
@@ -367,6 +427,7 @@ export default function PosWorkspace({ items, customers, accounts, taxes, receip
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm font-medium">{line.name}</p>
                       <p className="text-xs text-muted-foreground tabular-nums">{money(line.price)} each</p>
+                      {line.serials?.length ? <p className="truncate text-[11px] text-muted-foreground" title={line.serials.join(", ")}>SN {line.serials.join(", ")}</p> : null}
                     </div>
                     <div className="flex items-center gap-1">
                       <Button type="button" variant="outline" size="icon-sm" aria-label={`One less ${line.name}`} onClick={() => setQuantity(line.itemId, line.quantity - 1)}><Minus size={13} /></Button>
@@ -413,6 +474,8 @@ export default function PosWorkspace({ items, customers, accounts, taxes, receip
           </div>
         </aside>
       </div>
+
+      <PosReturnDialog open={returning} onOpenChange={setReturning} receipts={receipts} returns={returns} items={items} payAccounts={payAccounts} currency={currency} today={today} onDone={() => router.refresh()} />
 
       <CameraScanner open={cameraOpen} onOpenChange={setCameraOpen} onCode={(code) => { if (!addByCode(code)) toast.error(`No product with barcode “${code}”.`, { position: "top-center" }); }} />
 

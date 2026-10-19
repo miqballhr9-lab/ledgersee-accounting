@@ -26,6 +26,7 @@ import { standardAccounts } from "@/lib/standard-accounts";
 import { budgetActual, budgetExpectedTotal, payrollBudgetHead, budgetVariance, parseBudgetLines, parseCsv, recordsWithinBudgetDates, resolveBudgetLineAccount, type BudgetCategory, type BudgetLine, type BudgetLineType, type BudgetPeriod } from "@/lib/budget-utils";
 import { calculatePayroll, payrollCsvFields, serializePayroll, type EmployerContribution, type PayrollValues, type SalaryTaxRule } from "@/lib/payroll-utils";
 import { packFor } from "@/lib/tax-packs";
+import { paymentTermOptions, termsFor } from "@/lib/payment-terms";
 import { buildLedger } from "@/lib/ledger";
 import type { PayrollLiabilityKind } from "@/lib/payroll-liabilities";
 import { supplierCategoryForBankLine } from "@/lib/supplier-memory";
@@ -1907,6 +1908,8 @@ export async function convertBookkeepingRecord(id: string, target?: string, perc
     }
 
     const today = new Date().toISOString().slice(0, 10);
+    // The customer's or supplier's own payment terms, not always 30 days.
+    const terms = targetKind === "invoices" ? await termsFor(me.id, "customers", source.data.customer) : sourceKind === "purchase-orders" ? await termsFor(me.id, "vendors", source.data.vendor) : "30 days";
     const sourceData = progress
       ? {
           ...source.data,
@@ -1922,8 +1925,8 @@ export async function convertBookkeepingRecord(id: string, target?: string, perc
         ? {
             invoiceNumber: await nextDocumentNumber(transaction, me.id, "invoices", "invoiceNumber", "INV-"),
             issueDate: today,
-            paymentTerms: "30 days",
-            dueDate: dueDateForTerms(today, "30 days"),
+            paymentTerms: terms,
+            dueDate: dueDateForTerms(today, terms),
             paidAmount: "0",
             status: "Draft",
           }
@@ -1979,8 +1982,8 @@ export async function convertBookkeepingRecord(id: string, target?: string, perc
         taxRate: "",
         taxAmount: "0",
         discount: "",
-        paymentTerms: "30 days",
-        dueDate: dueDateForTerms(today, "30 days"),
+        paymentTerms: terms,
+        dueDate: dueDateForTerms(today, terms),
       };
     }
     const [created] = await transaction.insert(bookkeepingRecord)
@@ -2597,12 +2600,14 @@ export async function generateRecurringInvoice(id: string): Promise<void> {
   const sequence = Math.max(1, Number(settings?.data.nextInvoiceNumber) || 1);
   const prefix = settings?.data.invoicePrefix || "INV-";
   const today = new Date().toISOString().slice(0, 10);
+  // The schedule's own terms, else the customer's.
+  const terms = paymentTermOptions.includes(schedule.data.paymentTerms ?? "") ? schedule.data.paymentTerms : await termsFor(me.id, "customers", schedule.data.customer);
   const invoiceData = amountFromLineItems({
     ...schedule.data,
     invoiceNumber: `${prefix}${String(sequence).padStart(4, "0")}`,
     issueDate: today,
-    paymentTerms: "30 days",
-    dueDate: dueDateForTerms(today, "30 days"),
+    paymentTerms: terms,
+    dueDate: dueDateForTerms(today, terms),
     currency: settings?.data.currency || "USD",
     exchangeRate: "1",
     paidAmount: "0",

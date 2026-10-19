@@ -5,6 +5,7 @@ import { listAllBookkeepingRecords, listBookkeepingRecordGroups } from "@/app/ac
 import CompanySettings from "@/components/settings/CompanySettings";
 import { requireUser } from "@/lib/auth";
 import ChartOfAccountsWorkspace from "@/components/bookkeeping/ChartOfAccountsWorkspace";
+import { buildLedger } from "@/lib/ledger";
 import InventoryWorkspace from "@/components/bookkeeping/InventoryWorkspace";
 import BudgetPlannerWorkspace from "@/components/bookkeeping/BudgetPlannerWorkspace";
 import BillsWorkspace from "@/components/bookkeeping/BillsWorkspace";
@@ -152,10 +153,23 @@ export default async function SectionPage({ params, searchParams }: SectionPageP
   if (!baseModule) notFound();
   let module = baseModule;
   if (module.kind === "accounts") {
-    const groups = await listBookkeepingRecordGroups(["accounts", "settings"]);
+    const [groups, allRecords] = await Promise.all([listBookkeepingRecordGroups(["accounts", "settings"]), listAllBookkeepingRecords()]);
     const accounts = groups.accounts ?? [];
     const settings = groups.settings ?? [];
-    return <ChartOfAccountsWorkspace accounts={accounts} currency={settings[0]?.data.currency || "USD"} />;
+    // Each account's balance today, from the books, as the Balance Sheet and Profit and Loss read it.
+    const method = settings[0]?.data.accountingMethod === "Cash" ? "cash" : "accrual";
+    const ledger = buildLedger(allRecords, method);
+    const today = new Date().toISOString().slice(0, 10);
+    const totals = new Map<string, number>();
+    for (const posting of ledger.postings) if (posting.date <= today) totals.set(posting.account.trim().toLowerCase(), (totals.get(posting.account.trim().toLowerCase()) ?? 0) + posting.amount);
+    const balances = Object.fromEntries(accounts.map((account) => {
+      const name = (account.data.name?.trim() || account.data.code?.trim() || "").toLowerCase();
+      const raw = totals.get(name) ?? 0;
+      // Liabilities, equity and income are credit balances: shown positive when they are owed or earned.
+      const credit = ["Liability", "Equity", "Income"].includes(ledger.accounts.get(name)?.category ?? "");
+      return [account.id, Math.round((credit ? -raw : raw) * 100) / 100];
+    }));
+    return <ChartOfAccountsWorkspace accounts={accounts} currency={settings[0]?.data.currency || "USD"} balances={balances} cashBasis={method === "cash"} />;
   }
 
   const kinds = new Set<RecordKind>([module.kind, "settings", "warehouses"]);

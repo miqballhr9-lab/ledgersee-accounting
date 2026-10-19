@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { LockKeyhole, MoreHorizontal, Pencil, Plus, Search, Trash2, WalletCards } from "lucide-react";
+import Link from "next/link";
+import { BookOpenText, LockKeyhole, MoreHorizontal, Pencil, Plus, Search, Trash2, WalletCards } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { readableError } from "@/lib/action-error";
 
@@ -33,6 +34,9 @@ import { useOpenRecordParam } from "@/hooks/use-new-record-param";
 interface ChartOfAccountsWorkspaceProps {
   accounts: BookkeepingRecord[];
   currency: string;
+  /** Each account's balance today from the books, by account id. */
+  balances?: Record<string, number>;
+  cashBasis?: boolean;
 }
 
 const accountTypes = ["Asset", "Liability", "Equity", "Income", "Expense"] as const;
@@ -47,7 +51,15 @@ function formatCurrency(amount: string | undefined, currency: string) {
   }
 }
 
-export default function ChartOfAccountsWorkspace({ accounts: initialAccounts, currency }: ChartOfAccountsWorkspaceProps) {
+/** The account's transactions (its register), as the Transaction Report for that account. */
+function registerHref(account: BookkeepingRecord, cashBasis: boolean) {
+  const name = account.data.name?.trim() || account.data.code?.trim() || "";
+  const query = new URLSearchParams({ z: JSON.stringify({ accounts: [name], from: "", to: new Date().toISOString().slice(0, 10) }), back: "/app/accounts", title: `Account register · ${name}` });
+  if (cashBasis) query.set("method", "cash");
+  return `/app/reports/transaction-report?${query.toString()}`;
+}
+
+export default function ChartOfAccountsWorkspace({ accounts: initialAccounts, currency, balances = {}, cashBasis = false }: ChartOfAccountsWorkspaceProps) {
   const [accounts, setAccounts] = useState(initialAccounts);
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState("all");
@@ -183,6 +195,7 @@ export default function ChartOfAccountsWorkspace({ accounts: initialAccounts, cu
                 <TableHead className="min-w-52 text-xs font-medium text-muted-foreground">Name</TableHead>
                 <TableHead className="min-w-48 text-xs font-medium text-muted-foreground">Type / detail type</TableHead>
                 <TableHead className="text-right text-xs font-medium text-muted-foreground">Opening balance</TableHead>
+                <TableHead className="text-right text-xs font-medium text-muted-foreground">Balance</TableHead>
                 <TableHead className="w-28 text-right text-xs font-medium text-muted-foreground">Status</TableHead>
                 <TableHead className="w-14 px-5 text-right" aria-label="Account actions" />
               </TableRow>
@@ -207,6 +220,9 @@ export default function ChartOfAccountsWorkspace({ accounts: initialAccounts, cu
                     <span className="block">{formatCurrency(account.data.openingBalance, currency)}</span>
                     {account.data.openingBalanceDate ? <span className="mt-0.5 block text-xs font-normal text-muted-foreground">As of {account.data.openingBalanceDate}</span> : null}
                   </TableCell>
+                  <TableCell className="text-right font-medium tabular-nums">
+                    <Link href={registerHref(account, cashBasis)} className="text-primary hover:underline" title="Open this account’s register">{formatCurrency(String(balances[account.id] ?? 0), currency)}</Link>
+                  </TableCell>
                   <TableCell className="text-right">
                     {account.data.locked === "true" ? <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground"><LockKeyhole size={11} />Locked</span> : <span className="inline-flex rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">Active</span>}
                   </TableCell>
@@ -214,6 +230,7 @@ export default function ChartOfAccountsWorkspace({ accounts: initialAccounts, cu
                     <DropdownMenu>
                       <DropdownMenuTrigger render={<Button type="button" variant="ghost" size="icon-sm" aria-label={`More actions for ${account.data.name || "account"}`}><MoreHorizontal size={15} /></Button>} />
                       <DropdownMenuContent align="end" className="min-w-40">
+                        <DropdownMenuItem render={<Link href={registerHref(account, cashBasis)} />}><BookOpenText size={14} />View register</DropdownMenuItem>
                         <DropdownMenuItem onClick={() => openEditAccount(account)}><Pencil size={14} />Edit account</DropdownMenuItem>
                         <DropdownMenuSeparator />
                         <DropdownMenuItem variant="destructive" disabled={account.data.locked === "true"} title={account.data.locked === "true" ? "Unlock this account before deleting it" : undefined} onClick={() => { setDeleteError(""); setDeletingAccount(account); }}><Trash2 size={14} />{account.data.locked === "true" ? "Locked: can’t delete" : "Delete account"}</DropdownMenuItem>

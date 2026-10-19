@@ -10,6 +10,8 @@ import { assertCanWrite, requireUser } from "@/lib/auth";
 import { saveBookkeepingRecord } from "@/app/actions";
 import { assertBooksOpen } from "@/lib/closing";
 import { sendEmailOrThrow } from "@/lib/email";
+import { termsFor } from "@/lib/payment-terms";
+import { dueDateForTerms } from "@/lib/invoice-utils";
 import { paymentAccountType } from "@/lib/payment-accounts";
 import { revalidatePath } from "@/lib/revalidate";
 
@@ -129,14 +131,14 @@ export async function createInvoiceFromCharges(ids: string[]): Promise<{ id: str
   const lines = charges
     .sort((a, b) => (a.data.date ?? "").localeCompare(b.data.date ?? ""))
     .map((row) => ({ itemId: "", name: row.data.service || "Charge", description: [row.data.date, row.data.description].filter(Boolean).join(" · ").slice(0, 300), quantity: row.data.quantity || "1", rate: Number(row.data.rate).toFixed(2) }));
-  const due = new Date(`${today}T12:00:00Z`);
-  due.setUTCDate(due.getUTCDate() + 30);
+  // The customer's own payment terms.
+  const terms = await termsFor(me.id, "customers", customers[0]);
   const saved = await saveBookkeepingRecord("invoices", {
     customer: customers[0],
     invoiceNumber: number,
     issueDate: today,
-    paymentTerms: "30 days",
-    dueDate: due.toISOString().slice(0, 10),
+    paymentTerms: terms,
+    dueDate: dueDateForTerms(today, terms),
     lineItems: JSON.stringify(lines),
     ...(credit > 0 ? { discount: credit.toFixed(2) } : {}),
     status: "Draft",
@@ -169,14 +171,14 @@ export async function createInvoiceFromTime(ids: string[]): Promise<{ id: string
   const lines = entries
     .sort((a, b) => (a.data.date ?? "").localeCompare(b.data.date ?? ""))
     .map((row) => ({ itemId: "", name: row.data.service || "Services", description: [row.data.date, row.data.employee, row.data.description].filter(Boolean).join(" · ").slice(0, 300), quantity: String(Number(row.data.hours)), rate: Number(row.data.rate).toFixed(2) }));
-  const due = new Date(`${today}T12:00:00Z`);
-  due.setUTCDate(due.getUTCDate() + 30);
+  // The customer's own payment terms.
+  const terms = await termsFor(me.id, "customers", customers[0]);
   const saved = await saveBookkeepingRecord("invoices", {
     customer: customers[0],
     invoiceNumber: number,
     issueDate: today,
-    paymentTerms: "30 days",
-    dueDate: due.toISOString().slice(0, 10),
+    paymentTerms: terms,
+    dueDate: dueDateForTerms(today, terms),
     lineItems: JSON.stringify(lines),
     status: "Draft",
     paymentMethod: "Credit",
