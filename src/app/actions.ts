@@ -11,7 +11,7 @@ import { ActionError } from "@/lib/action-error";
 import { bookkeepingRecord, user } from "@/db/schema";
 import { assertCanRead, assertCanWrite, requireUser } from "@/lib/auth";
 import { canReadKind } from "@/lib/permissions";
-import { applyLoanRepayment } from "@/lib/hr-rules";
+import { syncAttachmentRepayments } from "@/lib/hr-rules";
 import { sendEmailOrThrow } from "@/lib/email";
 import { createUploadUrl } from "@/lib/storage";
 import { dueDateForTerms, invoiceTax, parseInvoiceLines, serialList } from "@/lib/invoice-utils";
@@ -328,6 +328,8 @@ export async function saveBookkeepingRecord(kind: string, input: Record<string, 
   const me = await requireUser();
   await recordAudit(me, id ? "Edited" : "Added", kind, saved.id, saved.data);
   if (kind === "customers" || kind === "vendors") await syncOpeningBalance(me.id, kind, saved);
+  // Loan and advance deductions on a salary pay down the employee's salary attachments.
+  if (kind === "payroll") await syncAttachmentRepayments(me.id);
   return saved;
 }
 
@@ -1054,6 +1056,7 @@ export async function importPayrollCsv(input: string): Promise<{ created: number
     }
   }
 
+  await syncAttachmentRepayments(me.id);
   revalidatePath("/app", "layout");
   const savedRows = await db
     .select()
@@ -1148,6 +1151,7 @@ export async function deleteBookkeepingRecord(kind: string, id: string): Promise
   const [before] = isRecordKind(kind) ? await db.select().from(bookkeepingRecord).where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, kind))).limit(1) : [];
   await deleteRecord(kind, id);
   if (before) await recordAudit(me, "Deleted", kind, id, before.data);
+  if (kind === "payroll") await syncAttachmentRepayments(me.id);
 }
 
 async function deleteRecord(kind: string, id: string): Promise<void> {
@@ -1672,7 +1676,7 @@ export async function recordPayrollPayment(id: string, paymentDate: string, acco
     data: { payrollId: id, reference: entry.data.reference ?? "", employee: entry.data.employeeName ?? "", amount: amount.toFixed(2), paymentDate, method, paymentAccountId: account.id, paymentAccountName: name, direction: "out" },
   });
   // The salary's loan deduction pays down the employee's HR loans once the salary is fully paid.
-  if (fullyPaid) await applyLoanRepayment(me.id, entry.data, 1);
+  await syncAttachmentRepayments(me.id);
   await auditPayment(me, "payroll", id);
   revalidatePath("/app", "layout");
 }
@@ -1695,7 +1699,7 @@ export async function undoPayrollPayment(id: string): Promise<void> {
     .update(bookkeepingRecord)
     .set({ data: { ...entry.data, status: "Unpaid", paidAmount: "0", paidDate: "" }, updatedAt: new Date() })
     .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id)));
-  if (entry.data.status === "Paid") await applyLoanRepayment(me.id, entry.data, -1);
+  await syncAttachmentRepayments(me.id);
   await auditRecord(me, "Payment removed", id);
   revalidatePath("/app", "layout");
 }

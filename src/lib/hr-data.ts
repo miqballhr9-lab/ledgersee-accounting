@@ -13,12 +13,15 @@ import { standardAccounts } from "@/lib/standard-accounts";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
 import { hrKinds } from "@/lib/crm-config";
 import { odooHrData } from "@/lib/hr-status";
+import { syncAttachmentRepayments } from "@/lib/hr-rules";
 import { weekendDays } from "@/lib/weekend";
 
 /** Everything the HR screens show, loaded in one query. */
 export async function loadHrData() {
   const me = await requireUser();
   await ensurePaymentAccounts(me);
+  // Bring salary attachments up to date with the deductions already in payroll.
+  await syncAttachmentRepayments(me.id);
   const groups = await listBookkeepingRecordGroups([...hrKinds, "employees", "payroll", "crm-notes", "team-members", "settings", "accounts"]);
   const store: Record<string, BookkeepingRecord[]> = {};
   for (const [kind, records] of Object.entries(groups)) {
