@@ -3,7 +3,7 @@ import { and, desc, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { bookkeepingRecord } from "@/db/schema";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
-import { budgetActual, budgetTotals, budgetVariance, parseBudgetLines, recordsWithinBudgetDates } from "@/lib/budget-utils";
+import { budgetActual, budgetExpectedTotal, budgetTotals, budgetVariance, parseBudgetLines, recordsWithinBudgetDates } from "@/lib/budget-utils";
 
 function toRecord(row: typeof bookkeepingRecord.$inferSelect): BookkeepingRecord {
   return { id: row.id, kind: row.kind as BookkeepingRecord["kind"], data: row.data, createdAt: row.createdAt.toISOString(), updatedAt: row.updatedAt.toISOString() };
@@ -89,6 +89,13 @@ export function BudgetPrintSheet({ budget, sources, settings, fallbackCompany }:
             );
           })}
           <tfoot>
+            <tr className="border-t-2 border-border font-semibold">
+              <td colSpan={3} className="py-3 pr-3">Total</td>
+              <td className="py-3 pr-3 text-right tabular-nums">{money(budgetExpectedTotal(lines.map((item) => item.line)))}</td>
+              <td className="py-3 pr-3 text-right tabular-nums">{money(lines.reduce((sum, item) => sum + item.actual, 0))}</td>
+              <td className={`py-3 pr-3 text-right tabular-nums ${totals.variance < 0 ? "text-destructive" : ""}`}>{money(totals.variance)}</td>
+              <td />
+            </tr>
             <tr className="border-t-2 border-primary font-semibold">
               <td colSpan={3} className="py-3 pr-3">Net profit / (loss)</td>
               <td className={`py-3 pr-3 text-right tabular-nums ${totals.profit.expected < 0 ? "text-destructive" : ""}`}>{money(totals.profit.expected)}</td>
