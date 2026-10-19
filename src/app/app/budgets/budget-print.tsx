@@ -3,7 +3,7 @@ import { and, desc, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { bookkeepingRecord } from "@/db/schema";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
-import { budgetActual, budgetExpectedTotal, budgetVariance, parseBudgetLines, recordsWithinBudgetDates } from "@/lib/budget-utils";
+import { budgetActual, budgetTotals, budgetVariance, parseBudgetLines, recordsWithinBudgetDates } from "@/lib/budget-utils";
 
 function toRecord(row: typeof bookkeepingRecord.$inferSelect): BookkeepingRecord {
   return { id: row.id, kind: row.kind as BookkeepingRecord["kind"], data: row.data, createdAt: row.createdAt.toISOString(), updatedAt: row.updatedAt.toISOString() };
@@ -39,8 +39,7 @@ export function BudgetPrintSheet({ budget, sources, settings, fallbackCompany }:
       return `${currency} ${value.toFixed(2)}`;
     }
   };
-  const actualTotal = lines.reduce((sum, item) => sum + item.actual, 0);
-  const varianceTotal = lines.reduce((sum, item) => sum + item.variance, 0);
+  const totals = budgetTotals(lines.map((item) => item.line), lines.map((item) => item.actual));
 
   return (
     <article className="mx-auto mb-6 max-w-4xl break-after-page print:mb-0 last:break-after-auto border border-border bg-card p-6 text-card-foreground shadow-sm print:max-w-none print:border-0 print:p-8 print:shadow-none sm:p-10">
@@ -62,25 +61,39 @@ export function BudgetPrintSheet({ budget, sources, settings, fallbackCompany }:
               <th className="py-2">Description</th>
             </tr>
           </thead>
-          <tbody>
-            {lines.map(({ line, actual, variance }, index) => (
-              <tr key={index} className="border-b border-border">
-                <td className="py-2.5 pr-3 text-muted-foreground">{index + 1}</td>
-                <td className="py-2.5 pr-3">{line.category}</td>
-                <td className="py-2.5 pr-3 font-medium">{line.budgetHead}</td>
-                <td className="py-2.5 pr-3 text-right tabular-nums">{money(Number(line.expected) || 0)}</td>
-                <td className="py-2.5 pr-3 text-right tabular-nums">{money(actual)}</td>
-                <td className={`py-2.5 pr-3 text-right tabular-nums ${variance < 0 ? "text-destructive" : ""}`}>{money(variance)}</td>
-                <td className="py-2.5 text-muted-foreground">{line.description || "—"}</td>
-              </tr>
-            ))}
-          </tbody>
+          {(["Income", "Expense"] as const).map((section) => {
+            const sectionLines = lines.filter(({ line }) => (line.type === "Income") === (section === "Income"));
+            const sectionTotal = section === "Income" ? totals.income : totals.expense;
+            return (
+              <tbody key={section}>
+                <tr className="border-b border-border bg-muted/40"><td colSpan={7} className="py-2 pl-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{section === "Income" ? "Income / sales" : "Expenses"}</td></tr>
+                {sectionLines.map(({ line, actual, variance }, index) => (
+                  <tr key={index} className="border-b border-border">
+                    <td className="py-2.5 pr-3 text-muted-foreground">{index + 1}</td>
+                    <td className="py-2.5 pr-3">{line.category}</td>
+                    <td className="py-2.5 pr-3 font-medium">{line.budgetHead}</td>
+                    <td className="py-2.5 pr-3 text-right tabular-nums">{money(Number(line.expected) || 0)}</td>
+                    <td className="py-2.5 pr-3 text-right tabular-nums">{money(actual)}</td>
+                    <td className={`py-2.5 pr-3 text-right tabular-nums ${variance < 0 ? "text-destructive" : ""}`}>{money(variance)}</td>
+                    <td className="py-2.5 text-muted-foreground">{line.description || "—"}</td>
+                  </tr>
+                ))}
+                <tr className="border-b-2 border-border font-semibold">
+                  <td colSpan={3} className="py-2.5 pr-3">Total {section === "Income" ? "income" : "expenses"}</td>
+                  <td className="py-2.5 pr-3 text-right tabular-nums">{money(sectionTotal.expected)}</td>
+                  <td className="py-2.5 pr-3 text-right tabular-nums">{money(sectionTotal.actual)}</td>
+                  <td className="py-2.5 pr-3 text-right tabular-nums">{money(section === "Income" ? sectionTotal.actual - sectionTotal.expected : sectionTotal.expected - sectionTotal.actual)}</td>
+                  <td />
+                </tr>
+              </tbody>
+            );
+          })}
           <tfoot>
             <tr className="border-t-2 border-primary font-semibold">
-              <td colSpan={3} className="py-3 pr-3">Total</td>
-              <td className="py-3 pr-3 text-right tabular-nums">{money(budgetExpectedTotal(lines.map((item) => item.line)))}</td>
-              <td className="py-3 pr-3 text-right tabular-nums">{money(actualTotal)}</td>
-              <td className={`py-3 pr-3 text-right tabular-nums ${varianceTotal < 0 ? "text-destructive" : ""}`}>{money(varianceTotal)}</td>
+              <td colSpan={3} className="py-3 pr-3">Net profit / (loss)</td>
+              <td className={`py-3 pr-3 text-right tabular-nums ${totals.profit.expected < 0 ? "text-destructive" : ""}`}>{money(totals.profit.expected)}</td>
+              <td className={`py-3 pr-3 text-right tabular-nums ${totals.profit.actual < 0 ? "text-destructive" : ""}`}>{money(totals.profit.actual)}</td>
+              <td className={`py-3 pr-3 text-right tabular-nums ${totals.variance < 0 ? "text-destructive" : ""}`}>{money(totals.variance)}</td>
               <td />
             </tr>
           </tfoot>

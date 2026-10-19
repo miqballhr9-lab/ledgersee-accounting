@@ -16,7 +16,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectSeparator, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { homeRate } from "@/lib/invoice-utils";
-import { budgetActual, budgetActualRecords, budgetExpectedTotal, budgetPresetRange, budgetVariance, csvCell, parseBudgetLines, payrollBudgetHeads, parseCsv, recordsWithinBudgetDates, type BudgetCategory, type BudgetLine, type BudgetPeriod } from "@/lib/budget-utils";
+import { budgetActual, budgetActualRecords, budgetPresetRange, budgetTotals, budgetVariance, csvCell, parseBudgetLines, payrollBudgetHeads, parseCsv, recordsWithinBudgetDates, type BudgetCategory, type BudgetLine, type BudgetPeriod } from "@/lib/budget-utils";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
 
 interface BudgetPlannerWorkspaceProps {
@@ -213,21 +213,15 @@ export default function BudgetPlannerWorkspace({ budgets, financialRecords, acco
   );
   const actuals = useMemo(() => lines.map((line) => budgetActual(resolveBudgetLine(line, accountHeads), periodRecords, currency)), [accountHeads, lines, periodRecords, currency]);
   const activeActualRecords = activeActualLine ? budgetActualRecords(resolveBudgetLine(activeActualLine, accountHeads), periodRecords) : [];
-  const expectedTotal = budgetExpectedTotal(lines);
-  const actualTotal = actuals.reduce((sum, amount) => sum + amount, 0);
-  const varianceTotal = lines.reduce((sum, line, index) => sum + budgetVariance(line, actuals[index] ?? 0), 0);
+  const totals = budgetTotals(lines, actuals);
 
   const budgetSummaries = useMemo(() => savedBudgets.map((record) => {
     const budgetLines = parseBudgetLines(record.data.lines).map((line) => resolveBudgetLine(line, accountHeads));
     const records = recordsWithinBudgetDates(financialRecords, record.data.startDate || "", record.data.endDate || "");
     const lineActuals = budgetLines.map((line) => budgetActual(line, records, currency));
-    return {
-      record,
-      lineCount: budgetLines.length,
-      expected: budgetExpectedTotal(budgetLines),
-      actual: lineActuals.reduce((sum, amount) => sum + amount, 0),
-      variance: budgetLines.reduce((sum, line, index) => sum + budgetVariance(line, lineActuals[index] ?? 0), 0),
-    };
+    const { profit, variance } = budgetTotals(budgetLines, lineActuals);
+    // Budgets are compared by the profit (or loss) they plan: income less expenses.
+    return { record, lineCount: budgetLines.length, expected: profit.expected, actual: profit.actual, variance };
   }), [accountHeads, financialRecords, savedBudgets]);
   const selectedBudgets = savedBudgets.filter((record) => selectedIds.has(record.id));
   const filteredBudgets = budgetSummaries.filter(({ record }) => !search.trim() || `${record.data.name} ${record.data.description} ${record.data.period}`.toLowerCase().includes(search.trim().toLowerCase()));
@@ -575,8 +569,8 @@ export default function BudgetPlannerWorkspace({ budgets, financialRecords, acco
       <section className="mt-6 grid grid-cols-2 gap-3 xl:grid-cols-4" aria-label="Budget summary">
         {[
           { label: "Saved budgets", value: String(savedBudgets.length) },
-          { label: "Expected (all budgets)", value: formatAmount(budgetSummaries.reduce((sum, item) => sum + item.expected, 0), currency) },
-          { label: "Actual (all budgets)", value: formatAmount(budgetSummaries.reduce((sum, item) => sum + item.actual, 0), currency) },
+          { label: "Planned profit / loss", value: formatAmount(budgetSummaries.reduce((sum, item) => sum + item.expected, 0), currency) },
+          { label: "Actual profit / loss", value: formatAmount(budgetSummaries.reduce((sum, item) => sum + item.actual, 0), currency) },
           { label: "Favorable variance", value: formatAmount(budgetSummaries.reduce((sum, item) => sum + item.variance, 0), currency) },
         ].map((item) => (
           <div key={item.label} className="rounded-lg border border-border bg-card p-4">
@@ -626,8 +620,8 @@ export default function BudgetPlannerWorkspace({ budgets, financialRecords, acco
                   <th className="px-4 py-3">Period</th>
                   <th className="px-4 py-3">Dates</th>
                   <th className="px-4 py-3 text-right">Lines</th>
-                  <th className="px-4 py-3 text-right">Expected</th>
-                  <th className="px-4 py-3 text-right">Actual</th>
+                  <th className="px-4 py-3 text-right">Planned profit / loss</th>
+                  <th className="px-4 py-3 text-right">Actual profit / loss</th>
                   <th className="px-4 py-3 text-right">Variance</th>
                   <th className="px-4 py-3">Description</th>
                   <th className="w-12 print:hidden"><span className="sr-only">Actions</span></th>
@@ -693,10 +687,19 @@ export default function BudgetPlannerWorkspace({ budgets, financialRecords, acco
             <DialogDescription>Set the budget’s dates and expected amounts; actuals and variance update from your records.</DialogDescription>
           </DialogHeader>
           <div className="min-w-0 space-y-4">
-            <div className="grid grid-cols-3 gap-3">
-              <div className="rounded-md bg-muted/50 p-3"><p className="text-xs text-muted-foreground">Expected budget</p><p className="mt-1 font-semibold tabular-nums">{formatAmount(expectedTotal, currency)}</p></div>
-              <div className="rounded-md bg-muted/50 p-3"><p className="text-xs text-muted-foreground">Actual</p><p className="mt-1 font-semibold tabular-nums">{formatAmount(actualTotal, currency)}</p></div>
-              <div className="rounded-md bg-accent/70 p-3"><p className="text-xs text-muted-foreground">Favorable variance</p><p className={`mt-1 font-semibold tabular-nums ${varianceTotal < 0 ? "text-destructive" : "text-primary"}`}>{formatAmount(varianceTotal, currency)}</p></div>
+            <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+              {[
+                { label: "Income / sales", planned: totals.income.expected, actual: totals.income.actual },
+                { label: "Expenses", planned: totals.expense.expected, actual: totals.expense.actual },
+                { label: totals.profit.actual < 0 ? "Net loss" : "Net profit", planned: totals.profit.expected, actual: totals.profit.actual, strong: true },
+              ].map((card) => (
+                <div key={card.label} className={`rounded-md p-3 ${card.strong ? "bg-primary/10" : "bg-muted/50"}`}>
+                  <p className="text-xs text-muted-foreground">{card.label}</p>
+                  <p className={`mt-1 font-semibold tabular-nums ${card.strong && card.actual < 0 ? "text-destructive" : ""}`}>{formatAmount(card.actual, currency)} <span className="text-xs font-normal text-muted-foreground">actual</span></p>
+                  <p className="text-xs tabular-nums text-muted-foreground">Budget {formatAmount(card.planned, currency)}</p>
+                </div>
+              ))}
+              <div className="rounded-md bg-accent/70 p-3"><p className="text-xs text-muted-foreground">Favorable variance</p><p className={`mt-1 font-semibold tabular-nums ${totals.variance < 0 ? "text-destructive" : "text-primary"}`}>{formatAmount(totals.variance, currency)}</p><p className="text-xs text-muted-foreground">Actual profit less budgeted profit</p></div>
             </div>
 
           <section className="rounded-lg border border-border bg-card p-4 sm:p-5">
@@ -744,8 +747,17 @@ export default function BudgetPlannerWorkspace({ budgets, financialRecords, acco
                     <th className="w-20"><span className="sr-only">Line actions</span></th>
                   </tr>
                 </thead>
-                <tbody>
+                {(["Income", "Expense"] as const).map((section) => {
+                  const sectionTotal = section === "Income" ? totals.income : totals.expense;
+                  return (
+                <tbody key={section}>
+                  <tr className="border-b border-border bg-muted/40">
+                    <td />
+                    <td colSpan={7} className="px-2.5 py-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{section === "Income" ? "Income / sales" : "Expenses"}</td>
+                  </tr>
                   {lines.map((line, index) => {
+                    // Income lines sit under Income; expense lines, and lines without a head yet, under Expenses.
+                    if ((line.type === "Income") !== (section === "Income")) return null;
                     const actual = actuals[index] ?? 0;
                     const resolvedLine = resolveBudgetLine(line, accountHeads);
                     const directSourceKind: BookkeepingRecord["kind"] | null = resolvedLine.category === "Payroll"
@@ -810,15 +822,27 @@ export default function BudgetPlannerWorkspace({ budgets, financialRecords, acco
                       </tr>
                     );
                   })}
-                </tbody>
-                <tfoot>
-                  <tr className="font-semibold">
+                  <tr className="border-b-2 border-border font-semibold">
                     <td />
                     <td className={cellBorder} />
-                    <td className={`px-2.5 py-3 text-right ${cellBorder}`}>Total</td>
-                    <td className={`px-2.5 py-3 text-right tabular-nums ${cellBorder}`}>{formatAmount(expectedTotal, currency)}</td>
-                    <td className={`px-2.5 py-3 text-right tabular-nums ${cellBorder}`}>{formatAmount(actualTotal, currency)}</td>
-                    <td className={`px-2.5 py-3 text-right tabular-nums ${cellBorder} ${varianceTotal < 0 ? "text-destructive" : "text-primary"}`}>{formatAmount(varianceTotal, currency)}</td>
+                    <td className={`px-2.5 py-2.5 text-right ${cellBorder}`}>Total {section === "Income" ? "income" : "expenses"}</td>
+                    <td className={`px-2.5 py-2.5 text-right tabular-nums ${cellBorder}`}>{formatAmount(sectionTotal.expected, currency)}</td>
+                    <td className={`px-2.5 py-2.5 text-right tabular-nums ${cellBorder}`}>{formatAmount(sectionTotal.actual, currency)}</td>
+                    <td className={`px-2.5 py-2.5 text-right tabular-nums ${cellBorder}`}>{formatAmount(section === "Income" ? sectionTotal.actual - sectionTotal.expected : sectionTotal.expected - sectionTotal.actual, currency)}</td>
+                    <td className={cellBorder} />
+                    <td />
+                  </tr>
+                </tbody>
+                  );
+                })}
+                <tfoot>
+                  <tr className="bg-primary/5 font-semibold">
+                    <td />
+                    <td className={cellBorder} />
+                    <td className={`px-2.5 py-3 text-right ${cellBorder}`}>Net profit / (loss)</td>
+                    <td className={`px-2.5 py-3 text-right tabular-nums ${cellBorder} ${totals.profit.expected < 0 ? "text-destructive" : ""}`}>{formatAmount(totals.profit.expected, currency)}</td>
+                    <td className={`px-2.5 py-3 text-right tabular-nums ${cellBorder} ${totals.profit.actual < 0 ? "text-destructive" : ""}`}>{formatAmount(totals.profit.actual, currency)}</td>
+                    <td className={`px-2.5 py-3 text-right tabular-nums ${cellBorder} ${totals.variance < 0 ? "text-destructive" : "text-primary"}`}>{formatAmount(totals.variance, currency)}</td>
                     <td className={cellBorder} />
                     <td />
                   </tr>

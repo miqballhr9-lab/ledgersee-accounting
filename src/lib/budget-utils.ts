@@ -195,3 +195,16 @@ export function parseCsv(text: string) {
 export function csvCell(value: string | number) {
   return `"${String(value).replaceAll('"', '""')}"`;
 }
+
+/**
+ * A budget read like a profit and loss: income at the top, expenses below,
+ * and the profit (or loss) they leave, planned and actual. Variance is
+ * favorable when positive: more income, or less spending, than planned.
+ */
+export function budgetTotals(lines: BudgetLine[], actuals: number[]) {
+  const side = (type: BudgetLineType) => lines.reduce((total, line, index) => (line.type === type ? { expected: total.expected + (Number(line.expected) || 0), actual: total.actual + (actuals[index] ?? 0) } : total), { expected: 0, actual: 0 });
+  const income = side("Income");
+  const expense = side("Expense");
+  const profit = { expected: income.expected - expense.expected, actual: income.actual - expense.actual };
+  return { income, expense, profit, variance: profit.actual - profit.expected };
+}
