@@ -72,10 +72,10 @@ export default async function SectionPage({ params, searchParams }: SectionPageP
 
   if (section === "payroll") {
     await ensurePaymentAccounts(await requireUser());
-    const groups = await listBookkeepingRecordGroups(["payroll", "employees", "accounts", "settings", "hr-leaves", "hr-loans", "hr-attendance"]);
+    const groups = await listBookkeepingRecordGroups(["payroll", "employees", "accounts", "settings", "hr-leaves", "hr-loans", "hr-attendance", "expenses"]);
     const settingsData = groups.settings?.[0]?.data;
     const pack = packFor(settingsData?.taxCountry);
-    return <PayrollWorkspace records={groups.payroll ?? []} accounts={groups.accounts ?? []} employees={groups.employees ?? []} hr={{ leaves: groups["hr-leaves"] ?? [], loans: groups["hr-loans"] ?? [], attendance: groups["hr-attendance"] ?? [], weekend: weekendDays(settingsData?.weekendDays), salaryRules: settingsData?.salaryRules ?? "" }} asOfDate={new Date().toISOString().slice(0, 10)} dateRange={{ startDate, endDate }} currency={settingsData?.currency || pack?.currency || "PKR"} taxRule={pack?.payroll.incomeTax ?? "pakistan-slabs"} />;
+    return <PayrollWorkspace records={groups.payroll ?? []} accounts={groups.accounts ?? []} employees={groups.employees ?? []} hr={{ leaves: groups["hr-leaves"] ?? [], loans: groups["hr-loans"] ?? [], attendance: groups["hr-attendance"] ?? [], weekend: weekendDays(settingsData?.weekendDays), salaryRules: settingsData?.salaryRules ?? "" }} asOfDate={new Date().toISOString().slice(0, 10)} dateRange={{ startDate, endDate }} currency={settingsData?.currency || pack?.currency || "PKR"} taxRule={pack?.payroll.incomeTax ?? "pakistan-slabs"} liabilityPayments={(groups.expenses ?? []).filter((expense) => expense.data.payrollLiability)} />;
   }
 
   if (section === "employees") {

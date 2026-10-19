@@ -109,6 +109,33 @@ interface DocPayment {
   rate?: number;
 }
 
+/** Attachments that pay a creditor or court out of salary, rather than money lent to the employee. */
+export const isGarnishment = (loanType: string | undefined) => /attachment of salary|assignment of salary|child support|garnish/i.test(loanType ?? "");
+
+/** What each salary kept back for an attachment, as worked out from payroll. */
+export function deductionLog(raw: string | undefined): Array<{ payrollId: string; month: string; amount: number }> {
+  try {
+    const parsed: unknown = JSON.parse(raw || "[]");
+    return Array.isArray(parsed)
+      ? parsed.flatMap((entry) => (entry && typeof entry === "object" && typeof entry.payrollId === "string" && Number(entry.amount) > 0 ? [{ payrollId: entry.payrollId, month: String(entry.month ?? ""), amount: Number(entry.amount) }] : []))
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+// Expense accounts that suit each HR expense category when there is no account of that name.
+const claimAccountPatterns: Record<string, RegExp> = {
+  travel: /travel/i,
+  accommodation: /accommodation|lodging|hotel|travel/i,
+  fuel: /fuel|vehicle|motor/i,
+  meals: /meal|entertain/i,
+  "office supplies": /office|supplies/i,
+  "mobile & internet": /phone|mobile|internet|telecom|communication/i,
+  training: /training|education/i,
+  medical: /medical|health/i,
+};
+
 export function buildLedger(allRecords: BookkeepingRecord[], method: AccountingMethod = "accrual"): Ledger {
   // Records an automation made that still wait for approval stay out of the books until approved.
   const records = allRecords.filter((record) => record.data.awaitingApproval !== "true");
@@ -161,6 +188,17 @@ export function buildLedger(allRecords: BookkeepingRecord[], method: AccountingM
   // What the employer pays on top of salaries (Sweden's arbetsgivaravgifter, Denmark's ATP), and where it is owed until paid.
   const employerContributions = lazy(() => find((account) => account.category === "Expense" && /employer (social )?contributions|arbetsgivaravgift|employer.*(social security|national insurance)/i.test(account.name)) ?? ensure("Employer social contributions", "Expense", "Expenses"));
   const employerContributionsOwed = lazy(() => find((account) => account.category === "Liability" && /employer contributions owed/i.test(account.name)) ?? payrollLiabilities);
+  // Salary kept back for a creditor or court (attachment, assignment, child support), owed on until paid to them.
+  const attachmentsPayable = lazy(() => find((account) => account.category === "Liability" && /attachment|garnish|child support/i.test(account.name)) ?? ensure("Salary attachments payable", "Liability", "Current liabilities"));
+  const vehicleExpenses = lazy(() => find((account) => account.category === "Expense" && /vehicle|motor|fleet|car expense/i.test(account.name)) ?? ensure("Vehicle expenses", "Expense", "Expenses"));
+  const employeeExpenses = lazy(() => find((account) => account.category === "Expense" && /employee expenses|staff expenses/i.test(account.name)) ?? ensure("Employee expenses", "Expense", "Expenses"));
+  /** An HR expense category's account: the chart account of that name, else one that fits it, else Employee expenses. */
+  const claimAccount = (category: string) => {
+    const named = accounts.get(key(category));
+    if (named?.category === "Expense") return named.name;
+    const pattern = claimAccountPatterns[category.trim().toLowerCase()];
+    return (pattern && find((account) => account.category === "Expense" && pattern.test(account.name))) || employeeExpenses();
+  };
   const employeeRecoveries = lazy(() => find((account) => account.category === "Income" && /fine|recover/i.test(account.name)) ?? ensure("Employee fines and recoveries", "Income", "Other income"));
 
   const recordById = new Map(records.map((record) => [record.id, record]));
@@ -487,7 +525,7 @@ export function buildLedger(allRecords: BookkeepingRecord[], method: AccountingM
 
     if (record.kind === "payroll") {
       const gross = num(data.grossSalary);
-      if (!gross) continue;
+      if (!gross || /draft|cancel/i.test(data.status ?? "")) continue;
       const net = num(data.payableSalary);
       // What was kept back from pay: loans and advances repay the employee's receivable, fines are income,
       // and income tax and anything else is owed onwards (payroll liabilities).
@@ -564,12 +602,34 @@ export function buildLedger(allRecords: BookkeepingRecord[], method: AccountingM
     }
 
     if (record.kind === "hr-loans") {
-      // A loan or advance paid out to an employee is money they owe back, repaid through payroll.
       const amount = num(data.amount);
       if (!amount || !["Running", "Completed", "Approved", "Repaid"].includes(data.status ?? "")) continue;
+      const date = data.requestDate || record.createdAt.slice(0, 10);
+      const base = { number: "", name: data.employee ?? "", customer: "", supplier: "", memo: data.loanType || "Salary attachment", sourceKind: "hr-loans", sourceId: record.id };
+      if (isGarnishment(data.loanType)) {
+        // Not money paid to the employee: what each salary keeps back for it is owed on to the creditor or court.
+        for (const entry of deductionLog(data.deductionLog)) {
+          post({ ...base, type: "Salary attachment", txnId: `att-${record.id}-${entry.payrollId}`, date: /^\d{4}-\d{2}$/.test(entry.month) ? `${entry.month}-28` : date }, [[employeeLoans(), entry.amount], [attachmentsPayable(), -entry.amount]]);
+        }
+        continue;
+      }
+      // A loan or advance paid out to an employee is money they owe back, repaid through payroll or in cash.
+      post({ ...base, type: "Employee loan", txnId: `loan-${record.id}`, date }, [[employeeLoans(), amount], [paymentAccountName(data), -amount]]);
+      const cash = num(data.manualRepaid);
+      if (cash > 0) {
+        const into = data.repaidIntoId && accountById.get(data.repaidIntoId) ? ensure(accountById.get(data.repaidIntoId)!, "Asset", "Cash and cash equivalents") : paymentAccountName(data);
+        post({ ...base, type: "Loan repayment", txnId: `loan-rep-${record.id}`, date: data.cashRepaidDate || date }, [[into, cash], [employeeLoans(), -cash]]);
+      }
+      continue;
+    }
+
+    if (record.kind === "hr-vehicle-services") {
+      // Fuel, repairs and servicing are a cost once done, paid from the account chosen on the service.
+      const cost = num(data.cost);
+      if (!cost || !["Done", ""].includes(data.status ?? "")) continue;
       post(
-        { txnId: `loan-${record.id}`, date: data.requestDate || record.createdAt.slice(0, 10), type: "Employee loan", number: "", name: data.employee ?? "", customer: "", supplier: "", memo: data.loanType || "Salary attachment", sourceKind: "hr-loans", sourceId: record.id },
-        [[employeeLoans(), amount], [paymentAccountName(data), -amount]],
+        { txnId: `fleet-${record.id}`, date: data.date || record.createdAt.slice(0, 10), type: "Vehicle expense", number: "", name: data.vendor ?? "", customer: "", supplier: data.vendor ?? "", memo: [data.vehicle, data.serviceType].filter(Boolean).join(" · "), sourceKind: "hr-vehicle-services", sourceId: record.id },
+        [[vehicleExpenses(), cost], [paymentAccountName(data), -cost]],
       );
       continue;
     }
@@ -578,7 +638,7 @@ export function buildLedger(allRecords: BookkeepingRecord[], method: AccountingM
       const amount = num(data.amount);
       if (!amount || !["Approved", "Paid"].includes(data.status ?? "")) continue;
       const base = { number: data.reference ?? "", name: data.employee ?? "", customer: "", supplier: "", memo: data.description ?? "", sourceKind: "hr-claims", sourceId: record.id };
-      const expense = expenseAccount(data.category || "Employee expenses");
+      const expense = claimAccount(data.category || "");
       const date = data.date || record.createdAt.slice(0, 10);
       if (data.paidBy === "Company") {
         // Paid with company money: the expense and the payment happen together.

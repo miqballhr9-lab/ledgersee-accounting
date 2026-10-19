@@ -70,7 +70,7 @@ const borrowedReads: Partial<Record<Area, string[]>> = {
   budgets: ["invoices", "bills", "expenses", "payroll", "accounts"],
   sales: ["accounts", "taxes"],
   purchases: ["accounts", "items", "taxes"],
-  accounting: ["customers", "vendors", "employees", "payroll", "invoices", "bills", "expenses", "hr-loans", "hr-claims", "hr-settlements"],
+  accounting: ["customers", "vendors", "employees", "payroll", "invoices", "bills", "expenses", "hr-loans", "hr-claims", "hr-settlements", "hr-vehicle-services"],
 };
 
 export function canReadKind(role: Role, kind: string) {

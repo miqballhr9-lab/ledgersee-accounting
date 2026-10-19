@@ -475,7 +475,7 @@ export async function syncAttachmentRepayments(userId: string) {
     .sort((a, b) => (a.data.month || "").localeCompare(b.data.month || "") || a.createdAt.getTime() - b.createdAt.getTime());
   // Amounts entered by hand on the attachment; older records kept only the total, so their payroll share comes off it.
   const manualOf = (data: Record<string, string>) => (data.manualRepaid !== undefined ? money(data.manualRepaid) : isToApprove(data.status) ? money(data.repaidAmount) : 0);
-  const repaid = new Map<string, { amount: number; last: string; count: number; payrolls: Set<string> }>();
+  const repaid = new Map<string, { amount: number; last: string; count: number; payrolls: Set<string>; log: Array<{ payrollId: string; month: string; amount: string }> }>();
   for (const pay of payrolls) {
     const employee = employees.find((row) => pay.data.employeeId && row.data.employeeId === pay.data.employeeId);
     const name = (pay.data.employeeName ?? "").trim().toLowerCase();
@@ -486,19 +486,21 @@ export async function syncAttachmentRepayments(userId: string) {
       let left = deducted;
       for (const loan of [...theirs.filter((row) => preferred(row.data)), ...theirs.filter((row) => !preferred(row.data))]) {
         if (left <= 0.004) break;
-        const entry = repaid.get(loan.id) ?? { amount: 0, last: "", count: 0, payrolls: new Set<string>() };
+        const entry = repaid.get(loan.id) ?? { amount: 0, last: "", count: 0, payrolls: new Set<string>(), log: [] };
         const take = Math.min(left, Math.max(0, money(loan.data.amount) - manualOf(loan.data) - entry.amount));
         if (take <= 0.004) continue;
         left -= take;
         // Each salary that took something off counts as one installment.
         entry.payrolls.add(pay.id);
-        repaid.set(loan.id, { amount: entry.amount + take, last: [pay.data.month, pay.data.reference].filter(Boolean).join(" · "), count: entry.payrolls.size, payrolls: entry.payrolls });
+        // Each salary's share, so accounting can post what was kept back in the month it was kept.
+        const log = [...entry.log.filter((item) => item.payrollId !== pay.id), { payrollId: pay.id, month: pay.data.month ?? "", amount: fixed(take + Number(entry.log.find((item) => item.payrollId === pay.id)?.amount ?? 0)) }];
+        repaid.set(loan.id, { amount: entry.amount + take, last: [pay.data.month, pay.data.reference].filter(Boolean).join(" · "), count: entry.payrolls.size, payrolls: entry.payrolls, log });
       }
     }
   }
   for (const loan of loans) {
     const amount = money(loan.data.amount);
-    const fromSalary = repaid.get(loan.id) ?? { amount: 0, last: "", count: 0, payrolls: new Set<string>() };
+    const fromSalary = repaid.get(loan.id) ?? { amount: 0, last: "", count: 0, payrolls: new Set<string>(), log: [] };
     const installments = Math.max(1, Math.round(money(loan.data.installments)) || 1);
     // Before this, salaries only paid down approved attachments; on one still waiting for approval, all of the paid amount was entered by hand.
     const manual = loan.data.manualRepaid !== undefined || isToApprove(loan.data.status) ? manualOf(loan.data) : Math.max(0, money(loan.data.repaidAmount) - fromSalary.amount);
@@ -506,8 +508,8 @@ export async function syncAttachmentRepayments(userId: string) {
     const balance = Math.max(0, amount - total);
     // Deductions taken from pay mean the attachment is running; once nothing is left, it is completed.
     const status = balance <= 0.004 ? "Completed" : fromSalary.amount > 0 && !isRunningAttachment(loan.data.status) ? "Running" : isCompletedAttachment(loan.data.status) ? "Running" : loan.data.status;
-    const next = { ...loan.data, manualRepaid: fixed(manual), payrollRepaid: fixed(fromSalary.amount), lastDeduction: fromSalary.last, installmentsPaid: String(fromSalary.count), installmentsLeft: String(Math.max(0, installments - fromSalary.count)), repaidAmount: fixed(total), balance: fixed(balance), status };
-    if (["manualRepaid", "payrollRepaid", "lastDeduction", "installmentsPaid", "installmentsLeft", "repaidAmount", "balance", "status"].some((key) => (next as Record<string, string>)[key] !== loan.data[key])) {
+    const next = { ...loan.data, manualRepaid: fixed(manual), payrollRepaid: fixed(fromSalary.amount), lastDeduction: fromSalary.last, installmentsPaid: String(fromSalary.count), installmentsLeft: String(Math.max(0, installments - fromSalary.count)), repaidAmount: fixed(total), balance: fixed(balance), status, deductionLog: JSON.stringify(fromSalary.log) };
+    if (["manualRepaid", "payrollRepaid", "lastDeduction", "installmentsPaid", "installmentsLeft", "repaidAmount", "balance", "status", "deductionLog"].some((key) => (next as Record<string, string>)[key] !== loan.data[key])) {
       await db.update(bookkeepingRecord).set({ data: next, updatedAt: new Date() }).where(eq(bookkeepingRecord.id, loan.id));
     }
   }

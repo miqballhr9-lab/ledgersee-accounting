@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import PaymentDialog from "@/components/bookkeeping/PaymentDialog";
+import PayrollLiabilitiesDialog from "@/components/bookkeeping/PayrollLiabilitiesDialog";
 import PayrollSheet, { type PayrollHrRecords } from "@/components/bookkeeping/PayrollSheet";
 import { useNewRecordParam } from "@/hooks/use-new-record-param";
 import { paymentAccountType } from "@/lib/payment-accounts";
@@ -20,6 +21,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { payrollCsvFields } from "@/lib/payroll-utils";
+import { payrollLiabilitiesOwed } from "@/lib/payroll-liabilities";
 import type { SalaryTaxRule } from "@/lib/payroll-utils";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
 
@@ -35,6 +37,8 @@ interface PayrollWorkspaceProps {
   taxRule?: SalaryTaxRule;
   /** Time off, salary attachments and attendance, which adjust a new month's lines. */
   hr?: PayrollHrRecords;
+  /** Payments of salary tax, employer contributions and attachments already made. */
+  liabilityPayments?: BookkeepingRecord[];
 }
 
 function formatPayAmount(amount: number, currency: string) {
@@ -150,7 +154,7 @@ function payrollColumns(currency: string, employees: BookkeepingRecord[] = []): 
 }
 
 
-export default function PayrollWorkspace({ records, accounts, employees = [], hr, asOfDate, dateRange, currency = "PKR", taxRule }: PayrollWorkspaceProps) {
+export default function PayrollWorkspace({ records, accounts, employees = [], hr, asOfDate, dateRange, currency = "PKR", taxRule, liabilityPayments = [] }: PayrollWorkspaceProps) {
   const formatRupees = (amount: number) => formatPayAmount(amount, currency);
   const router = useRouter();
   const uploadRef = useRef<HTMLInputElement>(null);
@@ -165,6 +169,8 @@ export default function PayrollWorkspace({ records, accounts, employees = [], hr
   const [paymentTargets, setPaymentTargets] = useState<BookkeepingRecord[] | null>(null);
   const [isPaying, setIsPaying] = useState(false);
   const paymentAccounts = accounts.filter((account) => paymentAccountType(account));
+  const [payingLiabilities, setPayingLiabilities] = useState(false);
+  const liabilitiesOwed = useMemo(() => payrollLiabilitiesOwed(savedRecords, hr?.loans ?? [], liabilityPayments), [savedRecords, hr?.loans, liabilityPayments]);
   const [sheet, setSheet] = useState<{ key: number; month: string; copyFrom?: BookkeepingRecord } | null>(null);
   const [isDeleting, setIsDeleting] = useState("");
   const [isSending, setIsSending] = useState("");
@@ -422,7 +428,10 @@ export default function PayrollWorkspace({ records, accounts, employees = [], hr
           <h1 className="mt-1 text-[26px] font-semibold tracking-tight sm:text-3xl">Payroll</h1>
           <p className="mt-1.5 max-w-2xl text-sm text-muted-foreground">Prepare each employee’s monthly pay with salary-tax estimates for your country and a clear take-home total. Unpaid leave and loan installments from HR are applied for you.</p>
         </div>
-        <Button onClick={openNewEntry} className="w-full shrink-0 sm:w-auto"><Plus size={16} /> Add payroll entry</Button>
+        <div className="flex w-full shrink-0 flex-col gap-2 sm:w-auto sm:flex-row">
+          <Button variant="outline" onClick={() => setPayingLiabilities(true)}><Banknote size={16} /> Pay taxes &amp; contributions</Button>
+          <Button onClick={openNewEntry}><Plus size={16} /> Add payroll entry</Button>
+        </div>
       </section>
 
       <section className="grid grid-cols-2 gap-3 xl:grid-cols-4" aria-label="Payroll summary">
@@ -637,6 +646,8 @@ export default function PayrollWorkspace({ records, accounts, employees = [], hr
         amountDue={paymentTargets?.length === 1 ? Math.max(0, Number(paymentTargets[0].data.payableSalary || 0) - Number(paymentTargets[0].data.paidAmount || 0)) : undefined}
         onSubmit={(date, accountId, amount) => void payTargets(date, accountId, amount)}
       />
+
+      <PayrollLiabilitiesDialog open={payingLiabilities} onOpenChange={setPayingLiabilities} owed={liabilitiesOwed} paymentAccounts={paymentAccounts} format={formatRupees} onPaid={() => router.refresh()} />
 
       {sheet ? (
         <PayrollSheet

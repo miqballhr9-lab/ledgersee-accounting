@@ -26,6 +26,7 @@ import { standardAccounts } from "@/lib/standard-accounts";
 import { budgetActual, budgetExpectedTotal, payrollBudgetHead, budgetVariance, parseBudgetLines, parseCsv, recordsWithinBudgetDates, type BudgetCategory, type BudgetLine, type BudgetLineType, type BudgetPeriod } from "@/lib/budget-utils";
 import { calculatePayroll, payrollCsvFields, serializePayroll, type EmployerContribution, type PayrollValues, type SalaryTaxRule } from "@/lib/payroll-utils";
 import { packFor } from "@/lib/tax-packs";
+import type { PayrollLiabilityKind } from "@/lib/payroll-liabilities";
 import { supplierCategoryForBankLine } from "@/lib/supplier-memory";
 import { MAX_ITEM_IMPORT_ROWS, type ItemImportData, type ItemImportRow } from "@/lib/item-import";
 import { MAX_INVENTORY_COUNT_ROWS, type InventoryCountRow } from "@/lib/inventory-import";
@@ -1678,6 +1679,60 @@ export async function recordPayrollPayment(id: string, paymentDate: string, acco
   // The salary's loan deduction pays down the employee's HR loans once the salary is fully paid.
   await syncAttachmentRepayments(me.id);
   await auditPayment(me, "payroll", id);
+  revalidatePath("/app", "layout");
+}
+
+const payrollLiabilityAccounts: Record<PayrollLiabilityKind, { test: RegExp; name: string; label: string }> = {
+  withheld: { test: /payroll/i, name: "Payroll liabilities", label: "Tax and deductions withheld from salaries" },
+  employer: { test: /employer contributions owed/i, name: "Payroll liabilities", label: "Employer contributions" },
+  attachments: { test: /attachment|garnish|child support/i, name: "Salary attachments payable", label: "Salary attachments kept back for creditors" },
+};
+
+/**
+ * Pays over what payroll owes onwards: income tax and other deductions kept
+ * back from salaries, the employer's contributions, or salary attachments
+ * owed to a creditor or court. Saved as an expense against the liability
+ * account, so the books show the amount as paid and no longer owed.
+ */
+export async function payPayrollLiabilities(input: { kind: PayrollLiabilityKind; date: string; accountId: string; amount: string; payee: string; memo?: string }): Promise<void> {
+  const me = await requireUser();
+  assertCanWrite(me, "payroll");
+  const target = payrollLiabilityAccounts[input.kind];
+  if (!target) throw new ActionError("Choose what you are paying.");
+  if (!isPaymentDate(input.date)) throw new ActionError("Choose a payment date.");
+  await assertBooksOpen(me.id, input.date);
+  const amount = Math.round(Number(input.amount) * 100) / 100;
+  if (!Number.isFinite(amount) || amount <= 0) throw new ActionError("Enter an amount greater than zero.");
+  const payee = input.payee.trim();
+  if (!payee) throw new ActionError("Enter who you are paying, such as the tax authority.");
+  const { account, method, name } = await findPaymentAccount(me.id, input.accountId);
+  const rows = await db.select().from(bookkeepingRecord).where(and(eq(bookkeepingRecord.userId, me.id), inArray(bookkeepingRecord.kind, ["accounts", "settings"])));
+  const liabilities = rows.filter((row) => row.kind === "accounts" && /^liability$/i.test(row.data.type ?? ""));
+  // The same account the books keep the amount in until it is paid.
+  const payrollAccount = liabilities.find((row) => /payroll/i.test(`${row.data.name} ${row.data.detailType}`));
+  const found = input.kind === "withheld" ? payrollAccount : liabilities.find((row) => target.test.test(row.data.name ?? "")) ?? (input.kind === "employer" ? payrollAccount : undefined);
+  let liability = found?.data.name?.trim() || found?.data.code?.trim() || "";
+  if (!liability) {
+    liability = target.name;
+    if (!liabilities.some((row) => (row.data.name ?? "").trim().toLowerCase() === liability.toLowerCase())) {
+      await db.insert(bookkeepingRecord).values({ userId: me.id, kind: "accounts", data: { name: liability, type: "Liability", accountType: "Current liabilities", detailType: input.kind === "attachments" ? "Other current liabilities" : "Payroll tax payable" } });
+    }
+  }
+  const currency = rows.find((row) => row.kind === "settings")?.data.currency || "USD";
+  const data = amountFromLineItems({
+    payee,
+    expenseDate: input.date,
+    currency,
+    exchangeRate: "1",
+    lineItems: JSON.stringify([{ itemId: "", name: liability, description: target.label, quantity: "1", rate: amount.toFixed(2) }]),
+    memo: input.memo?.trim() || target.label,
+    payrollLiability: input.kind,
+    paymentAccountId: account.id,
+    paymentAccountName: name,
+    paymentMethod: method === "Bank" ? "Bank transfer" : method,
+  }, "expenses");
+  const [created] = await db.insert(bookkeepingRecord).values({ userId: me.id, kind: "expenses", data: data }).returning({ id: bookkeepingRecord.id });
+  await auditRecord(me, "Created", created.id);
   revalidatePath("/app", "layout");
 }
 
