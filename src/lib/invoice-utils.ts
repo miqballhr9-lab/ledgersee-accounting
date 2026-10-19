@@ -108,3 +108,9 @@ export function lineSummary(data: Record<string, string>) {
   const quantity = lines.reduce((sum, line) => sum + (Number(line.quantity) || 0), 0);
   return { names: lines.map((line) => line.name.trim()).join(", "), quantity: Math.round(quantity * 1000) / 1000 };
 }
+
+/** The products bought on a bill or expense (its item lines, or the purchase order's), for "Items" and "Quantity" columns. */
+export function purchaseItemSummary(data: Record<string, string>) {
+  const fromOrder = parseInvoiceLines(data.purchaseLineItems ?? "").filter((line) => line.name.trim());
+  return lineSummary({ lineItems: JSON.stringify(fromOrder.length ? fromOrder : parseInvoiceLines(data.lineItems ?? "").filter((line) => line.itemId && line.name.trim())) });
+}

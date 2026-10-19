@@ -25,7 +25,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { moduleBySlug, withWarehouses, type ModuleDefinition } from "@/lib/bookkeeping-config";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
 import { expenseCategoryLabel, expenseLinesFromData } from "@/lib/expense-utils";
-import { dueDateForTerms, homeRate } from "@/lib/invoice-utils";
+import { dueDateForTerms, homeRate, purchaseItemSummary } from "@/lib/invoice-utils";
 import { paymentAccountLabel, paymentAccountType } from "@/lib/payment-accounts";
 
 interface ExpensesWorkspaceProps {
@@ -376,13 +376,15 @@ export default function ExpensesWorkspace({ expenses: initialExpenses, bills: in
   }
 
   function exportCsv() {
-    const headings = ["Date", "Type", "No. or description", "Payee", "Category", "Payment account", "Currency", "Amount", `Amount (${currency})`, "Status"];
+    const headings = ["Date", "Type", "No. or description", "Payee", "Category", "Items", "Quantity", "Payment account", "Currency", "Amount", `Amount (${currency})`, "Status"];
     const rows = filteredRecords.map((record) => [
       getRecordDate(record),
       record.kind === "bills" ? "Bill" : record.data.docType === "Check" ? "Check" : record.data.docType === "Credit card credit" ? "Credit card credit" : "Expense",
       record.kind === "bills" ? record.data.billNumber || record.data.description || "" : record.data.description || "",
       record.kind === "bills" ? record.data.vendor || "" : record.data.payee || "",
       expenseCategoryLabel(record.data),
+      purchaseItemSummary(record.data).names,
+      purchaseItemSummary(record.data).quantity ? String(purchaseItemSummary(record.data).quantity) : "",
       record.kind === "bills" ? record.data.paymentAccountName || record.data.paymentMethod || "" : record.data.paymentAccount || "",
       record.data.currency || currency,
       record.data.amount || "",
@@ -496,7 +498,7 @@ export default function ExpensesWorkspace({ expenses: initialExpenses, bills: in
                     })}
                   />
                 </TableHead>
-                {["Date", "Type", "No. / Description", "Payee", "Category", "Payment account", "Amount", `Amount (${currency})`, "Status", ""].map((heading) => (
+                {["Date", "Type", "No. / Description", "Payee", "Category", "Items", "Quantity", "Payment account", "Amount", `Amount (${currency})`, "Status", ""].map((heading) => (
                   <TableHead key={heading || "actions"} className="whitespace-nowrap text-xs font-medium text-muted-foreground">{heading}</TableHead>
                 ))}
               </TableRow>
@@ -517,6 +519,8 @@ export default function ExpensesWorkspace({ expenses: initialExpenses, bills: in
                     <TableCell className="max-w-[240px] text-[13px] font-medium text-primary"><span className="block truncate" title={title || ""}>{title || "—"}</span></TableCell>
                     <TableCell className="max-w-[180px] text-[13px]"><span className="block truncate" title={payee || ""}>{payee || "—"}</span></TableCell>
                     <TableCell className="max-w-[200px] text-[13px]"><span className="block truncate" title={expenseCategoryLabel(record.data)}>{expenseCategoryLabel(record.data) || "—"}</span></TableCell>
+                    <TableCell className="max-w-[180px] text-[13px]"><span className="block truncate" title={purchaseItemSummary(record.data).names}>{purchaseItemSummary(record.data).names || "—"}</span></TableCell>
+                    <TableCell className="text-right text-[13px] tabular-nums">{purchaseItemSummary(record.data).quantity ? purchaseItemSummary(record.data).quantity.toLocaleString(undefined, { maximumFractionDigits: 3 }) : "—"}</TableCell>
                     <TableCell className="max-w-[200px] text-[13px]"><span className="block truncate" title={payment || ""}>{payment || "—"}</span></TableCell>
                     <TableCell className="text-right text-[13px] tabular-nums">{formatMoney(record.data.amount || "", record.data.currency || currency)}</TableCell>
                     <TableCell className="text-right text-[13px] font-medium tabular-nums">{formatMoney(String((Number(record.data.amount) || 0) * homeRate(record.data, currency)), currency)}</TableCell>
@@ -544,7 +548,7 @@ export default function ExpensesWorkspace({ expenses: initialExpenses, bills: in
               })}
               {!pageRecords.length ? (
                 <TableRow>
-                  <TableCell colSpan={11} className="h-48 whitespace-normal text-center">
+                  <TableCell colSpan={13} className="h-48 whitespace-normal text-center">
                     <div className="sticky left-0 w-[calc(100vw-4.5rem)] sm:static sm:mx-auto sm:w-auto sm:max-w-sm">
                       <p className="text-sm font-medium">{records.length ? "No transactions match these filters" : "No expenses or bills yet"}</p>
                       <p className="mt-1 text-sm text-muted-foreground">{records.length ? "Change the date, type, or filters to see more results." : "Add a bill you need to pay or record a purchase already paid."}</p>
