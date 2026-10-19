@@ -4,17 +4,27 @@
  * afterwards, so a business can change them when a budget or notification
  * changes them — nothing here is fixed in the documents.
  *
- * Rates were current when written (Pakistan FY 2025-26, UAE and Saudi VAT) but
- * governments change them; Tax setup says so and asks people to check.
+ * Rates were current when written (Pakistan FY 2025-26, UAE and Saudi VAT,
+ * Sweden and Denmark 2026) but governments change them; Tax setup says so and
+ * asks people to check.
  */
 
-export type CountryCode = "PK" | "AE" | "SA" | "GB" | "US" | "OTHER";
+export type CountryCode = "PK" | "AE" | "SA" | "GB" | "US" | "SE" | "DK" | "OTHER";
+
+/**
+ * Cross-border VAT in the EU: sales to businesses in other EU countries go out
+ * without VAT, and purchases from abroad carry no VAT from the supplier — the
+ * buyer works out the VAT itself (reverse charge), owing and reclaiming it in
+ * the same return.
+ */
+export const crossBorderTypes = ["EU goods sale", "EU services sale", "EU goods purchase", "EU services purchase", "Non-EU services purchase", "Import"] as const;
+export const reverseChargeTypes = new Set<string>(["EU goods purchase", "EU services purchase", "Non-EU services purchase", "Import"]);
 
 export interface PackTax {
   name: string;
   rate: number;
   /** What kind of tax it is; drives which box of the return it lands in. */
-  type: "Standard" | "Reduced" | "Zero-rated" | "Exempt" | "Further tax" | "Withholding" | "Provincial services";
+  type: "Standard" | "Reduced" | "Zero-rated" | "Exempt" | "Further tax" | "Withholding" | "Provincial services" | (typeof crossBorderTypes)[number];
   appliesTo: "Sales" | "Purchases" | "Both";
   jurisdiction: string;
   isDefault?: boolean;
@@ -44,10 +54,16 @@ export interface CountryPack {
   returnName: string;
   /** Payroll rules shown on Tax setup and used where the app works them out. */
   payroll: {
-    incomeTax: "pakistan-slabs" | "uk-paye" | "none";
+    incomeTax: "pakistan-slabs" | "uk-paye" | "sweden-estimate" | "denmark-estimate" | "none";
     notes: string[];
     gratuity: string;
+    /** What the employer pays on top of salaries, booked with each payroll row: a share of gross pay and/or a fixed monthly amount per employee. */
+    employer?: { rate: number; monthly: number; label: string };
   };
+  /** Tax on the business's profit, shown on Tax setup. */
+  companyTax?: { rate: string; notes: string[] };
+  /** VAT rate a reverse-charge purchase is self-assessed at. */
+  reverseChargeRate?: number;
 }
 
 export const countryPacks: Record<CountryCode, CountryPack> = {
@@ -92,6 +108,7 @@ export const countryPacks: Record<CountryCode, CountryPack> = {
       ],
       gratuity: "Gratuity is usually 30 days' last basic salary per completed year (a part year of six months or more counts). Final settlements use this by default.",
     },
+    companyTax: { rate: "29%", notes: ["Companies pay 29% income tax on taxable profit (small companies 20%); banks pay more.", "Tax is paid in advance each quarter and settled with the annual return to FBR."] },
   },
   AE: {
     code: "AE",
@@ -120,6 +137,7 @@ export const countryPacks: Record<CountryCode, CountryPack> = {
       ],
       gratuity: "End of service gratuity is 21 days' basic salary per year for the first five years and 30 days per year after that, capped at two years' pay. Set 21 in final settlements for service under five years.",
     },
+    companyTax: { rate: "9%", notes: ["Corporate tax is 9% on taxable profit above AED 375,000 (0% below it); qualifying free zone income can be 0%.", "Returns are filed with the FTA within nine months of the year end."] },
   },
   SA: {
     code: "SA",
@@ -152,6 +170,7 @@ export const countryPacks: Record<CountryCode, CountryPack> = {
       ],
       gratuity: "End of service award is half a month's wage per year for the first five years and a full month per year after that. Set 15 days per year in final settlements for service under five years.",
     },
+    companyTax: { rate: "20% / 2.5% Zakat", notes: ["Foreign-owned shares of a company pay 20% income tax on profit; Saudi and GCC-owned shares pay 2.5% Zakat on the Zakat base.", "Returns are filed with ZATCA within 120 days of the year end."] },
   },
   GB: {
     code: "GB",
@@ -186,6 +205,7 @@ export const countryPacks: Record<CountryCode, CountryPack> = {
       ],
       gratuity: "There is no gratuity in the UK; statutory redundancy pay applies after two years' service. Set gratuity days to 0 in final settlements.",
     },
+    companyTax: { rate: "19%–25%", notes: ["Corporation tax is 25% on profits over £250,000 and 19% up to £50,000, with marginal relief in between.", "Pay within nine months and one day of the year end; file the CT600 within 12 months."] },
   },
   US: {
     code: "US",
@@ -225,6 +245,114 @@ export const countryPacks: Record<CountryCode, CountryPack> = {
         "FUTA is 6% of the first $7,000 of wages, usually 0.6% after the state credit; SUTA rates are set by each state.",
       ],
       gratuity: "There is no statutory gratuity in the USA. Set gratuity days to 0 in final settlements.",
+    },
+    companyTax: { rate: "21% federal", notes: ["C corporations pay 21% federal income tax on profit, plus state corporate tax in most states.", "LLCs and S corporations usually pass profit through to the owners' personal returns."] },
+  },
+  SE: {
+    code: "SE",
+    country: "Sweden",
+    currency: "SEK",
+    fiscalYear: "January",
+    timeZone: "Europe/Stockholm",
+    registrations: [
+      { key: "cr", label: "Organisationsnummer", placeholder: "556677-8899" },
+      { key: "trn", label: "VAT number (momsregistreringsnummer)", placeholder: "SE556677889901" },
+    ],
+    taxes: [
+      { name: "Moms 25% (standard)", rate: 25, type: "Standard", appliesTo: "Both", jurisdiction: "Skatteverket", isDefault: true },
+      { name: "Moms 12% (restaurants, hotels)", rate: 12, type: "Reduced", appliesTo: "Both", jurisdiction: "Skatteverket", note: "Eat-in restaurant and catering services, hotel stays." },
+      { name: "Moms 6% (food)", rate: 6, type: "Reduced", appliesTo: "Both", jurisdiction: "Skatteverket", note: "Food, including takeaway, from 1 April 2026 to 31 December 2027 (12% before and after). Alcohol stays at 25%." },
+      { name: "Moms 6% (books, newspapers, transport, culture)", rate: 6, type: "Reduced", appliesTo: "Both", jurisdiction: "Skatteverket", note: "Books, newspapers, domestic passenger transport, concerts and sports events." },
+      { name: "Export outside the EU 0%", rate: 0, type: "Zero-rated", appliesTo: "Sales", jurisdiction: "Skatteverket — ruta 36" },
+      { name: "Momsfri (exempt)", rate: 0, type: "Exempt", appliesTo: "Both", jurisdiction: "Skatteverket — ruta 42", note: "Healthcare, education, banking and insurance, residential rent." },
+      { name: "Goods to EU businesses 0% (reverse charge)", rate: 0, type: "EU goods sale", appliesTo: "Sales", jurisdiction: "Skatteverket — ruta 35", note: "The buyer must have a valid EU VAT number; also report it in the EC sales list (periodisk sammanställning)." },
+      { name: "Services to EU businesses 0% (reverse charge)", rate: 0, type: "EU services sale", appliesTo: "Sales", jurisdiction: "Skatteverket — ruta 39", note: "Also report it in the EC sales list." },
+      { name: "Goods from EU suppliers (reverse charge 25%)", rate: 0, type: "EU goods purchase", appliesTo: "Purchases", jurisdiction: "Skatteverket — ruta 20 and 30", note: "No VAT on the supplier's invoice: you owe 25% and reclaim it in the same return." },
+      { name: "Services from EU suppliers (reverse charge 25%)", rate: 0, type: "EU services purchase", appliesTo: "Purchases", jurisdiction: "Skatteverket — ruta 21 and 30" },
+      { name: "Services from outside the EU (reverse charge 25%)", rate: 0, type: "Non-EU services purchase", appliesTo: "Purchases", jurisdiction: "Skatteverket — ruta 22 and 30" },
+      { name: "Import of goods (import VAT 25%)", rate: 0, type: "Import", appliesTo: "Purchases", jurisdiction: "Skatteverket — ruta 50 and 60", note: "Import VAT is declared in your VAT return, not paid to customs." },
+    ],
+    accounts: [
+      { code: "2611", name: "VAT output payable (utgående moms)", type: "Liability", description: "Moms charged on sales, owed to Skatteverket." },
+      { code: "2641", name: "VAT input recoverable (ingående moms)", type: "Asset", description: "Moms paid on purchases you can deduct." },
+      { code: "2710", name: "Employee income tax withheld (personalskatt)", type: "Liability", description: "Preliminary tax withheld from salaries, paid to Skatteverket each month." },
+      { code: "2731", name: "Employer contributions owed (arbetsgivaravgifter)", type: "Liability", description: "Employer social security contributions due with the monthly employer return." },
+      { code: "7510", name: "Employer social contributions (arbetsgivaravgifter)", type: "Expense", description: "The employer's 31.42% on salaries: pension, health, parental and work injury insurance and the general payroll fee." },
+      { code: "2512", name: "Corporate income tax owed (bolagsskatt)", type: "Liability", description: "Tax on the company's profit, paid as monthly preliminary tax (F-skatt)." },
+    ],
+    returnName: "Momsdeklaration (Skatteverket)",
+    reverseChargeRate: 25,
+    payroll: {
+      incomeTax: "sweden-estimate",
+      employer: { rate: 31.42, monthly: 0, label: "Arbetsgivaravgifter 31.42%" },
+      notes: [
+        "Preliminary income tax (2026): municipal tax averages 32.38% (29–35% by municipality) after the basic deduction (grundavdrag), less the job tax credit (jobbskatteavdrag); state tax adds 20% on taxable income over 643,000 kr (about 660,400 kr salary). Payroll estimates this at the average municipal rate when the tax box is left empty — use Skatteverket's tax table (skattetabell) for the employee's municipality for the exact amount.",
+        "Employer contributions (arbetsgivaravgifter) are 31.42% of gross pay for employees born 1959–2002: retirement pension 10.21%, survivor's pension 0.60%, health insurance 3.55%, parental insurance 2.00%, work injury 0.10%, labour market 2.64% and the general payroll fee 12.32%. Lower rates apply to young people (20.81% up to 25,000 kr a month for those born 2003–2007) and people over 66. Payroll books 31.42% automatically.",
+        "Health care, sick pay after day 14 and parental benefit are covered by these contributions and taxes; employees pay no separate health insurance. The employer pays sick pay for days 2–14 (80%).",
+        "The employer files the monthly employer return (arbetsgivardeklaration på individnivå) and pays the withheld tax and contributions by the 12th of the following month (17th in January and August).",
+        "Occupational pension and insurance under collective agreements (e.g. ITP, SAF-LO, Fora) are extra; add them as deductions or adjustments.",
+      ],
+      gratuity: "There is no gratuity in Sweden; notice periods follow LAS and collective agreements. Set gratuity days to 0 in final settlements.",
+    },
+    companyTax: {
+      rate: "20.6%",
+      notes: [
+        "Limited companies (aktiebolag) pay 20.6% corporate tax (bolagsskatt) on taxable profit.",
+        "Tax is paid in advance each month as preliminary tax (F-skatt) based on estimated profit, and settled with the annual income tax return (inkomstdeklaration 2).",
+        "Sole traders (enskild firma) pay income tax on the profit through their personal return, plus self-employed contributions (egenavgifter, about 28.97%).",
+      ],
+    },
+  },
+  DK: {
+    code: "DK",
+    country: "Denmark",
+    currency: "DKK",
+    fiscalYear: "January",
+    timeZone: "Europe/Copenhagen",
+    registrations: [
+      { key: "cr", label: "CVR number", placeholder: "12345678" },
+      { key: "trn", label: "VAT number (SE / momsnummer)", placeholder: "DK12345678" },
+    ],
+    taxes: [
+      { name: "Moms 25% (standard)", rate: 25, type: "Standard", appliesTo: "Both", jurisdiction: "Skattestyrelsen", isDefault: true, note: "Denmark has a single VAT rate." },
+      { name: "Export outside the EU 0%", rate: 0, type: "Zero-rated", appliesTo: "Sales", jurisdiction: "Skattestyrelsen — rubrik C" },
+      { name: "Momsfritaget (exempt)", rate: 0, type: "Exempt", appliesTo: "Both", jurisdiction: "Skattestyrelsen — rubrik C", note: "Healthcare, education, banking and insurance, renting property, passenger transport." },
+      { name: "Goods to EU businesses 0% (reverse charge)", rate: 0, type: "EU goods sale", appliesTo: "Sales", jurisdiction: "Skattestyrelsen — rubrik B (varer)", note: "The buyer must have a valid EU VAT number; also report it in EU-salg uden moms." },
+      { name: "Services to EU businesses 0% (reverse charge)", rate: 0, type: "EU services sale", appliesTo: "Sales", jurisdiction: "Skattestyrelsen — rubrik B (ydelser)" },
+      { name: "Goods from EU suppliers (reverse charge 25%)", rate: 0, type: "EU goods purchase", appliesTo: "Purchases", jurisdiction: "Skattestyrelsen — rubrik A (varer)", note: "No VAT on the supplier's invoice: you owe 25% and deduct it again as købsmoms." },
+      { name: "Services from EU suppliers (reverse charge 25%)", rate: 0, type: "EU services purchase", appliesTo: "Purchases", jurisdiction: "Skattestyrelsen — rubrik A (ydelser)" },
+      { name: "Services from outside the EU (reverse charge 25%)", rate: 0, type: "Non-EU services purchase", appliesTo: "Purchases", jurisdiction: "Skattestyrelsen — moms af ydelseskøb i udlandet" },
+      { name: "Import of goods (import VAT 25%)", rate: 0, type: "Import", appliesTo: "Purchases", jurisdiction: "Skattestyrelsen — moms af varekøb i udlandet" },
+    ],
+    accounts: [
+      { code: "2310", name: "VAT output payable (salgsmoms)", type: "Liability", description: "Moms charged on sales, owed to Skattestyrelsen." },
+      { code: "1410", name: "VAT input recoverable (købsmoms)", type: "Asset", description: "Moms paid on purchases you can deduct." },
+      { code: "2330", name: "A-tax and AM contribution withheld (A-skat og AM-bidrag)", type: "Liability", description: "Withheld from salaries and reported through eIndkomst." },
+      { code: "2340", name: "Employer contributions owed (ATP, AES, Barsel.dk)", type: "Liability", description: "ATP and other employer contributions due." },
+      { code: "7510", name: "Employer social contributions (ATP, AES, Barsel.dk)", type: "Expense", description: "The employer's ATP share and other labour market contributions." },
+      { code: "2512", name: "Corporate income tax owed (selskabsskat)", type: "Liability", description: "Tax on the company's profit, paid on account (acontoskat) in March and November." },
+    ],
+    returnName: "Momsangivelse (Skattestyrelsen)",
+    reverseChargeRate: 25,
+    payroll: {
+      incomeTax: "denmark-estimate",
+      employer: { rate: 0, monthly: 198, label: "ATP employer share 198 kr a month" },
+      notes: [
+        "AM-bidrag (labour market contribution) is 8% of gross pay, taken before any other tax. Payroll includes it in the tax it estimates.",
+        "A-skat (2026): municipal tax averages about 25% (plus church tax for members) and bottom tax (bundskat) is 12.01%, after the personal allowance of 54,100 kr a year; the employment deduction (beskæftigelsesfradrag, 12.75% up to 63,300 kr) and job deduction lower the municipal tax. Middle tax (mellemskat) 7.5% above 641,200 kr, top tax (topskat) 7.5% above 777,900 kr and top-top tax 5% above 2,592,700 kr. Payroll estimates this when the tax box is left empty; use each employee's tax card (skattekort) for the exact rate and deduction.",
+        "ATP (supplementary pension) for full-time staff on monthly pay (117+ hours) is 297 kr a month: 99 kr from the employee (enter it as a social deduction) and 198 kr from the employer, which payroll books automatically.",
+        "Health care is paid from taxes; there is no separate health insurance contribution. Employers must carry work injury insurance (arbejdsskadeforsikring) and pay small contributions to AES, Barsel.dk, AUB and FIB.",
+        "Salaries, A-skat and AM-bidrag are reported each month through eIndkomst, and paid to Skattestyrelsen by the due date.",
+      ],
+      gratuity: "There is no general gratuity in Denmark; salaried employees (funktionærer) may get severance after 12 or more years. Holiday pay (feriepenge, 12.5%) is earned on top of pay. Set gratuity days to 0 in final settlements.",
+    },
+    companyTax: {
+      rate: "22%",
+      notes: [
+        "Companies (ApS, A/S) pay 22% corporate tax (selskabsskat) on taxable profit.",
+        "Tax is paid on account (acontoskat) in March and November, and settled with the annual tax return (selvangivelse for selskaber).",
+        "Sole proprietors (enkeltmandsvirksomhed) pay personal income tax on the profit, or can use the company tax scheme (virksomhedsordningen).",
+      ],
     },
   },
   OTHER: {

@@ -147,7 +147,7 @@ export function buildLedger(allRecords: BookkeepingRecord[], method: AccountingM
   const openingEquity = find((account) => /opening balance/i.test(`${account.name} ${account.detailType}`)) ?? ensure("Opening balance equity", "Equity", "Owner's equity");
   const retainedEarnings = find((account) => /retained earnings/i.test(`${account.name} ${account.detailType}`)) ?? ensure("Retained earnings", "Equity", "Owner's equity");
   const payrollLiabilities = find((account) => /payroll/i.test(`${account.name} ${account.detailType}`) && account.category === "Liability") ?? ensure("Payroll liabilities", "Liability", "Current liabilities");
-  const salaries = find((account) => /salar|wages|payroll expense/i.test(`${account.name} ${account.detailType}`) && account.category === "Expense") ?? ensure("Salaries and wages", "Expense", "Expenses");
+  const salaries = find((account) => /salar|wages|payroll expense/i.test(`${account.name} ${account.detailType}`) && account.category === "Expense" && !/employer/i.test(account.name)) ?? ensure("Salaries and wages", "Expense", "Expenses");
   const undeposited = find((account) => /undeposited/i.test(`${account.name} ${account.detailType}`)) ?? "Undeposited funds";
   // Tax paid on purchases goes to the input tax account a tax pack adds (GST/VAT you can claim back);
   // without one it is netted against the tax payable account, as QuickBooks' tax control account does.
@@ -158,6 +158,9 @@ export function buildLedger(allRecords: BookkeepingRecord[], method: AccountingM
   const settlementExpense = lazy(() => find((account) => account.category === "Expense" && /gratuity|final settlement|severance/i.test(account.name)) ?? ensure("Gratuity and final settlement", "Expense", "Expenses"));
   // Foreign currency paid at a different rate than invoiced or billed: the difference is a realized gain or loss.
   const exchangeGainLoss = lazy(() => find((account) => /exchange gain|exchange loss|foreign exchange|fx gain/i.test(account.name)) ?? ensure("Exchange gain or loss", "Expense", "Other expense"));
+  // What the employer pays on top of salaries (Sweden's arbetsgivaravgifter, Denmark's ATP), and where it is owed until paid.
+  const employerContributions = lazy(() => find((account) => account.category === "Expense" && /employer (social )?contributions|arbetsgivaravgift|employer.*(social security|national insurance)/i.test(account.name)) ?? ensure("Employer social contributions", "Expense", "Expenses"));
+  const employerContributionsOwed = lazy(() => find((account) => account.category === "Liability" && /employer contributions owed/i.test(account.name)) ?? payrollLiabilities);
   const employeeRecoveries = lazy(() => find((account) => account.category === "Income" && /fine|recover/i.test(account.name)) ?? ensure("Employee fines and recoveries", "Income", "Other income"));
 
   const recordById = new Map(records.map((record) => [record.id, record]));
@@ -495,6 +498,11 @@ export function buildLedger(allRecords: BookkeepingRecord[], method: AccountingM
       const withheld = (share: number): Array<[string, number]> => [...recovered(share), [payrollLiabilities, -owed * share]];
       const base = { number: data.reference ?? "", name: data.employeeName ?? "", customer: "", supplier: "", memo: data.month ? `Salary ${data.month}` : "Salary", sourceKind: "payroll", sourceId: record.id };
       const month = /^\d{4}-\d{2}$/.test(data.month ?? "") ? `${data.month}-28` : "";
+      // The employer's contributions on this salary are a cost of the month, owed to the tax authority.
+      const employerCost = num(data.employerContribution);
+      if (employerCost > 0 && (method === "accrual" || data.status === "Paid" || paymentsFor.has(record.id))) {
+        post({ ...base, type: "Employer contributions", txnId: `pec-${record.id}`, date: month || record.createdAt.slice(0, 10) }, [[employerContributions(), employerCost], [employerContributionsOwed(), -employerCost]]);
+      }
       // Salaries paid in parts: owed for the month, then each payment.
       if (paymentsFor.has(record.id) || num(data.paidAmount) > 0) {
         const payments = docPayments(record, month || record.createdAt.slice(0, 10));

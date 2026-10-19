@@ -72,7 +72,7 @@ export function pakistanAnnualSalaryTax(annualTaxableSalary: number): number {
 }
 
 /** Which salary income tax payroll works out when the tax box is left empty. Set by Tax setup's country. */
-export type SalaryTaxRule = "pakistan-slabs" | "uk-paye" | "none";
+export type SalaryTaxRule = "pakistan-slabs" | "uk-paye" | "sweden-estimate" | "denmark-estimate" | "none";
 
 /**
  * UK income tax for 2025/26 (England, Wales and Northern Ireland), as a yearly
@@ -90,8 +90,61 @@ export function ukAnnualIncomeTax(annualIncome: number): number {
   return Math.round((basic * 0.2 + higher * 0.4 + additional * 0.45) * 100) / 100;
 }
 
+/** Sweden's price base amount (prisbasbelopp) for 2026, which the deductions are set in. */
+const SE_PBB = 59_200;
+
+/**
+ * Swedish preliminary tax on salary for 2026, as a yearly estimate for someone
+ * under 66: the basic deduction (grundavdrag), municipal tax at the national
+ * average of 32.38%, state tax of 20% over 643,000 kr, less the job tax credit
+ * (jobbskatteavdrag, approximated to reach its 2026 maximum at 8.08 price base
+ * amounts). The employee's own municipality and Skatteverket's tax table give
+ * the exact figure.
+ */
+export function swedenAnnualIncomeTax(annualIncome: number): number {
+  const income = Math.max(0, annualIncome);
+  const p = SE_PBB;
+  const basic = income <= 0.99 * p ? 0.423 * p
+    : income <= 2.72 * p ? 0.423 * p + 0.2 * (income - 0.99 * p)
+      : income <= 3.11 * p ? 0.77 * p
+        : income <= 7.88 * p ? 0.77 * p - 0.1 * (income - 3.11 * p)
+          : 0.293 * p;
+  const deduction = Math.min(income, Math.ceil(basic / 100) * 100);
+  const taxable = Math.max(0, income - deduction);
+  const municipalRate = 0.3238;
+  const municipal = taxable * municipalRate;
+  const state = Math.max(0, taxable - 643_000) * 0.2;
+  const workBase = income <= 0.91 * p ? income : 0.91 * p + 0.3006 * (Math.min(income, 8.08 * p) - 0.91 * p);
+  const jobCredit = Math.min(municipal, Math.max(0, (workBase - deduction) * municipalRate));
+  return Math.round((municipal + state - jobCredit) * 100) / 100;
+}
+
+/**
+ * Danish tax on salary for 2026, as a yearly estimate: AM-bidrag 8%, then
+ * municipal tax at about the national average of 25% and bottom tax of 12.01%
+ * after the 54,100 kr personal allowance, with the employment and job
+ * deductions lowering the municipal tax, and middle, top and top-top tax above
+ * their thresholds. The employee's tax card (skattekort) gives the exact rate.
+ */
+export function denmarkAnnualIncomeTax(annualIncome: number): number {
+  const gross = Math.max(0, annualIncome);
+  const labourContribution = gross * 0.08;
+  const personal = gross - labourContribution;
+  const allowance = 54_100;
+  const employmentDeduction = Math.min(gross * 0.1275, 63_300);
+  const jobDeduction = Math.min(Math.max(0, gross - 235_200) * 0.045, 3_100);
+  const municipal = Math.max(0, personal - employmentDeduction - jobDeduction - allowance) * 0.25;
+  const bottom = Math.max(0, personal - allowance) * 0.1201;
+  const middle = Math.max(0, personal - 641_200) * 0.075;
+  const top = Math.max(0, personal - 777_900) * 0.075;
+  const topTop = Math.max(0, personal - 2_592_700) * 0.05;
+  return Math.round((labourContribution + municipal + bottom + middle + top + topTop) * 100) / 100;
+}
+
 export function annualSalaryTax(rule: SalaryTaxRule, annualIncome: number) {
   if (rule === "uk-paye") return ukAnnualIncomeTax(annualIncome);
+  if (rule === "sweden-estimate") return swedenAnnualIncomeTax(annualIncome);
+  if (rule === "denmark-estimate") return denmarkAnnualIncomeTax(annualIncome);
   if (rule === "none") return 0;
   return pakistanAnnualSalaryTax(annualIncome);
 }
@@ -158,10 +211,18 @@ export function emptyPayrollValues(month: string): PayrollValues {
   };
 }
 
-export function serializePayroll(values: PayrollValues, taxRule: SalaryTaxRule = "pakistan-slabs"): Record<string, string> {
+/** What the employer pays on top of a salary: a share of gross pay plus a fixed monthly amount (the country's payroll rules). */
+export interface EmployerContribution {
+  rate: number;
+  monthly: number;
+}
+
+export function serializePayroll(values: PayrollValues, taxRule: SalaryTaxRule = "pakistan-slabs", employer?: EmployerContribution): Record<string, string> {
   const totals = calculatePayroll(values, taxRule);
+  const employerCost = employer && totals.grossSalary > 0 ? totals.grossSalary * employer.rate / 100 + employer.monthly : 0;
   return {
     ...values,
+    ...(employerCost > 0 ? { employerContribution: employerCost.toFixed(2) } : {}),
     afterIncrement: totals.revisedSalary.toFixed(2),
     proratedSalary: totals.proratedSalary.toFixed(2),
     grossSalary: totals.grossSalary.toFixed(2),

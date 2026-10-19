@@ -24,7 +24,7 @@ import { recurringKinds, type RecurringKind } from "@/lib/recurring";
 import { accountCategoryForType, accountDetailsForType } from "@/lib/account-types";
 import { standardAccounts } from "@/lib/standard-accounts";
 import { budgetActual, budgetExpectedTotal, payrollBudgetHead, budgetVariance, parseBudgetLines, parseCsv, recordsWithinBudgetDates, type BudgetCategory, type BudgetLine, type BudgetLineType, type BudgetPeriod } from "@/lib/budget-utils";
-import { calculatePayroll, payrollCsvFields, serializePayroll, type PayrollValues, type SalaryTaxRule } from "@/lib/payroll-utils";
+import { calculatePayroll, payrollCsvFields, serializePayroll, type EmployerContribution, type PayrollValues, type SalaryTaxRule } from "@/lib/payroll-utils";
 import { packFor } from "@/lib/tax-packs";
 import { supplierCategoryForBankLine } from "@/lib/supplier-memory";
 import { MAX_ITEM_IMPORT_ROWS, type ItemImportData, type ItemImportRow } from "@/lib/item-import";
@@ -170,13 +170,19 @@ function amountFromLineItems(data: Record<string, string>, kind: string): Record
   };
 }
 
-/** The salary tax rule of the business's country (Tax setup); Pakistan slabs until a country is chosen. */
-async function salaryTaxRule(userId: string): Promise<SalaryTaxRule> {
-  const [settings] = await db.select().from(bookkeepingRecord).where(and(eq(bookkeepingRecord.userId, userId), eq(bookkeepingRecord.kind, "settings"))).limit(1);
-  return packFor(settings?.data.taxCountry)?.payroll.incomeTax ?? "pakistan-slabs";
+interface PayrollRules {
+  taxRule: SalaryTaxRule;
+  employer?: EmployerContribution;
 }
 
-function normalizePayrollData(data: Record<string, string>, taxRule: SalaryTaxRule = "pakistan-slabs"): Record<string, string> {
+/** The payroll rules of the business's country (Tax setup): its salary tax, and what the employer pays on top. Pakistan slabs until a country is chosen. */
+async function payrollRules(userId: string): Promise<PayrollRules> {
+  const [settings] = await db.select().from(bookkeepingRecord).where(and(eq(bookkeepingRecord.userId, userId), eq(bookkeepingRecord.kind, "settings"))).limit(1);
+  const payroll = packFor(settings?.data.taxCountry)?.payroll;
+  return { taxRule: payroll?.incomeTax ?? "pakistan-slabs", employer: payroll?.employer };
+}
+
+function normalizePayrollData(data: Record<string, string>, rules: PayrollRules = { taxRule: "pakistan-slabs" }): Record<string, string> {
   const values: PayrollValues = {
     reference: (data.reference || "").slice(0, 60),
     employeeId: data.employeeId || "",
@@ -239,9 +245,9 @@ function normalizePayrollData(data: Record<string, string>, taxRule: SalaryTaxRu
   const workedDays = Number(values.workedDays);
   if (!Number.isInteger(workingDays) || workingDays < 1 || workingDays > 31) throw new ActionError("Total working days must be from 1 to 31.");
   if (!Number.isInteger(workedDays) || workedDays < 0 || workedDays > workingDays) throw new ActionError("Worked days can’t exceed total working days.");
-  if (calculatePayroll(values, taxRule).payableSalary < 0) throw new ActionError("Deductions exceed the gross salary. Adjust the deductions or adjustment.");
+  if (calculatePayroll(values, rules.taxRule).payableSalary < 0) throw new ActionError("Deductions exceed the gross salary. Adjust the deductions or adjustment.");
 
-  return serializePayroll(values, taxRule);
+  return serializePayroll(values, rules.taxRule, rules.employer);
 }
 
 export async function listBookkeepingRecords(kind: string): Promise<BookkeepingRecord[]> {
@@ -439,7 +445,7 @@ async function saveRecord(
     if (data.itemType !== "Bundle" && !(Number(data.rate) >= 0)) throw new ActionError("Enter a sales price of zero or more.");
   }
   if (kind === "payroll") {
-    data = normalizePayrollData(data, await salaryTaxRule(me.id));
+    data = normalizePayrollData(data, await payrollRules(me.id));
     if (data.paymentAccountId) {
       const [paymentAccount] = await db
         .select()
@@ -962,7 +968,7 @@ export async function saveBudgetPlan(input: unknown, id?: string): Promise<Bookk
 export async function importPayrollCsv(input: string): Promise<{ created: number; updated: number; records: BookkeepingRecord[] }> {
   const me = await requireUser();
   assertCanWrite(me, "payroll");
-  const taxRule = await salaryTaxRule(me.id);
+  const rules = await payrollRules(me.id);
   if (input.length > 2_000_000) throw new ActionError("The payroll CSV is too large. Keep it under 2 MB.");
   const [rawHeaders, ...rows] = parseCsv(input);
   if (!rawHeaders || !rows.length) throw new ActionError("The payroll CSV needs a header row and at least one employee.");
@@ -980,7 +986,7 @@ export async function importPayrollCsv(input: string): Promise<{ created: number
       if (columnIndex !== undefined) payload[fieldName] = row[columnIndex] ?? "";
     }
     try {
-      return normalizePayrollData(payload, taxRule);
+      return normalizePayrollData(payload, rules);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Check this row’s payroll details.";
       throw new ActionError(`CSV row ${index + 2}: ${message}`);

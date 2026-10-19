@@ -1,6 +1,6 @@
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
 import { homeRate } from "@/lib/invoice-utils";
-import type { CountryCode } from "@/lib/tax-packs";
+import { countryPacks, reverseChargeTypes, type CountryCode } from "@/lib/tax-packs";
 
 /**
  * Works out a tax return for a period from the documents already in the books:
@@ -96,8 +96,14 @@ function sum(lines: TaxLine[], pick: (line: TaxLine) => boolean) {
 export function returnRows(country: CountryCode, lines: TaxLine[]): ReturnRow[] {
   const sales = (category: string) => sum(lines, (line) => line.side === "Sales" && line.category === category);
   const purchases = (category: string) => sum(lines, (line) => line.side === "Purchases" && line.category === category);
-  const taxedSales = sum(lines, (line) => line.side === "Sales" && !["Zero-rated", "Exempt"].includes(line.category));
-  const taxedPurchases = sum(lines, (line) => line.side === "Purchases" && !["Zero-rated", "Exempt", "Withholding"].includes(line.category));
+  const untaxedSales = ["Zero-rated", "Exempt", "EU goods sale", "EU services sale"];
+  const taxedSales = sum(lines, (line) => line.side === "Sales" && !untaxedSales.includes(line.category));
+  const taxedPurchases = sum(lines, (line) => line.side === "Purchases" && !["Zero-rated", "Exempt", "Withholding"].includes(line.category) && !reverseChargeTypes.has(line.category));
+  // Reverse charge: no VAT from the supplier, so the buyer owes it at the country's rate and deducts it again.
+  const reverse = (...categories: string[]) => {
+    const amount = sum(lines, (line) => line.side === "Purchases" && categories.includes(line.category)).amount;
+    return { amount, tax: amount * (countryPacks[country].reverseChargeRate ?? 0) / 100 };
+  };
   const allSales = sum(lines, (line) => line.side === "Sales");
   const allPurchases = sum(lines, (line) => line.side === "Purchases");
 
@@ -165,6 +171,53 @@ export function returnRows(country: CountryCode, lines: TaxLine[]): ReturnRow[] 
       { box: "7", label: "Total value of purchases excluding VAT", amount: Math.round(allPurchases.amount), tax: 0 },
       { box: "8", label: "Total value of goods supplied to the EU (Northern Ireland only)", amount: 0, tax: 0 },
       { box: "9", label: "Total value of goods acquired from the EU (Northern Ireland only)", amount: 0, tax: 0 },
+    ];
+  }
+
+  if (country === "SE") {
+    const domestic = (rate: number) => sum(lines, (line) => line.side === "Sales" && ["Standard", "Reduced"].includes(line.category) && line.rate === rate);
+    const [at25, at12, at6] = [domestic(25), domestic(12), domestic(6)];
+    const services = reverse("EU goods purchase", "EU services purchase", "Non-EU services purchase");
+    const imports = reverse("Import");
+    const output = at25.tax + at12.tax + at6.tax + services.tax + imports.tax;
+    const input = taxedPurchases.tax + services.tax + imports.tax;
+    return [
+      { box: "05", label: "Momspliktig försäljning (taxable sales in Sweden)", amount: sum(lines, (line) => line.side === "Sales" && ["Standard", "Reduced"].includes(line.category)).amount, tax: 0 },
+      { box: "10", label: "Utgående moms 25%", ...at25 },
+      { box: "11", label: "Utgående moms 12%", ...at12 },
+      { box: "12", label: "Utgående moms 6%", ...at6 },
+      { box: "20", label: "Inköp av varor från annat EU-land (goods from the EU)", amount: purchases("EU goods purchase").amount, tax: 0 },
+      { box: "21", label: "Inköp av tjänster från annat EU-land (services from the EU)", amount: purchases("EU services purchase").amount, tax: 0 },
+      { box: "22", label: "Inköp av tjänster från land utanför EU (services from outside the EU)", amount: purchases("Non-EU services purchase").amount, tax: 0 },
+      { box: "30", label: "Utgående moms 25% på inköp i ruta 20–22", amount: 0, tax: services.tax },
+      { box: "35", label: "Försäljning av varor till annat EU-land (goods to the EU)", amount: sales("EU goods sale").amount, tax: 0 },
+      { box: "36", label: "Försäljning av varor utanför EU (exports)", amount: sales("Zero-rated").amount, tax: 0 },
+      { box: "39", label: "Försäljning av tjänster till näringsidkare i annat EU-land", amount: sales("EU services sale").amount, tax: 0 },
+      { box: "42", label: "Övrig försäljning (exempt sales)", amount: sales("Exempt").amount, tax: 0 },
+      { box: "48", label: "Ingående moms att dra av (input VAT)", amount: 0, tax: input },
+      { box: "50", label: "Beskattningsunderlag vid import (imports)", amount: imports.amount, tax: 0 },
+      { box: "60", label: "Utgående moms 25% på import", amount: 0, tax: imports.tax },
+      { box: "49", label: output - input >= 0 ? "Moms att betala (VAT to pay)" : "Moms att få tillbaka (VAT refund)", amount: 0, tax: Math.abs(output - input), strong: true },
+    ];
+  }
+
+  if (country === "DK") {
+    const goods = reverse("EU goods purchase", "Import");
+    const services = reverse("EU services purchase", "Non-EU services purchase");
+    const outputVat = taxedSales.tax;
+    const inputVat = taxedPurchases.tax + goods.tax + services.tax;
+    const due = outputVat + goods.tax + services.tax - inputVat;
+    return [
+      { box: "1", label: "Salgsmoms (output VAT)", amount: taxedSales.amount, tax: outputVat },
+      { box: "2", label: "Moms af varekøb i udlandet (VAT on goods bought abroad)", amount: goods.amount, tax: goods.tax },
+      { box: "3", label: "Moms af ydelseskøb i udlandet med omvendt betalingspligt (VAT on services bought abroad)", amount: services.amount, tax: services.tax },
+      { box: "4", label: "Købsmoms (input VAT)", amount: 0, tax: inputVat },
+      { box: "5", label: due >= 0 ? "Momstilsvar — moms at betale (VAT to pay)" : "Momstilsvar — moms til gode (VAT refund)", amount: 0, tax: Math.abs(due), strong: true },
+      { box: "A varer", label: "Rubrik A – varer: goods bought from other EU countries", amount: purchases("EU goods purchase").amount, tax: 0 },
+      { box: "A ydelser", label: "Rubrik A – ydelser: services bought from other EU countries", amount: purchases("EU services purchase").amount, tax: 0 },
+      { box: "B varer", label: "Rubrik B – varer: goods sold to other EU countries", amount: sales("EU goods sale").amount, tax: 0 },
+      { box: "B ydelser", label: "Rubrik B – ydelser: services sold to other EU countries", amount: sales("EU services sale").amount, tax: 0 },
+      { box: "C", label: "Rubrik C: other sales without Danish VAT (exports, exempt)", amount: sales("Zero-rated").amount + sales("Exempt").amount, tax: 0 },
     ];
   }
 

@@ -42,8 +42,9 @@ export async function getTaxSetup(): Promise<TaxSetupState> {
 
 function chartAccount(account: PackAccount) {
   if (account.type === "Asset") return { type: "Asset", accountType: "Current assets", detailType: "Other current assets" };
+  if (account.type === "Expense") return { type: "Expense", accountType: "Expenses", detailType: "Employee benefits" };
   const salesTax = /tax payable \(output|vat output|sales tax|services payable/i.test(account.name);
-  const payroll = /withholding|eobi|gosi/i.test(account.name);
+  const payroll = /withholding|withheld|eobi|gosi|employer contributions/i.test(account.name);
   return { type: "Liability", accountType: "Current liabilities", detailType: salesTax ? "Sales tax payable" : payroll ? "Payroll tax payable" : "Other current liabilities" };
 }
 

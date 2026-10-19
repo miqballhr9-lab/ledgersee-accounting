@@ -118,6 +118,7 @@ export default function TaxSetupWorkspace({ state }: { state: TaxSetupState }) {
           <section className="rounded-lg border border-border bg-card">
             <div className="flex items-center gap-2 border-b border-border px-4 py-3"><Users size={16} className="text-primary" /><h2 className="text-sm font-semibold">Payroll rules in {pack.country}</h2></div>
             <div className="space-y-2 p-4 text-sm">
+              {pack.payroll.employer ? <p className="rounded-md bg-primary/5 px-3 py-2 text-xs"><span className="font-medium">Booked with each payroll row:</span> {pack.payroll.employer.label}, as an employer cost owed to the tax authority.</p> : null}
               {pack.payroll.notes.map((note) => <p key={note}>{note}</p>)}
               <p className="text-muted-foreground">{pack.payroll.gratuity}</p>
               {pack.payroll.incomeTax === "pakistan-slabs" ? (
@@ -132,6 +133,13 @@ export default function TaxSetupWorkspace({ state }: { state: TaxSetupState }) {
               ) : null}
             </div>
           </section>
+
+          {pack.companyTax ? (
+            <section className="rounded-lg border border-border bg-card">
+              <div className="flex items-center gap-2 border-b border-border px-4 py-3"><Landmark size={16} className="text-primary" /><h2 className="text-sm font-semibold">Tax on profit in {pack.country}</h2><span className="ml-auto rounded-full bg-accent px-2 py-0.5 text-xs font-medium text-accent-foreground">{pack.companyTax.rate}</span></div>
+              <div className="space-y-2 p-4 text-sm">{pack.companyTax.notes.map((note) => <p key={note}>{note}</p>)}</div>
+            </section>
+          ) : null}
         </div>
       </div>
     </div>

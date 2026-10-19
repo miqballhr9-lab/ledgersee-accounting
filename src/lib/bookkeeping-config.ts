@@ -481,7 +481,7 @@ export const modules: readonly ModuleDefinition[] = [
     fields: [
       { key: "name", label: "Tax name", required: true },
       { key: "rate", label: "Rate (%)", type: "number", required: true },
-      { key: "type", label: "Type", type: "select", options: ["Standard", "Reduced", "Zero-rated", "Exempt", "Further tax", "Withholding", "Provincial services"], help: "Decides which line of the tax return it is reported on." },
+      { key: "type", label: "Type", type: "select", options: ["Standard", "Reduced", "Zero-rated", "Exempt", "Further tax", "Withholding", "Provincial services", "EU goods sale", "EU services sale", "EU goods purchase", "EU services purchase", "Non-EU services purchase", "Import"], help: "Decides which line of the tax return it is reported on." },
       { key: "appliesTo", label: "Used on", type: "select", options: ["Both", "Sales", "Purchases"] },
       { key: "component", label: "Component", placeholder: "GST, VAT, PST" },
       { key: "jurisdiction", label: "Authority / jurisdiction" },
