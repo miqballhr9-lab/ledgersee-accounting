@@ -336,9 +336,14 @@ export default function RecordEditor({ module, record, customers, vendors, items
   }, [items]);
 
   const toEditorLines = (lines: SuggestedLine[]): ExpenseEntryLine[] => lines.map((line) => ({ id: crypto.randomUUID(), category: line.category, description: line.description, amount: line.amount, ...(line.taxRate ? { taxRate: line.taxRate } : {}) }));
+  /** The rate last used for a currency on these documents, to start from. */
+  const lastRateFor = (currency: string) => history.filter((entry) => entry.data.currency === currency && Number(entry.data.exchangeRate) > 0).sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0]?.data.exchangeRate ?? "";
   /** On a new purchase with no lines filled in yet, starts the lines from the supplier's rule or their last purchase. */
   function fillFromSupplier(supplier: string) {
     if (record) return;
+    // A supplier abroad bills in their own currency: theirs, else the one their last purchase was in.
+    const supplierCurrency = supplierNamed(vendors, supplier)?.data.currency || lastPurchase(history, supplier)?.data.currency || "";
+    if (supplierCurrency && "currency" in values && supplierCurrency !== values.currency) changeValue("currency", supplierCurrency);
     const suggestion = supplierSuggestion(supplier, vendors, history, accounts);
     if (!suggestion) return;
     setExpenseLines((current) => (current.every((line) => !line.category.trim() && !line.amount.trim()) ? toEditorLines(suggestion.lines) : current));
@@ -352,6 +357,10 @@ export default function RecordEditor({ module, record, customers, vendors, items
       }
       if (module.kind === "bills" && (key === "billDate" || key === "paymentTerms") && next.paymentTerms) {
         next.dueDate = dueDateForTerms(next.billDate ?? "", next.paymentTerms) || next.dueDate;
+      }
+      // The home currency needs no rate; a foreign one starts from the last rate used for it, else is left to fill in.
+      if (key === "currency" && "exchangeRate" in current) {
+        next.exchangeRate = !value || value === defaultCurrency ? "1" : current.currency === value && current.exchangeRate !== "1" ? current.exchangeRate : lastRateFor(value);
       }
       return next;
     });
@@ -522,6 +531,11 @@ export default function RecordEditor({ module, record, customers, vendors, items
     if (missingCurrency) {
       closePreparedMessage();
       setError(`${missingCurrency.label} is required.`);
+      return;
+    }
+    if (defaultCurrency && "exchangeRate" in values && values.currency && values.currency !== defaultCurrency && !(Number(values.exchangeRate) > 0)) {
+      closePreparedMessage();
+      setError(`Enter the exchange rate: how many ${defaultCurrency} one ${values.currency} is worth on this date.`);
       return;
     }
     if (shouldSend && sendMethod.current !== "email") {

@@ -102,8 +102,8 @@ function dateCutoff(preset: DatePreset, asOfDate: string) {
   return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
 }
 
-function createDefaults(kind: "bills" | "expenses", records: BookkeepingRecord[], asOfDate: string): Record<string, string> {
-  const values: Record<string, string> = {};
+function createDefaults(kind: "bills" | "expenses", records: BookkeepingRecord[], asOfDate: string, currency: string): Record<string, string> {
+  const values: Record<string, string> = { currency, exchangeRate: "1" };
   if (kind === "expenses") {
     values.expenseDate = asOfDate;
   } else {
@@ -216,8 +216,8 @@ export default function ExpensesWorkspace({ expenses: initialExpenses, bills: in
     setEditorModule(module);
     setEditingRecord(null);
     setEditorDefaults(check === "card-credit"
-      ? { ...createDefaults(kind, records, asOfDate), docType: "Credit card credit" }
-      : check ? { ...createDefaults(kind, records, asOfDate), docType: "Check", referenceNumber: nextCheckNumber(records) } : createDefaults(kind, records, asOfDate));
+      ? { ...createDefaults(kind, records, asOfDate, currency), docType: "Credit card credit" }
+      : check ? { ...createDefaults(kind, records, asOfDate, currency), docType: "Check", referenceNumber: nextCheckNumber(records) } : createDefaults(kind, records, asOfDate, currency));
     setActionMessage("");
   }
 
@@ -655,7 +655,7 @@ export default function ExpensesWorkspace({ expenses: initialExpenses, bills: in
           onSaveComplete={async (saved, intent) => {
             if (intent !== "save-and-new") return;
             setEditingRecord(null);
-            setEditorDefaults(createDefaults(editorModule.kind as "bills" | "expenses", [saved, ...records.filter((record) => record.id !== saved.id)], asOfDate));
+            setEditorDefaults(createDefaults(editorModule.kind as "bills" | "expenses", [saved, ...records.filter((record) => record.id !== saved.id)], asOfDate, currency));
           }}
         />
       ) : null}

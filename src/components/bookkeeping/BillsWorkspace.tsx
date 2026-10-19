@@ -132,6 +132,8 @@ export default function BillsWorkspace({ records: initialRecords, vendors, accou
       paymentMethod: "Credit",
       paidAmount: "0",
       status: "Open",
+      currency,
+      exchangeRate: "1",
     });
     setActionMessage("");
     setEditorOpen(true);

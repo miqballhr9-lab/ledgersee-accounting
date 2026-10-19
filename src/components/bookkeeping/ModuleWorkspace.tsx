@@ -218,11 +218,15 @@ function createDefaults(module: ModuleDefinition, records: BookkeepingRecord[], 
   }
   if (module.kind === "supplier-credits") {
     values.creditNumber = `SC-${String(records.filter((record) => record.kind === "supplier-credits").length + 1).padStart(4, "0")}`;
+    values.currency = defaultCurrency;
+    values.exchangeRate = "1";
     values.date = dateString(today);
     values.status = "Open";
   }
   if (module.kind === "bills") {
     values.billNumber = `BILL-${String(records.filter((record) => record.kind === "bills").length + 1).padStart(4, "0")}`;
+    values.currency = defaultCurrency;
+    values.exchangeRate = "1";
     values.billDate = dateString(today);
     values.paidAmount = "0";
     values.paymentMethod = "Credit";
