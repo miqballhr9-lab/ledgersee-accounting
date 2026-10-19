@@ -320,10 +320,11 @@ export const modules: readonly ModuleDefinition[] = [
   {
     slug: "purchase-orders", kind: "purchase-orders", label: "Purchase order", plural: "Purchase orders",
     description: "Confirm supplier orders, receive products, and record purchases as bills or expenses.", titleKey: "poNumber",
-    columns: ["poNumber", "vendor", "date", "expectedDate", "amount", "status"],
+    columns: ["poNumber", "vendor", "lineItemNames", "lineQuantity", "date", "expectedDate", "amount", "status"],
     fields: [
       { key: "vendor", label: "Supplier", required: true },
       { key: "currency", label: "Currency", type: "currency" },
+      { key: "exchangeRate", label: "Exchange rate", type: "number", placeholder: "1" },
       { key: "date", label: "PO date", type: "date", required: true },
       { key: "expectedDate", label: "Expected date", type: "date" },
       { key: "poNumber", label: "PO no.", required: true },

@@ -37,7 +37,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { navigationGroups, type ModuleDefinition } from "@/lib/bookkeeping-config";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
 import { formatCustomerAddress } from "@/lib/customer-utils";
-import { currencyAmount, dueDateForTerms, homeRate } from "@/lib/invoice-utils";
+import { currencyAmount, dueDateForTerms, homeRate, lineSummary } from "@/lib/invoice-utils";
 import { paymentAccountLabel, paymentAccountType, receivingAccountType } from "@/lib/payment-accounts";
 import { budgetActualRecords, recordsWithinBudgetDates, type BudgetLine } from "@/lib/budget-utils";
 import JournalEntryEditor from "@/components/bookkeeping/JournalEntryEditor";
@@ -207,6 +207,7 @@ function createDefaults(module: ModuleDefinition, records: BookkeepingRecord[], 
     values.poNumber = `PO-${String(records.filter((record) => record.kind === "purchase-orders").length + 1).padStart(4, "0")}`;
     values.date = dateString(today);
     values.currency = defaultCurrency;
+    values.exchangeRate = "1";
     values.status = "Draft";
   }
   if (module.kind === "credit-notes") {
@@ -932,7 +933,7 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
   }
 
   function exportCsv() {
-    const rows = [visibleColumns.map((key) => key === "homeAmount" ? `Amount (${currency})` : listColumnLabels?.[key] ?? key), ...filteredRecords.map((record) => visibleColumns.map((key) => key === "address" ? formatCustomerAddress(record.data).replaceAll("\n", ", ") : key === "homeAmount" ? ((Number(record.data.amount) || 0) * homeRate(record.data, currency)).toFixed(2) : record.data[key] ?? ""))];
+    const rows = [visibleColumns.map((key) => key === "homeAmount" ? `Amount (${currency})` : key === "lineItemNames" ? "Items" : key === "lineQuantity" ? "Quantity" : listColumnLabels?.[key] ?? key), ...filteredRecords.map((record) => visibleColumns.map((key) => key === "address" ? formatCustomerAddress(record.data).replaceAll("\n", ", ") : key === "homeAmount" ? ((Number(record.data.amount) || 0) * homeRate(record.data, currency)).toFixed(2) : key === "lineItemNames" ? lineSummary(record.data).names : key === "lineQuantity" ? String(lineSummary(record.data).quantity) : record.data[key] ?? ""))];
     const csv = rows.map((row) => row.map(toCsvValue).join(",")).join("\r\n");
     const objectUrl = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
     const anchor = document.createElement("a");

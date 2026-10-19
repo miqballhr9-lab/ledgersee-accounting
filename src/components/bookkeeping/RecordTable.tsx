@@ -10,7 +10,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import type { ModuleDefinition } from "@/lib/bookkeeping-config";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
 import { formatCustomerAddress } from "@/lib/customer-utils";
-import { homeRate } from "@/lib/invoice-utils";
+import { homeRate, lineSummary } from "@/lib/invoice-utils";
 
 export type RecordActionKind = "refund" | "remind" | "progress" | "statement" | "void" | "convert" | "convert-expense" | "payment" | "send" | "send-rfq" | "confirm-order" | "receive-order" | "cancel-order" | "mark-paid" | "match" | "apply-credit" | "generate" | "duplicate" | "share" | "print" | "undo-payment";
 
@@ -38,6 +38,8 @@ interface RecordTableProps {
 }
 
 const columnLabels: Record<string, string> = {
+  lineItemNames: "Items",
+  lineQuantity: "Quantity",
   refundAccountName: "Refund to",
   vendor: "Supplier",
   cnic: "CNIC",
@@ -111,6 +113,14 @@ const columnLabels: Record<string, string> = {
 };
 
 function displayValue(record: BookkeepingRecord, key: string, homeCurrency = "") {
+  if (key === "lineItemNames") {
+    const names = lineSummary(record.data).names;
+    return <span className="block max-w-[220px] truncate" title={names}>{names || "—"}</span>;
+  }
+  if (key === "lineQuantity") {
+    const { quantity } = lineSummary(record.data);
+    return <span className="tabular-nums">{quantity ? quantity.toLocaleString(undefined, { maximumFractionDigits: 3 }) : "—"}</span>;
+  }
   if (key === "homeAmount") {
     const number = (Number(record.data.amount) || 0) * homeRate(record.data, homeCurrency);
     const currency = homeCurrency || record.data.currency || "USD";

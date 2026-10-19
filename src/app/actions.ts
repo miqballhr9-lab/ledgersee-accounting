@@ -1998,6 +1998,7 @@ export async function convertPurchaseOrderToExpense(
       payee: order.data.vendor || "",
       expenseDate: order.data.date || today,
       currency: order.data.currency || "USD",
+      exchangeRate: order.data.exchangeRate || "1",
       lineItems: JSON.stringify([{
         itemId: "",
         name: expenseAccount.data.name || expenseAccount.data.code || "Expense",

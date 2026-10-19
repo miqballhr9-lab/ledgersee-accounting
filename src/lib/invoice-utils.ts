@@ -101,3 +101,10 @@ export function homeRate(data: Record<string, string>, homeCurrency = "") {
   const rate = Number(data.exchangeRate);
   return Number.isFinite(rate) && rate > 0 ? rate : 1;
 }
+
+/** The products on a document and how many in all, for list columns ("Items", "Quantity"). */
+export function lineSummary(data: Record<string, string>) {
+  const lines = parseInvoiceLines(data.lineItems ?? "").filter((line) => line.name.trim());
+  const quantity = lines.reduce((sum, line) => sum + (Number(line.quantity) || 0), 0);
+  return { names: lines.map((line) => line.name.trim()).join(", "), quantity: Math.round(quantity * 1000) / 1000 };
+}
