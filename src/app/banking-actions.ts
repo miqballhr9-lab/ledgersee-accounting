@@ -11,6 +11,7 @@ import { assertBooksOpen } from "@/lib/closing";
 import { parseCsv } from "@/lib/budget-utils";
 import { isUndepositedFunds, paymentAccountType } from "@/lib/payment-accounts";
 import { revalidatePath } from "@/lib/revalidate";
+import { supplierCategoryForBankLine } from "@/lib/supplier-memory";
 
 const isDate = (value: unknown): value is string => typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value);
 
@@ -165,6 +166,7 @@ export async function importBankStatement(accountName: string, csv: string): Pro
   const seen = new Set(existing.map((row) => `${row.data.account}|${row.data.date}|${row.data.description}|${row.data.amount}|${row.data.type}`));
   const rules = (await db.select().from(bookkeepingRecord).where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "bank-rules"))))
     .filter((rule) => rule.data.enabled !== "false" && rule.data.contains?.trim());
+  const [suppliers, accounts] = await Promise.all(["vendors", "accounts"].map((kind) => db.select().from(bookkeepingRecord).where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, kind)))));
   let imported = 0;
   let skipped = 0;
   for (const [index, row] of rows.entries()) {
@@ -186,10 +188,12 @@ export async function importBankStatement(accountName: string, csv: string): Pro
     seen.add(key);
     // Bank rules categorise the new lines, as they do when lines are entered by hand.
     const rule = rules.find((candidate) => description.toLowerCase().includes(candidate.data.contains.trim().toLowerCase()));
+    // No bank rule fits: money paid to a supplier named in the line goes to their default category.
+    const fromSupplier = !rule && type === "Withdrawal" ? supplierCategoryForBankLine(description, suppliers, accounts) : null;
     await db.insert(bookkeepingRecord).values({
       userId: me.id,
       kind: "transactions",
-      data: { date, description, account: name, type, amount, category: rule?.data.category || "", matched: "false", imported: "true", ...(rule ? { ruleApplied: rule.data.name || "Bank rule" } : {}) },
+      data: { date, description, account: name, type, amount, category: rule?.data.category || fromSupplier?.category || "", matched: "false", imported: "true", ...(rule ? { ruleApplied: rule.data.name || "Bank rule" } : fromSupplier ? { ruleApplied: `Supplier: ${fromSupplier.supplier}` } : {}) },
     });
     imported += 1;
   }

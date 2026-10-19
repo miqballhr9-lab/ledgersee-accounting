@@ -117,10 +117,11 @@ export default async function SectionPage({ params, searchParams }: SectionPageP
   }
 
   if (section === "bills") {
-    const groups = await listBookkeepingRecordGroups(["bills", "vendors", "accounts", "settings", "warehouses", ...inventoryKinds]);
+    const groups = await listBookkeepingRecordGroups(["bills", "expenses", "vendors", "accounts", "settings", "warehouses", ...inventoryKinds]);
     return (
       <BillsWorkspace
         records={groups.bills ?? []}
+        expenses={groups.expenses ?? []}
         vendors={groups.vendors ?? []}
         accounts={groups.accounts ?? []}
         currency={groups.settings?.[0]?.data.currency || "USD"}

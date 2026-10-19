@@ -39,6 +39,8 @@ interface BillsWorkspaceProps {
   items?: BookkeepingRecord[];
   /** Warehouse names, for where the bill's stock goes. */
   warehouses?: string[];
+  /** The business's expenses, so a supplier's last purchase can fill in a new bill. */
+  expenses?: BookkeepingRecord[];
 }
 
 type BillStatus = "Open" | "Partially Paid" | "Overdue" | "Paid" | "Cancelled";
@@ -74,7 +76,7 @@ function csvValue(value: string) {
   return `"${value.replaceAll('"', '""')}"`;
 }
 
-export default function BillsWorkspace({ records: initialRecords, vendors, accounts, currency, asOfDate, billTerms = "30 days", items = [], warehouses = [] }: BillsWorkspaceProps) {
+export default function BillsWorkspace({ records: initialRecords, vendors, accounts, currency, asOfDate, billTerms = "30 days", items = [], warehouses = [], expenses = [] }: BillsWorkspaceProps) {
   const router = useRouter();
   const [records, setRecords] = useState(initialRecords);
   const [search, setSearch] = useState("");
@@ -471,6 +473,7 @@ export default function BillsWorkspace({ records: initialRecords, vendors, accou
           onOpenChange={setEditorOpen}
           onSaved={handleSaved}
           onSaveComplete={async (saved, intent) => { if (intent === "save-and-new") openNewBill(records.some((record) => record.id === saved.id) ? 0 : 1); }}
+          history={[...records, ...expenses]}
         />
       ) : null}
     </div>

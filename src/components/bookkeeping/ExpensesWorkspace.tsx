@@ -648,6 +648,7 @@ export default function ExpensesWorkspace({ expenses: initialExpenses, bills: in
           accounts={accounts}
           defaultCurrency={currency}
           defaults={editorDefaults}
+          history={records}
           open={Boolean(editorModule)}
           onOpenChange={(open) => { if (!open) setEditorModule(null); }}
           onSaved={handleSaved}

@@ -3,7 +3,7 @@
 import { Fragment, useEffect, useRef, useState, type FormEvent } from "react";
 import { toast } from "sonner";
 import Link from "next/link";
-import { ChevronDown, Copy, LoaderCircle, Repeat, Mail, MessageCircle, MessageSquareText, Plus, Printer, Share2, Trash2, UploadCloud, X } from "lucide-react";
+import { AlertTriangle, ChevronDown, Copy, LoaderCircle, Repeat, Mail, MessageCircle, MessageSquareText, Plus, Printer, Share2, Trash2, UploadCloud, X } from "lucide-react";
 import { readableError } from "@/lib/action-error";
 
 import {
@@ -32,7 +32,8 @@ import { CurrencyPicker } from "@/components/bookkeeping/CurrencyPicker";
 import type { FormField, ModuleDefinition } from "@/lib/bookkeeping-config";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
 import { formatCustomerAddress } from "@/lib/customer-utils";
-import { expenseLinesFromData } from "@/lib/expense-utils";
+import { expenseCategoryLabel, expenseLinesFromData } from "@/lib/expense-utils";
+import { categoryLines, lastPurchase, possibleDuplicates, supplierNamed, supplierOf, supplierSuggestion, type SuggestedLine } from "@/lib/supplier-memory";
 import { currencyAmount, dueDateForTerms, invoiceSubtotal, invoiceTax, parseInvoiceLines } from "@/lib/invoice-utils";
 import { accountCategoryForType } from "@/lib/account-types";
 import { paymentAccountLabel, paymentAccountType, receivingAccountType } from "@/lib/payment-accounts";
@@ -50,6 +51,8 @@ interface RecordEditorProps {
   onOpenChange: (open: boolean) => void;
   onSaved: (record: BookkeepingRecord) => void;
   onSaveComplete: (record: BookkeepingRecord, intent: "save-and-new" | "save-and-copy") => Promise<void>;
+  /** Earlier bills and expenses: a supplier's last purchase fills a new one in, and a purchase entered twice is flagged. */
+  history?: BookkeepingRecord[];
 }
 
 interface InvoiceLine {
@@ -254,7 +257,7 @@ function catalogItemLabel(item: BookkeepingRecord, currency: string): string {
   return `${itemName} · ${itemType} · ${currencyAmount(rate, currency)}${unit ? ` / ${unit}` : ""}`;
 }
 
-export default function RecordEditor({ module, record, customers, vendors, items, accounts, defaultCurrency, defaults, open, onOpenChange, onSaved, onSaveComplete }: RecordEditorProps) {
+export default function RecordEditor({ module, record, customers, vendors, items, accounts, defaultCurrency, defaults, open, onOpenChange, onSaved, onSaveComplete, history = [] }: RecordEditorProps) {
   const [values, setValues] = useState<Record<string, string>>(() => getInitialValues(module, record, defaults, customers));
   // Tax rates from Taxes (installed by Tax setup), offered on documents with a tax rate field.
   const [taxes, setTaxes] = useState<BookkeepingRecord[]>([]);
@@ -331,6 +334,15 @@ export default function RecordEditor({ module, record, customers, vendors, items
   useEffect(() => {
     itemsRef.current = items;
   }, [items]);
+
+  const toEditorLines = (lines: SuggestedLine[]): ExpenseEntryLine[] => lines.map((line) => ({ id: crypto.randomUUID(), category: line.category, description: line.description, amount: line.amount, ...(line.taxRate ? { taxRate: line.taxRate } : {}) }));
+  /** On a new purchase with no lines filled in yet, starts the lines from the supplier's rule or their last purchase. */
+  function fillFromSupplier(supplier: string) {
+    if (record) return;
+    const suggestion = supplierSuggestion(supplier, vendors, history, accounts);
+    if (!suggestion) return;
+    setExpenseLines((current) => (current.every((line) => !line.category.trim() && !line.amount.trim()) ? toEditorLines(suggestion.lines) : current));
+  }
 
   function changeValue(key: string, value: string) {
     setValues((current) => {
@@ -606,6 +618,10 @@ export default function RecordEditor({ module, record, customers, vendors, items
     ...purchaseItems.filter((line) => line.itemId).map((line) => ({ quantity: line.quantity, rate: line.rate, taxRate: line.taxRate })),
   ], values.taxRate);
   const expenseGrandTotal = Math.max(0, expenseTotal + expenseTaxAmount - discount);
+  // Purchases only: the supplier's last bill or expense, and any that look like this one entered again.
+  const isPurchase = module.kind === "bills" || module.kind === "expenses";
+  const previousPurchase = isPurchase && supplierOf(values).trim() ? lastPurchase(history, supplierOf(values), record?.id) : undefined;
+  const duplicates = isPurchase ? possibleDuplicates(history, { ...values, amount: expenseGrandTotal > 0 ? String(expenseGrandTotal) : values.amount ?? "" }, record?.id) : [];
   const linesCurrency = values.currency || defaultCurrency || "USD";
   const hasStructuredLines = structuredLineKinds.has(module.kind);
   const isTransactionForm = hasStructuredLines || categoryLineKinds.has(module.kind);
@@ -758,18 +774,7 @@ export default function RecordEditor({ module, record, customers, vendors, items
                 const vendor = vendorOptions.find((option) => option.id === vendorId);
                 if (vendor?.data.name) {
                   changeValue(field.key, vendor.data.name);
-                  if ((module.kind === "bills" || module.kind === "supplier-credits") && vendor.data.defaultExpenseAccount) {
-                    const expenseAccount = expenseAccounts.find((account) => account.id === vendor.data.defaultExpenseAccount);
-                    const categoryName = expenseAccount?.data.name?.trim();
-                    if (categoryName) {
-                      // Prefill the first empty bill line with the supplier's default category.
-                      setExpenseLines((current) => {
-                        const target = current.findIndex((line) => !line.category.trim());
-                        if (target === -1) return current;
-                        return current.map((line, index) => index === target ? { ...line, category: categoryName } : line);
-                      });
-                    }
-                  }
+                  if (module.kind === "bills" || module.kind === "supplier-credits") fillFromSupplier(vendor.data.name);
                 }
               }}
             >
@@ -901,7 +906,12 @@ export default function RecordEditor({ module, record, customers, vendors, items
             type={field.type ?? "text"}
             value={module.kind === "credit-notes" && field.key === "amount" ? invoiceTotal.toFixed(2) : value}
             list={module.kind === "expenses" && field.key === "payee" ? "expense-payees" : undefined}
-            onChange={(event) => { if (field.key === "taxRate") setValues((current) => ({ ...current, taxName: "" })); changeValue(field.key, event.target.value); }}
+            onChange={(event) => {
+              if (field.key === "taxRate") setValues((current) => ({ ...current, taxName: "" }));
+              changeValue(field.key, event.target.value);
+              // A payee picked from the list (a supplier, or someone paid before) fills the lines as a supplier does on a bill.
+              if (module.kind === "expenses" && field.key === "payee" && (supplierNamed(vendors, event.target.value) || lastPurchase(history, event.target.value))) fillFromSupplier(event.target.value);
+            }}
             placeholder={field.placeholder}
             required={field.required}
             min={field.type === "number" ? "0" : undefined}
@@ -1090,6 +1100,25 @@ export default function RecordEditor({ module, record, customers, vendors, items
     const categoryTable = categoryLineKinds.has(module.kind) ? (
       <section className="rounded-xl border border-border bg-card" aria-labelledby={`${module.kind}-line-items-label`}>
         <h3 id={`${module.kind}-line-items-label`} className="px-5 pb-3 pt-4 text-base font-semibold">Category details</h3>
+        {duplicates.length ? (
+          <div role="alert" className="mx-5 mb-3 flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2.5 text-sm text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200">
+            <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+            <p>
+              <span className="font-medium">This may already be entered.</span>{" "}
+              {duplicates.slice(0, 3).map((entry) => `${entry.kind === "bills" ? "Bill" : "Expense"} ${entry.data.billNumber || entry.data.referenceNumber || ""} of ${currencyAmount(Number(entry.data.amount) || 0, entry.data.currency || defaultCurrency || "USD")} on ${entry.data.billDate || entry.data.expenseDate || ""}`.replace(/\s+/g, " ")).join("; ")}
+              {" "}from {supplierOf(values)}. Check it isn’t the same purchase before saving.
+            </p>
+          </div>
+        ) : null}
+        {previousPurchase ? (
+          <div className="mx-5 mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm">
+            <p className="text-muted-foreground">
+              Last from {supplierOf(values)}: <span className="font-medium text-foreground">{expenseCategoryLabel(previousPurchase.data) || "No category"}</span>
+              {" · "}{currencyAmount(Number(previousPurchase.data.amount) || 0, previousPurchase.data.currency || defaultCurrency || "USD")} on {previousPurchase.data.billDate || previousPurchase.data.expenseDate || previousPurchase.createdAt.slice(0, 10)}
+            </p>
+            <Button type="button" variant="outline" size="sm" onClick={() => setExpenseLines(toEditorLines(categoryLines(previousPurchase)))}><Copy size={14} />Use its lines</Button>
+          </div>
+        ) : null}
         <div className="overflow-x-auto border-y border-border">
           <table className={lineTableClass}>
             <thead>

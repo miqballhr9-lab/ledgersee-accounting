@@ -15,6 +15,7 @@ import { sendEmail, sendEmailOrThrow } from "@/lib/email";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
 import { adjustedWorkedDays, parseSalaryRules, payrollAdjustments, salaryRuleAmounts } from "@/lib/payroll-adjustments";
 import { weekendDays } from "@/lib/weekend";
+import { supplierCategoryForBankLine } from "@/lib/supplier-memory";
 import { runCaseEscalation, runLeadFollowUp, runOverdueTasks, runStaleDeals, runWonDealInvoices } from "@/lib/crm-automation";
 import {
   automationTemplate,
@@ -263,13 +264,16 @@ async function runRecurringInvoices(userId: string) {
 
 /** Categorises bank transactions no rule has handled yet when an enabled bank rule fits their description. */
 async function runBankRules(userId: string) {
-  const [transactions, rules] = await Promise.all([rowsOfKind(userId, "transactions"), rowsOfKind(userId, "bank-rules")]);
+  const [transactions, rules, vendors, accounts] = await Promise.all([rowsOfKind(userId, "transactions"), rowsOfKind(userId, "bank-rules"), rowsOfKind(userId, "vendors"), rowsOfKind(userId, "accounts")]);
   const enabled = rules.filter((rule) => rule.data.enabled !== "false" && rule.data.contains?.trim());
   const items: AutomationItem[] = [];
   for (const transaction of transactions) {
     if (transaction.data.matched === "true" || transaction.data.ruleApplied || transaction.data.reconciled === "true") continue;
     const description = (transaction.data.description || "").toLowerCase();
-    const rule = enabled.find((candidate) => description.includes(candidate.data.contains.trim().toLowerCase()));
+    const bankRule = enabled.find((candidate) => description.includes(candidate.data.contains.trim().toLowerCase()));
+    // No bank rule fits: a payment to a supplier named in the line takes the supplier's default category.
+    const fromSupplier = !bankRule && !transaction.data.category && transaction.data.type === "Withdrawal" ? supplierCategoryForBankLine(transaction.data.description || "", vendors, accounts) : null;
+    const rule = bankRule ?? (fromSupplier ? { data: { category: fromSupplier.category, account: "", name: `Supplier: ${fromSupplier.supplier}` } } : null);
     if (!rule) continue;
     const restore = { category: transaction.data.category || "", account: transaction.data.account || "", matched: transaction.data.matched || "false", ruleApplied: transaction.data.ruleApplied || "" };
     await db

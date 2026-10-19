@@ -26,6 +26,7 @@ import { standardAccounts } from "@/lib/standard-accounts";
 import { budgetActual, budgetExpectedTotal, payrollBudgetHead, budgetVariance, parseBudgetLines, parseCsv, recordsWithinBudgetDates, type BudgetCategory, type BudgetLine, type BudgetLineType, type BudgetPeriod } from "@/lib/budget-utils";
 import { calculatePayroll, payrollCsvFields, serializePayroll, type PayrollValues, type SalaryTaxRule } from "@/lib/payroll-utils";
 import { packFor } from "@/lib/tax-packs";
+import { supplierCategoryForBankLine } from "@/lib/supplier-memory";
 import { MAX_ITEM_IMPORT_ROWS, type ItemImportData, type ItemImportRow } from "@/lib/item-import";
 import { MAX_INVENTORY_COUNT_ROWS, type InventoryCountRow } from "@/lib/inventory-import";
 
@@ -692,6 +693,15 @@ async function saveRecord(
         account: data.account || matchedRule.data.account || "",
         ruleApplied: matchedRule.data.name || "Bank rule",
       };
+    }
+    else if (!data.category && data.type !== "Deposit") {
+      // No bank rule fits: money paid to a supplier named in the line goes to their default category.
+      const [vendors, accounts] = await Promise.all([
+        db.select().from(bookkeepingRecord).where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "vendors"))),
+        db.select().from(bookkeepingRecord).where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "accounts"))),
+      ]);
+      const fromSupplier = supplierCategoryForBankLine(data.description, vendors, accounts);
+      if (fromSupplier) data = { ...data, category: fromSupplier.category, ruleApplied: `Supplier: ${fromSupplier.supplier}` };
     }
   }
 
