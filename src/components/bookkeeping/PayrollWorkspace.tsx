@@ -18,7 +18,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Label } from "@/components/ui/label";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { payrollCsvFields } from "@/lib/payroll-utils";
 import type { SalaryTaxRule } from "@/lib/payroll-utils";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
@@ -76,13 +76,17 @@ interface PayrollColumn {
   label: string;
   align?: "right";
   render: (record: BookkeepingRecord) => ReactNode;
+  /** The amount this column adds up to in the register's total row. */
+  total?: (record: BookkeepingRecord) => number;
 }
 
 const PAYROLL_COLUMNS_KEY = "mikledger:payroll-columns:v1";
-const DEFAULT_PAYROLL_COLUMNS = ["reference", "employee", "phone", "designation", "days", "paymentAccount", "incentive", "overtime", "grossSalary", "tax", "otherDeductions", "payable", "description"];
-/** Columns added after people may have saved their choice; shown to them once, then theirs to hide. */
-const NEWER_COLUMNS = ["phone", "incentive", "overtime"];
-const COLUMNS_SEEN_KEY = "mikledger:payroll-columns-seen";
+/** The register shows the same columns as the payroll sheet, in the same order. */
+const DEFAULT_PAYROLL_COLUMNS = ["employee", "employeeId", "phone", "designation", "days", "baseSalary", "increment", "incentive", "overtime", "gym", "medical", "otherAllowance", "allowances", "grossSalary", "tax", "loan", "fine", "social", "adjustment", "payable", "paymentAccount", "description"];
+/** Set once a saved column choice has been moved to the sheet's layout; after that the choice is the person's own. */
+const COLUMNS_LAYOUT_KEY = "mikledger:payroll-columns-layout";
+const COLUMNS_LAYOUT = "sheet-v1";
+const amountOf = (record: BookkeepingRecord, ...keys: string[]) => keys.reduce((sum, key) => sum + (Number(record.data[key]) || 0), 0);
 
 /** The employee's mobile (or work phone) from Employees, matched by ID or name. */
 function phoneOf(record: BookkeepingRecord, employees: BookkeepingRecord[]) {
@@ -107,14 +111,30 @@ function payrollColumns(currency: string, employees: BookkeepingRecord[] = []): 
         </>
       ),
     },
-    { key: "phone", label: "Phone", render: (record) => { const phone = phoneOf(record, employees); return phone ? <a href={`tel:${phone.replace(/[^+\d]/g, "")}`} className="whitespace-nowrap text-primary hover:underline">{phone}</a> : "—"; } },
     { key: "employeeId", label: "Employee ID", render: (record) => record.data.employeeId || "—" },
+    { key: "phone", label: "Phone", render: (record) => { const phone = phoneOf(record, employees); return phone ? <a href={`tel:${phone.replace(/[^+\d]/g, "")}`} className="whitespace-nowrap text-primary hover:underline">{phone}</a> : "—"; } },
     { key: "cnic", label: "CNIC", render: (record) => record.data.cnic || "—" },
     { key: "employeeEmail", label: "Email", render: (record) => record.data.employeeEmail || "—" },
     { key: "joiningDate", label: "Joining date", render: (record) => record.data.joiningDate || "—" },
     { key: "month", label: "Month", render: (record) => record.data.month || "—" },
     { key: "designation", label: "Designation", render: (record) => record.data.designation || "—" },
     { key: "days", label: "Days", render: (record) => <span className="tabular-nums">{record.data.workedDays || "0"} / {record.data.workingDays || "0"}</span> },
+    { key: "baseSalary", label: "Base salary", align: "right", render: (record) => money(record.data.baseSalary), total: (record) => amountOf(record, "baseSalary") },
+    { key: "increment", label: "Increment", align: "right", render: (record) => money(record.data.increment), total: (record) => amountOf(record, "increment") },
+    { key: "incentive", label: "Incentive", align: "right", render: (record) => money(record.data.incentive), total: (record) => amountOf(record, "incentive") },
+    { key: "overtime", label: "Overtime", align: "right", render: (record) => money(record.data.overtimeAllowance), total: (record) => amountOf(record, "overtimeAllowance") },
+    { key: "gym", label: "Gym", align: "right", render: (record) => money(record.data.gymAllowance), total: (record) => amountOf(record, "gymAllowance") },
+    { key: "medical", label: "Medical", align: "right", render: (record) => money(record.data.medicalAllowance), total: (record) => amountOf(record, "medicalAllowance") },
+    { key: "otherAllowance", label: "Other allowance", align: "right", render: (record) => money(record.data.otherAllowance), total: (record) => amountOf(record, "otherAllowance") },
+    { key: "allowances", label: "Total allowances", align: "right", render: (record) => formatRupees(amountOf(record, "incentive", "overtimeAllowance", "gymAllowance", "medicalAllowance", "otherAllowance")), total: (record) => amountOf(record, "incentive", "overtimeAllowance", "gymAllowance", "medicalAllowance", "otherAllowance") },
+    { key: "grossSalary", label: "Gross salary", align: "right", render: (record) => <span className="font-medium">{money(record.data.grossSalary)}</span>, total: (record) => amountOf(record, "grossSalary") },
+    { key: "tax", label: "Tax", align: "right", render: (record) => money(record.data.taxDeduction), total: (record) => amountOf(record, "taxDeduction") },
+    { key: "loan", label: "Advance / loan", align: "right", render: (record) => formatRupees(amountOf(record, "loanDeduction", "advanceDeduction")), total: (record) => amountOf(record, "loanDeduction", "advanceDeduction") },
+    { key: "fine", label: "Fine", align: "right", render: (record) => money(record.data.fineDeduction), total: (record) => amountOf(record, "fineDeduction") },
+    { key: "social", label: "EOBI / PF", align: "right", render: (record) => money(record.data.socialDeduction), total: (record) => amountOf(record, "socialDeduction") },
+    { key: "adjustment", label: "Other adjustment", align: "right", render: (record) => money(record.data.adjustment), total: (record) => amountOf(record, "adjustment") },
+    { key: "otherDeductions", label: "Other deductions", align: "right", render: (record) => formatRupees(Math.max(0, Number(record.data.totalDeductions || 0) - Number(record.data.taxDeduction || 0))), total: (record) => Math.max(0, Number(record.data.totalDeductions || 0) - Number(record.data.taxDeduction || 0)) },
+    { key: "payable", label: "Payable", align: "right", render: (record) => <span className="font-semibold">{money(record.data.payableSalary)}</span>, total: (record) => amountOf(record, "payableSalary") },
     {
       key: "paymentAccount",
       label: "Payment account",
@@ -122,15 +142,6 @@ function payrollColumns(currency: string, employees: BookkeepingRecord[] = []): 
         ? <><span className="font-medium">{record.data.paymentMethod || "Account"}</span><span className="block text-xs text-muted-foreground">{record.data.paymentAccountName}</span></>
         : <span className="text-muted-foreground">Not set</span>,
     },
-    { key: "baseSalary", label: "Base salary", align: "right", render: (record) => money(record.data.baseSalary) },
-    { key: "increment", label: "Increment", align: "right", render: (record) => money(record.data.increment) },
-    { key: "incentive", label: "Incentive", align: "right", render: (record) => money(record.data.incentive) },
-    { key: "overtime", label: "Overtime", align: "right", render: (record) => money(record.data.overtimeAllowance) },
-    { key: "allowances", label: "Allowances", align: "right", render: (record) => formatRupees(["incentive", "overtimeAllowance", "gymAllowance", "medicalAllowance", "otherAllowance"].reduce((sum, key) => sum + Number(record.data[key] || 0), 0)) },
-    { key: "grossSalary", label: "Gross salary", align: "right", render: (record) => <span className="font-medium">{money(record.data.grossSalary)}</span> },
-    { key: "tax", label: "Tax", align: "right", render: (record) => money(record.data.taxDeduction) },
-    { key: "otherDeductions", label: "Other deductions", align: "right", render: (record) => formatRupees(Math.max(0, Number(record.data.totalDeductions || 0) - Number(record.data.taxDeduction || 0))) },
-    { key: "payable", label: "Payable", align: "right", render: (record) => <span className="font-semibold">{money(record.data.payableSalary)}</span> },
     {
       key: "status",
       label: "Status",
@@ -171,15 +182,11 @@ export default function PayrollWorkspace({ records, accounts, employees = [], hr
   useEffect(() => {
     try {
       const stored: unknown = JSON.parse(window.localStorage.getItem(PAYROLL_COLUMNS_KEY) || "null");
-      if (Array.isArray(stored) && stored.length) {
-        const keys = stored.filter((key): key is string => typeof key === "string");
-        // A saved choice from before Phone, Incentive and Overtime existed gets them once.
-        const seen = window.localStorage.getItem(COLUMNS_SEEN_KEY) === "1";
-        const next = seen ? keys : [...keys, ...NEWER_COLUMNS.filter((key) => !keys.includes(key))];
-        if (!seen) window.localStorage.setItem(PAYROLL_COLUMNS_KEY, JSON.stringify(next));
-        setVisibleColumnKeys(next);
-      }
-      window.localStorage.setItem(COLUMNS_SEEN_KEY, "1");
+      // A choice saved before the register matched the payroll sheet moves to the sheet's layout once.
+      if (window.localStorage.getItem(COLUMNS_LAYOUT_KEY) !== COLUMNS_LAYOUT) {
+        window.localStorage.setItem(PAYROLL_COLUMNS_KEY, JSON.stringify(DEFAULT_PAYROLL_COLUMNS));
+        window.localStorage.setItem(COLUMNS_LAYOUT_KEY, COLUMNS_LAYOUT);
+      } else if (Array.isArray(stored) && stored.length) setVisibleColumnKeys(stored.filter((key): key is string => typeof key === "string"));
     } catch {
       // Stored choice unreadable; keep the default columns.
     }
@@ -605,6 +612,17 @@ export default function PayrollWorkspace({ records, accounts, employees = [], hr
                   </TableRow>
                 ))}
               </TableBody>
+              <TableFooter>
+                <TableRow className="font-semibold">
+                  <TableCell className="print:hidden" />
+                  {visibleColumns.map((column, index) => (
+                    <TableCell key={column.key} className={column.align === "right" ? "text-right tabular-nums" : undefined}>
+                      {column.total ? formatRupees(filteredRecords.reduce((sum, record) => sum + column.total!(record), 0)) : index === 0 ? `Total · ${filteredRecords.length} ${filteredRecords.length === 1 ? "employee" : "employees"}` : null}
+                    </TableCell>
+                  ))}
+                  <TableCell className="print:hidden" />
+                </TableRow>
+              </TableFooter>
             </Table>
           </div>
         ) : (
