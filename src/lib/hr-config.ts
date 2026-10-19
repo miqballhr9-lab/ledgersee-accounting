@@ -131,7 +131,7 @@ export const hrModules: readonly CrmModule[] = [
     description: "Loans, advances and other amounts deducted from an employee's pay each month until the total is paid.",
     titleKey: "employee", statusKey: "status", kanbanKey: "status",
     quickActions: [{ label: "Approve", key: "status", value: "Running", tone: "primary" }, { label: "Mark as completed", key: "status", value: "Completed" }, { label: "Cancel", key: "status", value: "Cancelled", tone: "danger" }],
-    columns: ["employee", "loanType", "monthlyInstallment", "amount", "payrollRepaid", "repaidAmount", "balance", "status"],
+    columns: ["employee", "loanType", "monthlyInstallment", "amount", "installmentsPaid", "installmentsLeft", "payrollRepaid", "repaidAmount", "balance", "status"],
     fields: [
       { key: "employee", label: "Employee", type: "employee", section: "Salary attachment", required: true },
       { key: "loanType", label: "Type", type: "select", options: ["Loan", "Salary advance", "Attachment of salary", "Assignment of salary", "Child support"], section: "Salary attachment", required: true },
@@ -144,6 +144,8 @@ export const hrModules: readonly CrmModule[] = [
       { key: "paymentAccount", label: "Paid out from", type: "paymentAccount", section: "Salary attachment", help: "The cash or bank account the loan or advance was paid from. It is then repaid through payroll." },
       { key: "payrollRepaid", label: "Repaid from salary", type: "currency", section: "Amounts", readOnly: true, help: "Loan and advance deductions taken in payroll, worked out automatically." },
       { key: "lastDeduction", label: "Last deduction", section: "Amounts", readOnly: true },
+      { key: "installmentsPaid", label: "Installments paid", type: "number", section: "Amounts", readOnly: true, help: "Salaries that have taken a deduction for this, out of the number of months." },
+      { key: "installmentsLeft", label: "Installments left", type: "number", section: "Amounts", readOnly: true },
       { key: "repaidAmount", label: "Paid amount", type: "currency", section: "Amounts", help: "Everything repaid: salary deductions plus any amount paid back in cash or by bank (enter the total here)." },
       { key: "balance", label: "Remaining amount", type: "currency", section: "Amounts", readOnly: true },
       { key: "status", label: "Status", type: "select", options: ["To Approve", "Running", "Completed", "Cancelled"], section: "Amounts" },
