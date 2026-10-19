@@ -79,9 +79,18 @@ interface PayrollColumn {
 }
 
 const PAYROLL_COLUMNS_KEY = "mikledger:payroll-columns:v1";
-const DEFAULT_PAYROLL_COLUMNS = ["reference", "employee", "designation", "days", "paymentAccount", "grossSalary", "tax", "otherDeductions", "payable", "description"];
+const DEFAULT_PAYROLL_COLUMNS = ["reference", "employee", "phone", "designation", "days", "paymentAccount", "incentive", "overtime", "grossSalary", "tax", "otherDeductions", "payable", "description"];
+/** Columns added after people may have saved their choice; shown to them once, then theirs to hide. */
+const NEWER_COLUMNS = ["phone", "incentive", "overtime"];
+const COLUMNS_SEEN_KEY = "mikledger:payroll-columns-seen";
 
-function payrollColumns(currency: string): PayrollColumn[] {
+/** The employee's mobile (or work phone) from Employees, matched by ID or name. */
+function phoneOf(record: BookkeepingRecord, employees: BookkeepingRecord[]) {
+  const employee = employees.find((item) => item.data.employeeId && item.data.employeeId === record.data.employeeId) ?? employees.find((item) => item.data.name && item.data.name === record.data.employeeName);
+  return employee?.data.mobile || employee?.data.workPhone || employee?.data.phone || "";
+}
+
+function payrollColumns(currency: string, employees: BookkeepingRecord[] = []): PayrollColumn[] {
   const formatRupees = (amount: number) => formatPayAmount(amount, currency);
   const money = (value: string | undefined) => formatRupees(Number(value || 0));
   return [
@@ -98,6 +107,7 @@ function payrollColumns(currency: string): PayrollColumn[] {
         </>
       ),
     },
+    { key: "phone", label: "Phone", render: (record) => { const phone = phoneOf(record, employees); return phone ? <a href={`tel:${phone.replace(/[^+\d]/g, "")}`} className="whitespace-nowrap text-primary hover:underline">{phone}</a> : "—"; } },
     { key: "employeeId", label: "Employee ID", render: (record) => record.data.employeeId || "—" },
     { key: "cnic", label: "CNIC", render: (record) => record.data.cnic || "—" },
     { key: "employeeEmail", label: "Email", render: (record) => record.data.employeeEmail || "—" },
@@ -114,6 +124,8 @@ function payrollColumns(currency: string): PayrollColumn[] {
     },
     { key: "baseSalary", label: "Base salary", align: "right", render: (record) => money(record.data.baseSalary) },
     { key: "increment", label: "Increment", align: "right", render: (record) => money(record.data.increment) },
+    { key: "incentive", label: "Incentive", align: "right", render: (record) => money(record.data.incentive) },
+    { key: "overtime", label: "Overtime", align: "right", render: (record) => money(record.data.overtimeAllowance) },
     { key: "allowances", label: "Allowances", align: "right", render: (record) => formatRupees(["incentive", "overtimeAllowance", "gymAllowance", "medicalAllowance", "otherAllowance"].reduce((sum, key) => sum + Number(record.data[key] || 0), 0)) },
     { key: "grossSalary", label: "Gross salary", align: "right", render: (record) => <span className="font-medium">{money(record.data.grossSalary)}</span> },
     { key: "tax", label: "Tax", align: "right", render: (record) => money(record.data.taxDeduction) },
@@ -153,13 +165,21 @@ export default function PayrollWorkspace({ records, accounts, employees = [], hr
   const [isSending, setIsSending] = useState("");
   const [isImporting, setIsImporting] = useState(false);
   const [visibleColumnKeys, setVisibleColumnKeys] = useState<string[]>(DEFAULT_PAYROLL_COLUMNS);
-  const allColumns = useMemo(() => payrollColumns(currency), [currency]);
+  const allColumns = useMemo(() => payrollColumns(currency, employees), [currency, employees]);
   const visibleColumns = allColumns.filter((column) => visibleColumnKeys.includes(column.key));
 
   useEffect(() => {
     try {
       const stored: unknown = JSON.parse(window.localStorage.getItem(PAYROLL_COLUMNS_KEY) || "null");
-      if (Array.isArray(stored) && stored.length) setVisibleColumnKeys(stored.filter((key): key is string => typeof key === "string"));
+      if (Array.isArray(stored) && stored.length) {
+        const keys = stored.filter((key): key is string => typeof key === "string");
+        // A saved choice from before Phone, Incentive and Overtime existed gets them once.
+        const seen = window.localStorage.getItem(COLUMNS_SEEN_KEY) === "1";
+        const next = seen ? keys : [...keys, ...NEWER_COLUMNS.filter((key) => !keys.includes(key))];
+        if (!seen) window.localStorage.setItem(PAYROLL_COLUMNS_KEY, JSON.stringify(next));
+        setVisibleColumnKeys(next);
+      }
+      window.localStorage.setItem(COLUMNS_SEEN_KEY, "1");
     } catch {
       // Stored choice unreadable; keep the default columns.
     }
