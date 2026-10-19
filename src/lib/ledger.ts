@@ -51,6 +51,8 @@ export interface Ledger {
   postings: Posting[];
   ar: string;
   ap: string;
+  /** Tax paid on purchases that can be claimed back; the same as salesTax when there is no separate input tax account. */
+  inputTax: string;
   salesTax: string;
   sales: string;
   openingEquity: string;
@@ -685,6 +687,7 @@ export function buildLedger(allRecords: BookkeepingRecord[], method: AccountingM
     postings,
     ar,
     ap,
+    inputTax,
     salesTax,
     sales,
     openingEquity,

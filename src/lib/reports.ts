@@ -729,19 +729,27 @@ export function ageingSummary(records: BookkeepingRecord[], ledger: Ledger, side
 
 /** Tax collected on sales, tax paid on purchases, and what is left to pay. */
 export function taxSummary(ledger: Ledger, options: ReportOptions): ReportResult {
+  // Purchases' tax goes to the input tax account when there is one; tax return payments clear both.
+  const purchaseKinds = new Set(["bills", "expenses", "supplier-credits"]);
   let collected = 0;
   let paid = 0;
+  let settled = 0;
   for (const posting of ledger.postings) {
-    if (posting.account !== ledger.salesTax || posting.date < options.from || posting.date > options.to) continue;
-    if (posting.amount < 0) collected -= posting.amount; else paid += posting.amount;
+    if ((posting.account !== ledger.salesTax && posting.account !== ledger.inputTax) || posting.date < options.from || posting.date > options.to) continue;
+    if (posting.sourceKind === "tax-filings") settled += posting.amount;
+    else if (purchaseKinds.has(posting.sourceKind) || (posting.account === ledger.inputTax && ledger.inputTax !== ledger.salesTax)) paid += posting.amount;
+    else collected -= posting.amount;
   }
-  const zoom: ZoomSpec = { accounts: [ledger.salesTax], from: options.from, to: options.to };
+  const accounts = [...new Set([ledger.salesTax, ledger.inputTax])];
+  const zoom: ZoomSpec = { accounts, from: options.from, to: options.to };
   return {
     columns: [{ key: "amount", label: "Amount", kind: "amount" }],
     lines: [
-      { id: "collected", label: "Tax collected on sales", kind: "account", depth: 0, values: [collected], zooms: [zoom] },
-      { id: "paid", label: "Tax paid on purchases", kind: "account", depth: 0, values: [paid], zooms: [zoom] },
-      { id: "net", label: "Net tax payable", kind: "grand", depth: 0, values: [collected - paid], zooms: [zoom] },
+      { id: "collected", label: "Tax collected on sales", kind: "account", depth: 0, values: [collected], zooms: [{ accounts: [ledger.salesTax], from: options.from, to: options.to }] },
+      { id: "paid", label: "Tax paid on purchases", kind: "account", depth: 0, values: [paid], zooms: [{ accounts: [ledger.inputTax], from: options.from, to: options.to }] },
+      { id: "net", label: "Net tax payable", kind: "total", depth: 0, values: [collected - paid], zooms: [zoom] },
+      { id: "settled", label: "Paid to the tax authority", kind: "account", depth: 0, values: [settled], zooms: [zoom] },
+      { id: "left", label: "Left to pay", kind: "grand", depth: 0, values: [collected - paid - settled], zooms: [zoom] },
     ],
     period: periodLabel(options.from, options.to),
   };

@@ -237,7 +237,8 @@ function purchaseLines(records: BookkeepingRecord[], options: ReportOptions): Pu
 
 /** Salary entries whose month falls in the period. */
 function payrollInPeriod(records: BookkeepingRecord[], options: ReportOptions) {
-  return records.filter((record) => record.kind === "payroll" && record.data.month && `${record.data.month}-01` <= options.to && `${record.data.month}-31` >= options.from);
+  // Draft and cancelled salaries aren't payroll yet, as in the books.
+  return records.filter((record) => record.kind === "payroll" && record.data.month && !/draft|cancel/i.test(record.data.status ?? "") && `${record.data.month}-01` <= options.to && `${record.data.month}-31` >= options.from);
 }
 
 function monthLabel(month: string) {
@@ -778,11 +779,11 @@ export function buildListReport(key: string, records: BookkeepingRecord[], ledge
     }
 
     case "payroll-summary": {
-      const columns = [count("staff", "Employees"), amount("gross", "Gross pay"), amount("tax", "Tax withheld"), amount("other", "Other deductions"), amount("net", "Net pay"), amount("paid", "Paid")];
+      const columns = [count("staff", "Employees"), amount("gross", "Gross pay"), amount("tax", "Tax withheld"), amount("other", "Other deductions"), amount("net", "Net pay"), amount("paid", "Paid"), amount("employer", "Employer contributions"), amount("cost", "Total cost")];
       const months = groupBy(payrollInPeriod(records, options), (entry) => entry.data.month || "");
       const lines: ReportLine[] = months.map(([month, entries]) => {
         const sum = (key: string) => entries.reduce((total, entry) => total + num(entry.data[key]), 0);
-        return { id: month, label: monthLabel(month), kind: "account" as const, depth: 0, values: [entries.length, sum("grossSalary"), sum("taxDeduction"), sum("totalDeductions") - sum("taxDeduction"), sum("payableSalary"), sum("paidAmount")] };
+        return { id: month, label: monthLabel(month), kind: "account" as const, depth: 0, values: [entries.length, sum("grossSalary"), sum("taxDeduction"), sum("totalDeductions") - sum("taxDeduction"), sum("payableSalary"), sum("paidAmount"), sum("employerContribution"), sum("grossSalary") + sum("employerContribution")] };
       });
       if (lines.length) lines.push({ id: "total", label: "TOTAL", kind: "grand", depth: 0, values: columns.map((_, index) => lines.reduce((total, line) => total + ((line.values[index] as number) || 0), 0)) });
       return periodResult(columns, lines, options, "No salaries in this period.");
@@ -803,17 +804,18 @@ export function buildListReport(key: string, records: BookkeepingRecord[], ledge
     }
 
     case "payroll-tax-liability": {
-      const columns = [amount("gross", "Gross pay"), amount("tax", "Tax withheld"), amount("paid", "Salary paid"), pct("rate", "Effective rate")];
+      const columns = [amount("gross", "Gross pay"), amount("tax", "Tax withheld"), amount("employer", "Employer contributions"), amount("paid", "Salary paid"), pct("rate", "Effective rate")];
       const people = groupBy(payrollInPeriod(records, options), (entry) => entry.data.employeeName || "Not specified");
       const lines: ReportLine[] = people.map(([name, entries]) => {
         const gross = entries.reduce((total, entry) => total + num(entry.data.grossSalary), 0);
         const tax = entries.reduce((total, entry) => total + num(entry.data.taxDeduction), 0);
-        return { id: name, label: name, kind: "account" as const, depth: 0, values: [gross, tax, entries.reduce((total, entry) => total + num(entry.data.paidAmount), 0), gross ? (tax / gross) * 100 : null] };
+        return { id: name, label: name, kind: "account" as const, depth: 0, values: [gross, tax, entries.reduce((total, entry) => total + num(entry.data.employerContribution), 0), entries.reduce((total, entry) => total + num(entry.data.paidAmount), 0), gross ? (tax / gross) * 100 : null] };
       });
       if (lines.length) {
         const gross = lines.reduce((total, line) => total + (line.values[0] as number), 0);
         const tax = lines.reduce((total, line) => total + (line.values[1] as number), 0);
-        lines.push({ id: "total", label: "TOTAL", kind: "grand", depth: 0, values: [gross, tax, lines.reduce((total, line) => total + (line.values[2] as number), 0), gross ? (tax / gross) * 100 : null] });
+        const column = (index: number) => lines.reduce((total, line) => total + (line.values[index] as number), 0);
+        lines.push({ id: "total", label: "TOTAL", kind: "grand", depth: 0, values: [gross, tax, column(2), column(3), gross ? (tax / gross) * 100 : null] });
       }
       return periodResult(columns, lines, options, "No tax withheld from salaries in this period.");
     }
