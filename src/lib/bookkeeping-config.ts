@@ -606,6 +606,10 @@ export const navigationGroups: NavigationGroup[] = [
     ],
   },
   {
+    label: "Point of sale",
+    items: [{ slug: "pos", label: "POS register", icon: "Store" }],
+  },
+  {
     label: "Sales",
     items: [
       { slug: "sales", label: "All sales", icon: "ReceiptText" },

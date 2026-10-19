@@ -20,6 +20,7 @@ import {
   Clock,
   FileBadge,
   FileSpreadsheet,
+  Store,
   Globe,
   HandCoins,
   Network,
@@ -110,7 +111,7 @@ interface AppFrameProps {
 
 /** Which app each menu group belongs to; groups not listed (Organization) are for everyone. */
 const groupFeature: Record<string, Feature> = {
-  Overview: "accounting", CRM: "crm", Sales: "accounting", Purchases: "accounting", Inventory: "inventory", Accounts: "accounting",
+  Overview: "accounting", CRM: "crm", "Point of sale": "accounting", Sales: "accounting", Purchases: "accounting", Inventory: "inventory", Accounts: "accounting",
   HRM: "hr", Payroll: "hr", "My portal": "hr", Budgets: "accounting",
 };
 
@@ -179,6 +180,7 @@ const icons: Record<string, LucideIcon> = {
   UserRound,
   Globe,
   FileSpreadsheet,
+  Store,
 };
 
 const gearGroups = [

@@ -92,7 +92,7 @@ export function areaForPage(path: string): Area | null {
   if (slug === "profile") return null;
   if (slug === "crm") return "crm";
   if (slug === "hr" || slug === "my") return slug === "my" ? "self" : "hr";
-  if (slug === "invoices" || slug === "documents" || slug === "sales") return "sales";
+  if (slug === "invoices" || slug === "documents" || slug === "sales" || slug === "pos") return "sales";
   if (slug === "recurring" || slug === "reconciliation" || slug === "reports" || slug === "tax-setup" || slug === "tax-returns") return "accounting";
   if (slug === "inventory") return "inventory";
   if (slug === "automation") return "admin";
