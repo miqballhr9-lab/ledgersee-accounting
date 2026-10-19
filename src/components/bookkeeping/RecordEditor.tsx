@@ -34,7 +34,7 @@ import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
 import { formatCustomerAddress } from "@/lib/customer-utils";
 import { expenseCategoryLabel, expenseLinesFromData } from "@/lib/expense-utils";
 import { categoryLines, lastPurchase, possibleDuplicates, supplierNamed, supplierOf, supplierSuggestion, type SuggestedLine } from "@/lib/supplier-memory";
-import { currencyAmount, dueDateForTerms, invoiceSubtotal, invoiceTax, parseInvoiceLines } from "@/lib/invoice-utils";
+import { creditFromInvoice, currencyAmount, dueDateForTerms, invoiceSubtotal, invoiceTax, parseInvoiceLines } from "@/lib/invoice-utils";
 import { accountCategoryForType } from "@/lib/account-types";
 import { paymentAccountLabel, paymentAccountType, receivingAccountType } from "@/lib/payment-accounts";
 
@@ -284,7 +284,7 @@ export default function RecordEditor({ module, record, customers, vendors, items
   const [customTax, setCustomTax] = useState(false);
   const [recurringPayload, setRecurringPayload] = useState<Record<string, string> | null>(null);
 
-  const [invoiceLines, setInvoiceLines] = useState<InvoiceLine[]>(() => readInvoiceLines(record?.data.lineItems ?? "", items));
+  const [invoiceLines, setInvoiceLines] = useState<InvoiceLine[]>(() => readInvoiceLines(record?.data.lineItems ?? defaults.lineItems ?? "", items));
   const [expenseLines, setExpenseLines] = useState<ExpenseEntryLine[]>(() => readExpenseEditorLines(record));
   const [purchaseItems, setPurchaseItems] = useState<PurchaseItemLine[]>(() => readPurchaseItemLines(record));
   const availableItems = items.filter((item) => item.data.name?.trim());
@@ -319,8 +319,8 @@ export default function RecordEditor({ module, record, customers, vendors, items
   useEffect(() => {
     const initial = getInitialValues(moduleRef.current, record, defaults, customersRef.current);
     const defaultTax = defaultTaxRef.current;
-    setValues(!record && defaultTax && !initial.taxRate && !initial.taxName ? { ...initial, taxRate: defaultTax.rate, taxName: defaultTax.name } : initial);
-    setInvoiceLines(readInvoiceLines(record?.data.lineItems ?? "", itemsRef.current));
+    setValues(!record && defaultTax && !initial.taxRate && !initial.taxName && !defaults.lineItems ? { ...initial, taxRate: defaultTax.rate, taxName: defaultTax.name } : initial);
+    setInvoiceLines(readInvoiceLines(record?.data.lineItems ?? defaults.lineItems ?? "", itemsRef.current));
     setExpenseLines(readExpenseEditorLines(record));
     setPurchaseItems(readPurchaseItemLines(record));
     setSavedRecordId(record?.id ?? null);
@@ -347,6 +347,16 @@ export default function RecordEditor({ module, record, customers, vendors, items
     const suggestion = supplierSuggestion(supplier, vendors, history, accounts);
     if (!suggestion) return;
     setExpenseLines((current) => (current.every((line) => !line.category.trim() && !line.amount.trim()) ? toEditorLines(suggestion.lines) : current));
+  }
+
+  /** On a new credit note, an invoice number that matches an invoice brings in its customer, tax and lines. */
+  function fillFromInvoice(number: string) {
+    if (record || module.kind !== "credit-notes") return;
+    const invoice = history.find((entry) => entry.kind === "invoices" && (entry.data.invoiceNumber ?? "").trim().toLowerCase() === number.trim().toLowerCase());
+    if (!invoice) return;
+    const copied = creditFromInvoice(invoice);
+    setValues((current) => ({ ...current, ...Object.fromEntries(Object.entries(copied).filter(([key]) => key !== "lineItems" && (key === "customer" || key === "customerId" || !current[key]?.trim() || key === "currency" || key === "exchangeRate"))) }));
+    setInvoiceLines((current) => (current.every((line) => !line.name.trim() && !line.itemId) ? readInvoiceLines(copied.lineItems ?? "", items) : current));
   }
 
   function changeValue(key: string, value: string) {
@@ -919,12 +929,13 @@ export default function RecordEditor({ module, record, customers, vendors, items
             id={`field-${field.key}`}
             type={field.type ?? "text"}
             value={module.kind === "credit-notes" && field.key === "amount" ? invoiceTotal.toFixed(2) : value}
-            list={module.kind === "expenses" && field.key === "payee" ? "expense-payees" : undefined}
+            list={module.kind === "expenses" && field.key === "payee" ? "expense-payees" : module.kind === "credit-notes" && field.key === "invoiceNumber" && history.length ? "credit-invoices" : undefined}
             onChange={(event) => {
               if (field.key === "taxRate") setValues((current) => ({ ...current, taxName: "" }));
               changeValue(field.key, event.target.value);
               // A payee picked from the list (a supplier, or someone paid before) fills the lines as a supplier does on a bill.
               if (module.kind === "expenses" && field.key === "payee" && (supplierNamed(vendors, event.target.value) || lastPurchase(history, event.target.value))) fillFromSupplier(event.target.value);
+              if (module.kind === "credit-notes" && field.key === "invoiceNumber") fillFromInvoice(event.target.value);
             }}
             placeholder={field.placeholder}
             required={field.required}
@@ -933,6 +944,7 @@ export default function RecordEditor({ module, record, customers, vendors, items
             readOnly={(module.kind === "invoices" && field.key === "dueDate") || (module.kind === "credit-notes" && field.key === "amount")}
           />
         ) : null}
+        {module.kind === "credit-notes" && field.key === "invoiceNumber" && history.length ? <datalist id="credit-invoices">{history.filter((entry) => entry.data.invoiceNumber).map((entry) => <option value={entry.data.invoiceNumber} key={entry.id}>{entry.data.customer}</option>)}</datalist> : null}
         {module.kind === "expenses" && field.key === "payee" ? <datalist id="expense-payees">{vendorOptions.map((vendor) => <option value={vendor.data.name} key={vendor.id} />)}</datalist> : null}
 
         {field.key === "exchangeRate" && defaultCurrency ? (

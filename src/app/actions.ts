@@ -1902,6 +1902,7 @@ export async function convertBookkeepingRecord(id: string, target?: string, perc
       if (source.data.convertedRecordId || source.data.convertedKind) {
         throw new ActionError("This purchase order has already been recorded as a bill or expense.");
       }
+      if (source.data.status === "Partially received") throw new ActionError("Part of this order is still to come. Receive the rest before creating its bill.");
       if (!(["Purchase Order", "Received"].includes(source.data.status || ""))) {
         throw new ActionError("Confirm this purchase order before creating its bill.");
       }
@@ -2189,9 +2190,21 @@ export async function createInventoryMovement(input: {
   return movement;
 }
 
+/** How many of each item a purchase order has received so far, by item id. */
+function receivedQuantities(data: Record<string, string>): Record<string, number> {
+  try {
+    const parsed: unknown = JSON.parse(data.receivedQuantities || "{}");
+    return parsed && typeof parsed === "object" ? Object.fromEntries(Object.entries(parsed as Record<string, unknown>).map(([key, value]) => [key, Number(value) || 0])) : {};
+  } catch {
+    return {};
+  }
+}
+
 export async function advancePurchaseOrder(
   id: string,
   action: "send-rfq" | "confirm" | "receive" | "cancel",
+  /** For a receipt: how many of each item arrived now, by item id; everything still to come when left out. */
+  receiving?: Record<string, number>,
 ): Promise<{ status: string }> {
   const me = await requireUser();
   assertCanWrite(me, "purchase-orders");
@@ -2270,15 +2283,28 @@ export async function advancePurchaseOrder(
     }
 
     if (action === "receive") {
-      if (status !== "Purchase Order") throw new ActionError("Confirm this purchase order before receiving its items.");
+      if (status !== "Purchase Order" && status !== "Partially received") throw new ActionError("Confirm this purchase order before receiving its items.");
       const lines = parseInvoiceLines(lockedOrder.data.lineItems || "");
-      const quantities = new Map<string, number>();
+      const ordered = new Map<string, number>();
       for (const line of lines) {
         if (!line.itemId) continue;
         const quantity = Number(line.quantity);
         if (!Number.isFinite(quantity) || quantity <= 0) throw new ActionError("Check the ordered quantities before receiving items.");
-        quantities.set(line.itemId, (quantities.get(line.itemId) || 0) + quantity);
+        ordered.set(line.itemId, (ordered.get(line.itemId) || 0) + quantity);
       }
+      // Deliveries can come in parts: each receipt adds what arrived, up to what is still to come.
+      const already = receivedQuantities(lockedOrder.data);
+      const quantities = new Map<string, number>();
+      for (const [itemId, total] of ordered) {
+        const left = Math.max(0, total - (already[itemId] ?? 0));
+        const now = receiving && itemId in receiving ? Number(receiving[itemId]) : left;
+        if (!Number.isFinite(now) || now < 0) throw new ActionError("Enter the quantities received as numbers of zero or more.");
+        if (now > left + 1e-9) throw new ActionError(`Only ${left} of an item ${left === 1 ? "is" : "are"} still to come on this order.`);
+        if (now > 0) quantities.set(itemId, now);
+      }
+      if (!quantities.size && ordered.size) throw new ActionError("Enter how many of each item arrived.");
+      const receivedNow = Object.fromEntries([...ordered.keys()].map((itemId) => [itemId, (already[itemId] ?? 0) + (quantities.get(itemId) ?? 0)]));
+      const complete = [...ordered].every(([itemId, total]) => receivedNow[itemId] >= total - 1e-9);
       const itemIds = [...quantities.keys()];
       if (itemIds.length) {
         const linkedItems = await transaction.select().from(bookkeepingRecord)
@@ -2319,10 +2345,11 @@ export async function advancePurchaseOrder(
           });
         }
       }
+      const receivedData = { ...lockedOrder.data, receivedQuantities: JSON.stringify(receivedNow), lastReceivedAt: updatedAt.toISOString() };
       await transaction.update(bookkeepingRecord)
-        .set({ data: { ...lockedOrder.data, status: "Received", receivedAt: updatedAt.toISOString() }, updatedAt })
+        .set({ data: complete ? { ...receivedData, status: "Received", receivedAt: updatedAt.toISOString() } : { ...receivedData, status: "Partially received" }, updatedAt })
         .where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "purchase-orders")));
-      return "Received";
+      return complete ? "Received" : "Partially received";
     }
 
     if (![

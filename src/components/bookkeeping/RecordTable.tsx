@@ -12,7 +12,7 @@ import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
 import { formatCustomerAddress } from "@/lib/customer-utils";
 import { homeRate, lineSummary } from "@/lib/invoice-utils";
 
-export type RecordActionKind = "refund" | "remind" | "progress" | "statement" | "void" | "convert" | "convert-expense" | "payment" | "send" | "send-rfq" | "confirm-order" | "receive-order" | "cancel-order" | "mark-paid" | "match" | "apply-credit" | "generate" | "duplicate" | "share" | "print" | "undo-payment";
+export type RecordActionKind = "refund" | "remind" | "progress" | "statement" | "void" | "convert" | "convert-expense" | "payment" | "send" | "send-rfq" | "confirm-order" | "receive-order" | "cancel-order" | "mark-paid" | "match" | "apply-credit" | "generate" | "duplicate" | "share" | "print" | "undo-payment" | "credit-note";
 
 interface RecordTableProps {
   module: ModuleDefinition;
@@ -202,13 +202,14 @@ export function recordActions(
   const canConvertPurchaseOrder = module.kind === "purchase-orders" && ["Purchase Order", "Received"].includes(purchaseStatus) && !hasAccountingRecord;
   if (module.kind === "purchase-orders") {
     if (purchaseStatus === "Draft" || purchaseStatus === "RFQ Sent") add("confirm-order", "Confirm order", BadgeCheck, true);
-    else if (purchaseStatus === "Purchase Order") add("receive-order", "Receive products", PackageCheck, true);
+    else if (purchaseStatus === "Purchase Order" || purchaseStatus === "Partially received") add("receive-order", purchaseStatus === "Partially received" ? "Receive the rest" : "Receive products", PackageCheck, true);
     else if (purchaseStatus === "Received" && canConvertPurchaseOrder) add("convert", "Create bill", ArrowRightLeft, true);
     if (canConvertPurchaseOrder && purchaseStatus === "Purchase Order") add("convert", "Create bill", ArrowRightLeft);
     if (canConvertPurchaseOrder) add("convert-expense", "Record as expense", CircleDollarSign);
   }
   if (module.kind === "invoices" && !["Paid", "Cancelled"].includes(record.data.status ?? "")) add("payment", "Record payment", CircleDollarSign, true);
   if (module.kind === "invoices") add("send", "Send invoice", Mail, true);
+  if (module.kind === "invoices" && !["Draft", "Void", "Cancelled"].includes(record.data.status ?? "")) add("credit-note", "Create credit note", Undo2);
   if (["estimates", "sales-orders", "credit-notes"].includes(module.kind)) add("send", `Send ${module.label.toLowerCase()}`, Mail, true);
   if (module.kind === "bills" && record.data.status !== "Paid") add("mark-paid", "Mark paid", Check, true);
   if (module.kind === "credit-notes" && !["Applied", "Refunded", "Void"].includes(record.data.status ?? "")) {

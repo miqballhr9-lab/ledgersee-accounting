@@ -114,3 +114,25 @@ export function purchaseItemSummary(data: Record<string, string>) {
   const fromOrder = parseInvoiceLines(data.purchaseLineItems ?? "").filter((line) => line.name.trim());
   return lineSummary({ lineItems: JSON.stringify(fromOrder.length ? fromOrder : parseInvoiceLines(data.lineItems ?? "").filter((line) => line.itemId && line.name.trim())) });
 }
+
+/**
+ * A new credit note's starting values from the invoice it credits: the same
+ * customer, currency, tax, warehouse and lines, to trim to what is credited.
+ */
+export function creditFromInvoice(invoice: { data: Record<string, string> }): Record<string, string> {
+  const data = invoice.data;
+  const values: Record<string, string> = {
+    invoiceNumber: data.invoiceNumber ?? "",
+    customer: data.customer ?? "",
+    customerId: data.customerId ?? "",
+    currency: data.currency ?? "",
+    exchangeRate: data.exchangeRate ?? "",
+    taxRate: data.taxRate ?? "",
+    taxName: data.taxName ?? "",
+    discount: data.discount ?? "",
+    warehouse: data.warehouse ?? "",
+    lineItems: data.lineItems ?? "",
+    reason: `Credit for ${data.invoiceNumber || "invoice"}`,
+  };
+  return Object.fromEntries(Object.entries(values).filter(([, value]) => value !== ""));
+}

@@ -427,7 +427,7 @@ export function buildListReport(key: string, records: BookkeepingRecord[], ledge
       const docs = records.filter((record) => {
         if (record.kind !== kind) return false;
         const date = record.data[dateKey] || record.createdAt.slice(0, 10);
-        if (isPo) return ["Purchase Order", "Received"].includes(record.data.status ?? "") && !record.data.convertedRecordId && !record.data.convertedKind && date <= options.to;
+        if (isPo) return ["Purchase Order", "Partially received", "Received"].includes(record.data.status ?? "") && !record.data.convertedRecordId && !record.data.convertedKind && date <= options.to;
         return inPeriod(date, options);
       }).sort((a, b) => (a.data[dateKey] ?? "").localeCompare(b.data[dateKey] ?? ""));
       const rowOf = (record: BookkeepingRecord): Row => ({ values: [record.data[dateKey] || record.createdAt.slice(0, 10), record.data[numberKey] ?? "", ...(kind === "sales-orders" ? [record.data.customer ?? ""] : []), record.data[secondDate] ?? "", record.data.status || "Draft", num(record.data.amount) * rate(record.data)], source: src(record) });

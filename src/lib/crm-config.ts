@@ -18,6 +18,8 @@ export type CrmFieldType =
   /** Lookups store the record's id in `<key>Id` and its display name in `<key>`. */
   | "account" | "contact" | "deal" | "campaign"
   | "employee" | "department" | "leaveType" | "job"
+  /** A product or service from Items & services. */
+  | "item"
   /** An uploaded file: the link in `<key>`, the file name in `<key>Name`. */
   | "file"
   /** "Related to": a lead, contact, account, deal, campaign or case, stored as relatedType / relatedId / related. */
@@ -345,10 +347,12 @@ export const crmModules: readonly CrmModule[] = [
     columns: ["deal", "product", "quantity", "price", "discount", "total"],
     fields: [
       { key: "deal", label: "Deal", type: "deal", section: "Product", required: true },
-      { key: "product", label: "Product or service", section: "Product", required: true, help: "Use the name from Items & services so the invoice line picks up its accounts." },
+      { key: "item", label: "Item", type: "item", section: "Product", help: "Pick from Items & services: fills the name, price and tax, and the invoice line uses its accounts and stock." },
+      { key: "product", label: "Product or service", section: "Product", help: "Filled from the item; type a name for something not in Items & services." },
       { key: "quantity", label: "Quantity", type: "number", section: "Product", placeholder: "1" },
       { key: "price", label: "List price", type: "currency", section: "Product", required: true },
       { key: "discount", label: "Discount (%)", type: "percent", section: "Product" },
+      { key: "taxRate", label: "Tax rate (%)", type: "percent", section: "Product", help: "Carried to the quote or invoice line." },
       { key: "total", label: "Total", type: "currency", section: "Product", readOnly: true },
       { key: "description", label: "Description", type: "textarea", section: "Product", wide: true },
     ],

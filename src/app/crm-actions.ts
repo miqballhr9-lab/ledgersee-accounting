@@ -67,7 +67,7 @@ async function lookupContext(userId: string) {
     .from(bookkeepingRecord)
     .where(and(eq(bookkeepingRecord.userId, userId), inArray(bookkeepingRecord.kind, [
       "customers", "crm-leads", "crm-contacts", "crm-deals", "crm-campaigns", "crm-cases",
-      "employees", "hr-departments", "hr-leave-types", "hr-jobs", "hr-leaves", "hr-allocations", "hr-holidays", "hr-loans", "hr-attendance", "hr-contracts", "hr-shifts", "accounts", "settings",
+      "employees", "hr-departments", "hr-leave-types", "hr-jobs", "hr-leaves", "hr-allocations", "hr-holidays", "hr-loans", "hr-attendance", "hr-contracts", "hr-shifts", "accounts", "settings", "items",
     ])));
   const byKind = (kind: string) => rows.filter((row) => row.kind === kind);
   return { rows, byKind };
@@ -78,6 +78,7 @@ function lookupName(kind: string, data: Record<string, string>) {
   if (kind === "customers") return data.name?.trim() || data.company?.trim() || "Customer";
   if (kind === "employees") return data.name?.trim() || "Employee";
   if (kind === "accounts") return paymentAccountLabel({ kind: "accounts", data } as BookkeepingRecord);
+  if (kind === "items") return data.name?.trim() || "Item";
   const mod = crmModuleByKind(kind);
   return mod ? crmTitle(mod, data) : "Record";
 }
@@ -92,6 +93,7 @@ const lookupKinds: Partial<Record<NonNullable<CrmField["type"]>, string>> = {
   leaveType: "hr-leave-types",
   job: "hr-jobs",
   paymentAccount: "accounts",
+  item: "items",
 };
 
 /** Resolves one lookup to an id and name that belong to this business, by id first and then by name (for imports). */
@@ -195,6 +197,15 @@ function buildData(mod: CrmModule, input: Record<string, string>, context: Looku
   }
   if (mod.kind === "crm-deals") dealRules(mod, data, existing, context.byKind("settings")[0]?.data ?? {}, ownerName);
   if (mod.kind === "crm-deal-products") {
+    // A chosen item fills in what is left empty: its name, price and tax rate.
+    const item = data.itemId ? context.byKind("items").find((row) => row.id === data.itemId) : undefined;
+    if (item) {
+      if (!data.product?.trim() || (existing?.itemId && existing.itemId !== data.itemId)) data.product = item.data.name?.trim() ?? "";
+      if (!data.price || (existing?.itemId && existing.itemId !== data.itemId)) data.price = money(item.data.rate).toFixed(2);
+      if (!data.taxRate && item.data.taxRate) data.taxRate = String(money(item.data.taxRate));
+    }
+    if (!data.product?.trim()) throw new ActionError("Choose an item or enter the product or service.");
+    if (!data.price) throw new ActionError("List price is required.");
     const quantity = data.quantity ? money(data.quantity) : 1;
     if (!(quantity > 0)) throw new ActionError("Enter a quantity greater than zero.");
     data.quantity = String(quantity);
@@ -687,13 +698,19 @@ export async function createDocumentFromDeal(dealId: string, target: "estimates"
   const products = await db.select().from(bookkeepingRecord).where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "crm-deal-products"), sql`${bookkeepingRecord.data}->>'dealId' = ${deal.id}`));
   const items = products.length ? await db.select().from(bookkeepingRecord).where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "items"))) : [];
   const lineItems = JSON.stringify(products.length
-    ? products.map((line) => ({
-      itemId: items.find((item) => item.data.name?.trim().toLowerCase() === (line.data.product ?? "").trim().toLowerCase())?.id ?? "",
-      name: line.data.product || "Product",
-      description: line.data.description?.slice(0, 500) ?? "",
-      quantity: line.data.quantity || "1",
-      rate: (money(line.data.price) * (1 - money(line.data.discount) / 100)).toFixed(2),
-    }))
+    ? products.map((line) => {
+      const item = items.find((row) => row.id === line.data.itemId) ?? items.find((row) => row.data.name?.trim().toLowerCase() === (line.data.product ?? "").trim().toLowerCase());
+      // The line's tax rate, else the item's, travels to the document.
+      const taxRate = line.data.taxRate || item?.data.taxRate || "";
+      return {
+        itemId: item?.id ?? "",
+        name: line.data.product || item?.data.name || "Product",
+        description: line.data.description?.slice(0, 500) ?? "",
+        quantity: line.data.quantity || "1",
+        rate: (money(line.data.price) * (1 - money(line.data.discount) / 100)).toFixed(2),
+        ...(money(taxRate) > 0 ? { taxRate: String(money(taxRate)) } : {}),
+      };
+    })
     : [{ itemId: "", name: deal.data.dealName || "Deal", description: deal.data.description?.slice(0, 500) ?? "", quantity: "1", rate: amount.toFixed(2) }]);
   const existing = rows.filter((row) => row.kind === target);
   const common = {

@@ -65,6 +65,7 @@ export function fieldFor(mod: CrmModule, key: string): CrmField | undefined {
 export function recordTitle(record: BookkeepingRecord) {
   if (record.kind === "customers") return record.data.name || "Customer";
   if (record.kind === "employees") return record.data.name || "Employee";
+  if (record.kind === "items") return record.data.name || "Item";
   const mod = crmModuleByKind(record.kind);
   return mod ? crmTitle(mod, record.data) : "Record";
 }

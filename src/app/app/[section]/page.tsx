@@ -207,5 +207,5 @@ export default async function SectionPage({ params, searchParams }: SectionPageP
     : [];
   const sourceFilter = budgetHead ? { startDate, endDate, budgetHead } : undefined;
   const related = partyDocuments.flatMap((kind) => groups[kind] ?? []);
-  return <ModuleWorkspace module={module} records={records} customers={customers} vendors={vendors} accounts={accounts} items={items} defaultCurrency={settings[0]?.data.currency || "USD"} employeeNames={employeeNames} sourceFilter={sourceFilter} related={related} />;
+  return <ModuleWorkspace module={module} records={records} customers={customers} vendors={vendors} accounts={accounts} items={items} defaultCurrency={settings[0]?.data.currency || "USD"} employeeNames={employeeNames} sourceFilter={sourceFilter} related={related} invoices={module.kind === "credit-notes" ? (groups.invoices ?? []).filter((invoice) => !["Draft", "Void", "Cancelled"].includes(invoice.data.status ?? "")) : undefined} />;
 }

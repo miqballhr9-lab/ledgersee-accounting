@@ -282,6 +282,21 @@ export function applyHrRules(kind: string, data: Record<string, string>, existin
       data.loanRecovery = fixed(open.reduce((sum, row) => sum + money(row.data.balance), 0));
     }
     if (!data.gratuityDaysPerYear) data.gratuityDaysPerYear = "30";
+    // Paid time off left in the departure year: each limited paid type's allowance less what was taken.
+    const year = (data.lastWorkingDay || new Date().toISOString().slice(0, 10)).slice(0, 4);
+    const unused = context.byKind("hr-leave-types")
+      .filter((type) => type.data.paid !== "false")
+      .reduce((sum, type) => {
+        const person = { employeeId: data.employeeId ?? "", employee: data.employee ?? "", leaveTypeId: type.id };
+        const allowance = timeOffAllowance(context, person, year);
+        return allowance === null ? sum : sum + Math.max(0, allowance - leaveUsed(context.byKind("hr-leaves"), person, year));
+      }, 0);
+    data.unusedTimeOffDays = String(Math.round(unused * 100) / 100);
+    // Filled from the unused paid time off until a different figure is typed in.
+    const typed = data.leaveEncashmentDays?.trim() ?? "";
+    const auto = !typed || (existingData?.leaveEncashmentAuto === "true" && typed === existingData.leaveEncashmentDays);
+    if (auto) data.leaveEncashmentDays = data.unusedTimeOffDays;
+    data.leaveEncashmentAuto = auto ? "true" : "false";
     const daily = money(data.monthlySalary) / 30;
     let years = 0;
     if (data.joiningDate && data.lastWorkingDay && data.lastWorkingDay > data.joiningDate) {

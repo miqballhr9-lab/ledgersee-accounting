@@ -39,6 +39,7 @@ const lookupKind: Partial<Record<NonNullable<CrmField["type"]>, string>> = {
   leaveType: "hr-leave-types",
   job: "hr-jobs",
   paymentAccount: "accounts",
+  item: "items",
 };
 
 function plusDays(days: number) {
@@ -211,6 +212,11 @@ export default function CrmRecordEditor({ module, record, preset, open, onOpenCh
         <Select value={values[idKey] || null} onValueChange={(next) => {
           const chosen = options.find((option) => option.id === next);
           const changes: Record<string, string> = { [idKey]: chosen?.id ?? "", [field.key]: chosen?.name ?? "" };
+          // Picking an item fills its name, price and tax on a deal product.
+          if (field.type === "item" && chosen) {
+            const item = context.store.items?.find((entry) => entry.id === chosen.id);
+            if (item) Object.assign(changes, { product: item.data.name ?? "", price: item.data.rate ?? "", ...(item.data.taxRate ? { taxRate: item.data.taxRate } : {}) });
+          }
           // Picking a contact fills in their account, as Zoho does.
           if (field.type === "contact" && chosen && module.fields.some((item) => item.type === "account") && !values.accountId) {
             const contact = context.store["crm-contacts"]?.find((item) => item.id === chosen.id);

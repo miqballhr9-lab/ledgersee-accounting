@@ -8,7 +8,7 @@ import { crmKinds } from "@/lib/crm-config";
 /** Everything the CRM screens show, loaded in one query, plus who can own records. */
 export async function loadCrmData() {
   const me = await requireUser();
-  const groups = await listBookkeepingRecordGroups([...crmKinds, "crm-notes", "customers", "estimates", "invoices", "team-members", "settings"]);
+  const groups = await listBookkeepingRecordGroups([...crmKinds, "crm-notes", "customers", "estimates", "invoices", "items", "team-members", "settings"]);
   const store: Record<string, BookkeepingRecord[]> = {};
   for (const [kind, records] of Object.entries(groups)) {
     if (kind !== "team-members" && kind !== "settings") store[kind] = records ?? [];

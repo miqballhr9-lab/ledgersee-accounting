@@ -37,7 +37,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { navigationGroups, type ModuleDefinition } from "@/lib/bookkeeping-config";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
 import { formatCustomerAddress } from "@/lib/customer-utils";
-import { currencyAmount, dueDateForTerms, homeRate, lineSummary } from "@/lib/invoice-utils";
+import { creditFromInvoice, currencyAmount, dueDateForTerms, homeRate, lineSummary, parseInvoiceLines } from "@/lib/invoice-utils";
 import { paymentAccountLabel, paymentAccountType, receivingAccountType } from "@/lib/payment-accounts";
 import { budgetActualRecords, recordsWithinBudgetDates, type BudgetLine } from "@/lib/budget-utils";
 import JournalEntryEditor from "@/components/bookkeeping/JournalEntryEditor";
@@ -62,6 +62,28 @@ interface ModuleWorkspaceProps {
   sourceFilter?: { startDate: string; endDate: string; budgetHead: string };
   /** A customer's or supplier's documents and payments, for their page. */
   related?: BookkeepingRecord[];
+  /** On Credit notes: the invoices a credit note can be made from. */
+  invoices?: BookkeepingRecord[];
+}
+
+/** A purchase order's stocked lines with what was ordered, received so far and is still to come. */
+function orderReceiptLines(order: BookkeepingRecord, items: BookkeepingRecord[]) {
+  let received: Record<string, number> = {};
+  try {
+    received = JSON.parse(order.data.receivedQuantities || "{}") as Record<string, number>;
+  } catch {
+    received = {};
+  }
+  const ordered = new Map<string, { name: string; ordered: number }>();
+  for (const line of parseInvoiceLines(order.data.lineItems || "")) {
+    if (!line.itemId) continue;
+    const entry = ordered.get(line.itemId) ?? { name: items.find((item) => item.id === line.itemId)?.data.name || line.name || "Item", ordered: 0 };
+    ordered.set(line.itemId, { ...entry, ordered: entry.ordered + (Number(line.quantity) || 0) });
+  }
+  return [...ordered].map(([itemId, entry]) => {
+    const got = Number(received[itemId]) || 0;
+    return { itemId, name: entry.name, ordered: entry.ordered, received: got, left: Math.max(0, Math.round((entry.ordered - got) * 1000) / 1000) };
+  });
 }
 
 const DEFAULT_PAGE_SIZE = 10;
@@ -332,7 +354,7 @@ function partyCentre(kind: "customers" | "vendors", party: BookkeepingRecord, re
   };
 }
 
-export default function ModuleWorkspace({ module, records: initialRecords, customers, vendors, employeeNames = [], accounts, items, defaultCurrency, sourceFilter, related = [] }: ModuleWorkspaceProps) {
+export default function ModuleWorkspace({ module, records: initialRecords, customers, vendors, employeeNames = [], accounts, items, defaultCurrency, sourceFilter, related = [], invoices = [] }: ModuleWorkspaceProps) {
   const router = useRouter();
   const [records, setRecords] = useState(initialRecords);
   const [search, setSearch] = useState("");
@@ -343,6 +365,8 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
   const [editingRecord, setEditingRecord] = useState<BookkeepingRecord | null>(null);
   const [defaults, setDefaults] = useState<Record<string, string>>({});
   const [pendingAction, setPendingAction] = useState(false);
+  const [receiveTarget, setReceiveTarget] = useState<BookkeepingRecord | null>(null);
+  const [receiveQuantities, setReceiveQuantities] = useState<Record<string, string>>({});
   const [actionMessage, setActionMessage] = useState("");
   const [paymentRecord, setPaymentRecord] = useState<BookkeepingRecord | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
@@ -521,7 +545,9 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
       return;
     }
     setEditingRecord(null);
-    setDefaults(createDefaults(module, records, defaultCurrency));
+    // "Create credit note" on an invoice opens here with the invoice to copy.
+    const fromInvoice = module.kind === "credit-notes" ? invoices.find((invoice) => invoice.id === new URLSearchParams(window.location.search).get("fromInvoice")) : undefined;
+    setDefaults({ ...createDefaults(module, records, defaultCurrency), ...(fromInvoice ? creditFromInvoice(fromInvoice) : {}) });
     setActionMessage("");
     setEditorOpen(true);
   }
@@ -738,8 +764,21 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
     router.refresh();
   }
 
-  async function handleAction(kind: RecordActionKind, record: BookkeepingRecord) {
+  async function handleAction(kind: RecordActionKind, record: BookkeepingRecord, receiving?: Record<string, number>) {
     setActionMessage("");
+    // Receiving asks how many of each item arrived, so a delivery can come in parts.
+    if (kind === "receive-order" && !receiving) {
+      const lines = orderReceiptLines(record, items);
+      if (lines.length) {
+        setReceiveTarget(record);
+        setReceiveQuantities(Object.fromEntries(lines.map((line) => [line.itemId, String(line.left)])));
+        return;
+      }
+    }
+    if (kind === "credit-note") {
+      router.push(`/app/credit-notes?new=1&fromInvoice=${encodeURIComponent(record.id)}`);
+      return;
+    }
     if (kind === "convert-expense") {
       const vendor = vendors.find((item) => item.id === record.data.vendorId || item.id === record.data.vendor)
         ?? vendors.find((item) => item.data.name?.trim().toLowerCase() === record.data.vendor?.trim().toLowerCase());
@@ -793,13 +832,15 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
     try {
       if (["send-rfq", "confirm-order", "receive-order", "cancel-order"].includes(kind)) {
         const transition = kind === "send-rfq" ? "send-rfq" : kind === "confirm-order" ? "confirm" : kind === "receive-order" ? "receive" : "cancel";
-        const result = await advancePurchaseOrder(record.id, transition);
+        const result = await advancePurchaseOrder(record.id, transition, transition === "receive" ? receiving : undefined);
         setRecords((current) => current.map((item) => item.id === record.id ? { ...item, data: { ...item.data, status: result.status } } : item));
+        if (transition === "receive") router.refresh();
         setPage(1);
         const messages = {
           "RFQ Sent": `RFQ emailed to ${record.data.vendor}.`,
           "Purchase Order": "Purchase order confirmed and ready for receiving.",
           Received: "Items marked received and linked product stock updated.",
+          "Partially received": "Received items added to stock. Receive the rest when it arrives.",
           Cancelled: "Purchase order cancelled.",
         };
         setActionMessage(messages[result.status as keyof typeof messages]);
@@ -1180,8 +1221,39 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
           onOpenChange={setEditorOpen}
           onSaved={handleSaved}
           onSaveComplete={handleInvoiceSaveComplete}
+          history={module.kind === "credit-notes" ? invoices : undefined}
         />
       )}
+
+      <Dialog open={Boolean(receiveTarget)} onOpenChange={(open) => { if (!open && !pendingAction) setReceiveTarget(null); }}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Receive products</DialogTitle>
+            <DialogDescription>{receiveTarget?.data.poNumber || "Purchase order"} · {receiveTarget?.data.vendor}. Enter what arrived now; the rest stays open until it comes.</DialogDescription>
+          </DialogHeader>
+          <div className="divide-y divide-border rounded-lg border border-border">
+            {receiveTarget ? orderReceiptLines(receiveTarget, items).map((line) => (
+              <div key={line.itemId} className="flex items-center justify-between gap-3 px-3 py-2.5">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium">{line.name}</p>
+                  <p className="text-xs text-muted-foreground">Ordered {line.ordered} · received {line.received} · to come {line.left}</p>
+                </div>
+                <Input aria-label={`Received now of ${line.name}`} className="h-9 w-24 text-right tabular-nums" type="number" min="0" max={line.left} step="any" disabled={!line.left} value={receiveQuantities[line.itemId] ?? ""} onChange={(event) => setReceiveQuantities((current) => ({ ...current, [line.itemId]: event.target.value }))} />
+              </div>
+            )) : null}
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" disabled={pendingAction} onClick={() => setReceiveTarget(null)}>Cancel</Button>
+            <Button type="button" disabled={pendingAction} onClick={() => {
+              const target = receiveTarget;
+              if (!target) return;
+              const quantities = Object.fromEntries(Object.entries(receiveQuantities).map(([itemId, value]) => [itemId, Number(value) || 0]));
+              setReceiveTarget(null);
+              void handleAction("receive-order", target, quantities);
+            }}>Receive</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <PaymentDialog
         open={Boolean(refundTargets)}
