@@ -60,6 +60,7 @@ export default async function PayrollSlipPage({ params }: PayrollSlipPageProps) 
     ["Fine", amount(employee.fineDeduction)],
     ["EOBI / PF", amount(employee.socialDeduction)],
     ["Adjustment", amount(employee.adjustment)],
+    ...(Number(employee.reimbursement) > 0 ? [["Expense claims reimbursed", amount(employee.reimbursement)]] : []),
     ["Payment account", employee.paymentAccountName ? `${employee.paymentMethod || "Account"} · ${employee.paymentAccountName}` : "Not set"],
     ["Final payable salary", amount(employee.payableSalary)],
   ];

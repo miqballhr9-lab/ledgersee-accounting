@@ -465,7 +465,35 @@ const closedAttachment = (status: string | undefined) => /cancel|refus/i.test(st
  * remaining amount and status follow. Saved on the attachments, so the list,
  * final settlements and reports agree; run after payroll or an attachment changes.
  */
+/**
+ * Expense claims paid back with a salary: marked paid once the salary is
+ * saved, and approved (waiting again) if the salary is deleted, drafted or
+ * no longer carries them.
+ */
+export async function syncPayrollReimbursements(userId: string) {
+  const rows = await db.select().from(bookkeepingRecord).where(and(eq(bookkeepingRecord.userId, userId), inArray(bookkeepingRecord.kind, ["hr-claims", "payroll"])));
+  const salaryFor = new Map<string, (typeof rows)[number]>();
+  for (const pay of rows) {
+    if (pay.kind !== "payroll" || /draft|cancel/i.test(pay.data.status ?? "") || !(Number(pay.data.reimbursement) > 0)) continue;
+    for (const id of (pay.data.reimbursedClaims ?? "").split(",").map((item) => item.trim()).filter(Boolean)) salaryFor.set(id, pay);
+  }
+  for (const claim of rows.filter((row) => row.kind === "hr-claims")) {
+    const pay = salaryFor.get(claim.id);
+    let next: Record<string, string> | null = null;
+    if (pay && (claim.data.reimbursedInPayroll !== pay.id || claim.data.status !== "Paid")) {
+      next = { ...claim.data, reimbursedInPayroll: pay.id, status: "Paid", paidDate: pay.data.paidDate || (pay.data.month ? `${pay.data.month}-28` : claim.data.paidDate || "") };
+    } else if (!pay && claim.data.reimbursedInPayroll) {
+      const rest = { ...claim.data };
+      delete rest.reimbursedInPayroll;
+      next = { ...rest, status: claim.data.status === "Paid" ? "Approved" : claim.data.status, paidDate: "" };
+    }
+    if (next) await db.update(bookkeepingRecord).set({ data: next, updatedAt: new Date() }).where(eq(bookkeepingRecord.id, claim.id));
+  }
+}
+
 export async function syncAttachmentRepayments(userId: string) {
+  // Salaries also pay back expense claims; keep those in step at the same moments.
+  await syncPayrollReimbursements(userId);
   const rows = await db.select().from(bookkeepingRecord).where(and(eq(bookkeepingRecord.userId, userId), inArray(bookkeepingRecord.kind, ["hr-loans", "payroll", "employees"])));
   const loans = rows.filter((row) => row.kind === "hr-loans" && !closedAttachment(row.data.status))
     .sort((a, b) => (a.data.requestDate || "").localeCompare(b.data.requestDate || "") || a.createdAt.getTime() - b.createdAt.getTime());

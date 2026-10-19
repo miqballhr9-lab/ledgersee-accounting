@@ -13,7 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { readableError } from "@/lib/action-error";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
 import { calculatePayroll, emptyPayrollValues, type PayrollValues, type SalaryTaxRule } from "@/lib/payroll-utils";
-import { adjustedWorkedDays, parseSalaryRules, payrollAdjustments, salaryRuleAmounts } from "@/lib/payroll-adjustments";
+import { adjustedWorkedDays, claimsToReimburse, contractCoversMonth, parseSalaryRules, payrollAdjustments, salaryRuleAmounts } from "@/lib/payroll-adjustments";
 
 export interface PayrollHrRecords {
   leaves: BookkeepingRecord[];
@@ -23,6 +23,10 @@ export interface PayrollHrRecords {
   weekend?: number[];
   /** Salary rules from Settings, which fill allowances and deductions on new lines. */
   salaryRules?: string;
+  /** Contracts: employees whose contract has ended aren't added to a new month. */
+  contracts?: BookkeepingRecord[];
+  /** Approved expense claims, paid back with the salary. */
+  claims?: BookkeepingRecord[];
 }
 
 interface PayrollSheetProps {
@@ -45,14 +49,33 @@ interface PayrollSheetProps {
 /** The HR figures for a new line: worked days after unpaid time off and absences, and this month's loan installment. */
 function hrLine(month: string, employee: BookkeepingRecord, workingDays: string, hr?: PayrollHrRecords): Partial<SheetRow> {
   if (!hr) return {};
-  const adjustments = payrollAdjustments(month, { id: employee.id, name: employee.data.name }, hr.leaves, hr.loans, hr.attendance, hr.weekend);
-  const overtimeRate = Number(employee.data.overtimeRate) || 0;
   return {
     ...salaryRuleAmounts(parseSalaryRules(hr.salaryRules), Number(employee.data.baseSalary) || 0, employee.data.department),
-    workedDays: adjustedWorkedDays(workingDays, adjustments),
-    ...(adjustments.loanDeduction ? { loanDeduction: String(adjustments.loanDeduction) } : {}),
     ...(employee.data.socialDeduction ? { socialDeduction: employee.data.socialDeduction } : {}),
-    ...(overtimeRate && adjustments.overtimeHours ? { overtimeAllowance: (Math.round(overtimeRate * adjustments.overtimeHours * 100) / 100).toFixed(2) } : {}),
+    ...hrRefresh(month, employee, workingDays, hr),
+  };
+}
+
+/**
+ * What changes from month to month, from HR: the current wage, worked days
+ * after unpaid time off and absences, the running loan installments,
+ * overtime from attendance and expense claims to pay back. Used for new
+ * lines and when copying an earlier month, so nothing stale carries over.
+ */
+function hrRefresh(month: string, employee: BookkeepingRecord, workingDays: string, hr?: PayrollHrRecords): Partial<SheetRow> {
+  const wage = employee.data.baseSalary ? { baseSalary: employee.data.baseSalary } : {};
+  if (!hr) return { ...wage, workedDays: workingDays };
+  const person = { id: employee.id, name: employee.data.name };
+  const adjustments = payrollAdjustments(month, person, hr.leaves, hr.loans, hr.attendance, hr.weekend);
+  const claims = claimsToReimburse(month, person, hr.claims ?? []);
+  const overtimeRate = Number(employee.data.overtimeRate) || 0;
+  return {
+    ...wage,
+    workedDays: adjustedWorkedDays(workingDays, adjustments),
+    loanDeduction: adjustments.loanDeduction ? String(adjustments.loanDeduction) : "",
+    reimbursement: claims.amount ? String(claims.amount) : "",
+    reimbursedClaims: claims.ids.join(","),
+    ...(overtimeRate ? { overtimeAllowance: adjustments.overtimeHours ? (Math.round(overtimeRate * adjustments.overtimeHours * 100) / 100).toFixed(2) : "" } : {}),
   };
 }
 
@@ -83,6 +106,8 @@ interface SheetRow {
   fineDeduction: string;
   socialDeduction: string;
   adjustment: string;
+  reimbursement: string;
+  reimbursedClaims: string;
   description: string;
 }
 
@@ -101,7 +126,7 @@ const deductionColumns = [
   { key: "socialDeduction", label: "EOBI / PF" },
   { key: "adjustment", label: "Other adjustment" },
 ] as const;
-const amountKeys = ["baseSalary", "increment", ...allowanceColumns.map((column) => column.key), "taxDeduction", ...deductionColumns.map((column) => column.key)] as const;
+const amountKeys = ["baseSalary", "increment", ...allowanceColumns.map((column) => column.key), "taxDeduction", ...deductionColumns.map((column) => column.key), "reimbursement"] as const;
 
 function savedAmount(value: string | undefined) {
   return value && Number(value) ? value : "";
@@ -143,7 +168,7 @@ function blankRow(id: number, workingDays: string): SheetRow {
   return {
     id, personKey: "", workedDays: workingDays, baseSalary: "", increment: "",
     incentive: "", overtimeAllowance: "", gymAllowance: "", medicalAllowance: "", otherAllowance: "",
-    taxDeduction: "", loanDeduction: "", fineDeduction: "", socialDeduction: "", adjustment: "", description: "",
+    taxDeduction: "", loanDeduction: "", fineDeduction: "", socialDeduction: "", adjustment: "", reimbursement: "", reimbursedClaims: "", description: "",
   };
 }
 
@@ -153,17 +178,30 @@ function rowFromEntry(id: number, entry: BookkeepingRecord, personKey: string): 
   row.taxDeduction = entry.data.taxDeduction || "";
   const advanceAndLoan = (Number(entry.data.advanceDeduction) || 0) + (Number(entry.data.loanDeduction) || 0);
   row.loanDeduction = advanceAndLoan ? String(Math.round(advanceAndLoan * 100) / 100) : "";
+  row.reimbursedClaims = entry.data.reimbursedClaims || "";
   return row;
+}
+
+/** An earlier month's salary carried into this month, with this month's HR figures in place of the old ones. */
+function copiedRow(id: number, entry: BookkeepingRecord, personKey: string, month: string, employees: BookkeepingRecord[], workingDays: string, hr?: PayrollHrRecords): SheetRow {
+  // A fine is for the month it was given in.
+  const row = { ...rowFromEntry(id, entry, personKey), workedDays: workingDays, fineDeduction: "", reimbursement: "", reimbursedClaims: "" };
+  const employee = employees.find((item) => item.id === personKey);
+  if (!employee) return row;
+  const refreshed = { ...row, ...hrRefresh(month, employee, workingDays, hr) };
+  // A new wage gets a new tax estimate rather than last month's tax.
+  return refreshed.baseSalary !== row.baseSalary ? { ...refreshed, taxDeduction: "" } : refreshed;
 }
 
 /** The month's saved entries first, then active employees who have none yet, padded to five lines. */
 function startingRows(month: string, entries: BookkeepingRecord[], activeEmployees: BookkeepingRecord[], employees: BookkeepingRecord[], workingDays: string, copyFrom?: BookkeepingRecord | null, hr?: PayrollHrRecords) {
   const keyFor = (entry: BookkeepingRecord) => employees.find((employee) => samePerson(entry, employee))?.id ?? `entry:${entry.id}`;
   const rows: SheetRow[] = copyFrom
-    ? [{ ...rowFromEntry(1, copyFrom, keyFor(copyFrom)), workedDays: workingDays }]
+    ? [copiedRow(1, copyFrom, keyFor(copyFrom), month, employees, workingDays, hr)]
     : entries.filter((entry) => entry.data.month === month).map((entry, index) => rowFromEntry(index + 1, entry, keyFor(entry)));
   if (!copyFrom) {
     for (const employee of activeEmployees) {
+      if (!contractCoversMonth(month, { id: employee.id, name: employee.data.name }, hr?.contracts ?? [])) continue;
       if (!rows.some((row) => row.personKey === employee.id)) {
         rows.push({ ...blankRow(rows.length + 1, workingDays), personKey: employee.id, baseSalary: employee.data.baseSalary || "", ...hrLine(month, employee, workingDays, hr) });
       }
@@ -207,6 +245,8 @@ export default function PayrollSheet({ open, onOpenChange, month: initialMonth, 
     if (employee) return personFromEmployee(employee);
     return entryPeople.get(key) ?? null;
   }
+  // Employees left off because no contract covers the month.
+  const outOfContract = activeEmployees.filter((employee) => !contractCoversMonth(month, { id: employee.id, name: employee.data.name }, hr?.contracts ?? []) && !rows.some((row) => row.personKey === employee.id));
   const [pending, setPending] = useState(false);
   const [draggedRowId, setDraggedRowId] = useState<number | null>(null);
   const [error, setError] = useState("");
@@ -224,6 +264,7 @@ export default function PayrollSheet({ open, onOpenChange, month: initialMonth, 
       joiningDate: person.joiningDate,
       paymentAccountId: person.paymentAccountId,
       ...Object.fromEntries(amountKeys.map((key) => [key, row[key] || "0"])),
+      reimbursedClaims: Number(row.reimbursement) > 0 ? row.reimbursedClaims : "",
       taxDeduction: row.taxDeduction,
       workingDays: workingDays || "0",
       workedDays: row.workedDays || "0",
@@ -282,7 +323,7 @@ export default function PayrollSheet({ open, onOpenChange, month: initialMonth, 
       return;
     }
     const keyFor = (entry: BookkeepingRecord) => employees.find((employee) => samePerson(entry, employee))?.id ?? `entry:${entry.id}`;
-    const copied = entries.map((entry, index) => ({ ...rowFromEntry(nextId + index, entry, keyFor(entry)), workedDays: workingDays }));
+    const copied = entries.map((entry, index) => copiedRow(nextId + index, entry, keyFor(entry), month, employees, workingDays, hr));
     const others = rows.filter((row) => row.personKey && !copied.some((line) => line.personKey === row.personKey));
     setRows([...copied, ...others]);
     setNextId((current) => current + copied.length);
@@ -406,6 +447,7 @@ export default function PayrollSheet({ open, onOpenChange, month: initialMonth, 
                   <th className={`w-32 px-2.5 py-2.5 text-right ${cellBorder}`}>Gross salary</th>
                   <th className={`w-28 px-2.5 py-2.5 text-right ${cellBorder}`}>Tax</th>
                   {deductionColumns.map((column) => <th key={column.key} className={`w-28 px-2.5 py-2.5 text-right ${cellBorder}`}>{column.label}</th>)}
+                  <th className={`w-28 px-2.5 py-2.5 text-right ${cellBorder}`} title="Approved expense claims paid back with the salary">Expense claims</th>
                   <th className={`w-32 px-2.5 py-2.5 text-right ${cellBorder}`}>Payable</th>
                   <th className={`min-w-64 px-2.5 py-2.5 text-left ${cellBorder}`}>Description</th>
                   <th className="w-20"><span className="sr-only">Line actions</span></th>
@@ -452,6 +494,7 @@ export default function PayrollSheet({ open, onOpenChange, month: initialMonth, 
                       <td className={`px-2.5 text-right font-medium tabular-nums ${cellBorder}`}>{totals ? rupees(totals.grossSalary) : ""}</td>
                       {number("taxDeduction", "Tax", totals ? String(Math.round(totals.estimatedTax)) : "")}
                       {deductionColumns.map((column) => number(column.key, column.label))}
+                      {number("reimbursement", "Expense claims")}
                       <td className={`px-2.5 text-right font-semibold tabular-nums ${cellBorder}`}>{totals ? rupees(totals.payableSalary) : ""}</td>
                       <td className={`p-0 ${cellBorder}`}>
                         <Input aria-label={`Description for line ${index + 1}`} value={row.description} maxLength={1000} onChange={(event) => updateRow(row.id, "description", event.target.value)} className={cellInput} />
@@ -476,6 +519,7 @@ export default function PayrollSheet({ open, onOpenChange, month: initialMonth, 
                   <td className={`px-2.5 py-3 text-right tabular-nums ${cellBorder}`}>{rupees(sheetTotals.gross)}</td>
                   <td className={`px-2.5 py-3 text-right tabular-nums ${cellBorder}`}>{rupees(sheetTotals.tax)}</td>
                   {deductionColumns.map((column) => <td key={column.key} className={`px-2.5 py-3 text-right tabular-nums ${cellBorder}`}>{rupees(columnTotal(column.key))}</td>)}
+                  <td className={`px-2.5 py-3 text-right tabular-nums ${cellBorder}`}>{rupees(columnTotal("reimbursement"))}</td>
                   <td className={`px-2.5 py-3 text-right tabular-nums ${cellBorder}`}>{rupees(sheetTotals.payable)}</td>
                   <td className={cellBorder} />
                   <td />
@@ -489,6 +533,7 @@ export default function PayrollSheet({ open, onOpenChange, month: initialMonth, 
             <Button type="button" variant="outline" size="sm" onClick={clearLines} disabled={pending}>Clear all lines</Button>
             <Button type="button" variant="outline" size="sm" onClick={copyPreviousMonth} disabled={pending} title="Fill this sheet with the previous month’s salaries"><Copy size={14} />Copy previous month</Button>
           </div>
+          {outOfContract.length ? <p className="rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2.5 text-sm text-amber-800 dark:text-amber-300">Not added for {month}: {outOfContract.map((employee) => employee.data.name).join(", ")}. Their contract has ended or not started; add them by hand if they should still be paid.</p> : null}
           {!activeEmployees.length && !entryPeople.size ? <p className="text-sm text-muted-foreground">Add your staff on the Employees page first, then pick them here.</p> : null}
           {error ? <p role="alert" className="rounded-md border border-destructive/20 bg-destructive/5 px-3 py-2.5 text-sm text-destructive">{error}</p> : null}
         </form>

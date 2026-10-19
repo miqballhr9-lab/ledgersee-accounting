@@ -48,6 +48,31 @@ export function payrollAdjustments(month: string, employee: { id?: string; name?
   return { unpaidDays, absentDays, loanDeduction: Math.round(loanDeduction * 100) / 100, hasLoans, overtimeHours: Math.round(overtimeHours * 100) / 100 };
 }
 
+/** Whether the employee is under contract in the month; true when they have no contracts at all. */
+export function contractCoversMonth(month: string, employee: { id?: string; name?: string }, contracts: Row[]) {
+  const theirs = contracts.filter((row) => row.data.status !== "Cancelled" && ((employee.id && row.data.employeeId === employee.id) || (row.data.employee && row.data.employee === employee.name)));
+  if (!theirs.length) return true;
+  const start = `${month}-01`;
+  const end = `${month}-31`;
+  return theirs.some((row) => (!row.data.startDate || row.data.startDate <= end) && (row.data.endDate ? row.data.endDate >= start : row.data.status !== "Expired"));
+}
+
+/**
+ * Approved expense claims the employee paid for and hasn't been paid back,
+ * up to the end of the month, to reimburse with their salary.
+ */
+export function claimsToReimburse(month: string, employee: { id?: string; name?: string }, claims: Array<Row & { id: string }>, payrollId = "") {
+  const due = claims.filter((row) => {
+    const data = row.data;
+    const theirs = (employee.id && data.employeeId === employee.id) || (data.employee && data.employee === employee.name);
+    const waiting = data.status === "Approved" && !data.reimbursedInPayroll;
+    // Claims already on this salary stay on it when it is edited.
+    const onThisSalary = Boolean(payrollId) && data.reimbursedInPayroll === payrollId;
+    return theirs && data.paidBy !== "Company" && (waiting || onThisSalary) && (!data.date || data.date <= `${month}-31`);
+  });
+  return { amount: Math.round(due.reduce((sum, row) => sum + money(row.data.amount), 0) * 100) / 100, ids: due.map((row) => row.id) };
+}
+
 /** Worked days after unpaid time off and absences, never below zero. */
 export function adjustedWorkedDays(workingDays: string, adjustments: { unpaidDays: number; absentDays: number }) {
   const off = adjustments.unpaidDays + adjustments.absentDays;

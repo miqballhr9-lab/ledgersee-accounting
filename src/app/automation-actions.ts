@@ -13,7 +13,7 @@ import { billingAccess } from "@/lib/billing";
 import { planFor, type Feature } from "@/lib/plans";
 import { sendEmail, sendEmailOrThrow } from "@/lib/email";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
-import { adjustedWorkedDays, parseSalaryRules, payrollAdjustments, salaryRuleAmounts } from "@/lib/payroll-adjustments";
+import { adjustedWorkedDays, claimsToReimburse, contractCoversMonth, parseSalaryRules, payrollAdjustments, salaryRuleAmounts } from "@/lib/payroll-adjustments";
 import { weekendDays } from "@/lib/weekend";
 import { supplierCategoryForBankLine } from "@/lib/supplier-memory";
 import { runCaseEscalation, runLeadFollowUp, runOverdueTasks, runStaleDeals, runWonDealInvoices } from "@/lib/crm-automation";
@@ -162,7 +162,7 @@ const payrollAmountFields = ["baseSalary", "increment", "incentive", "overtimeAl
 async function runMonthlyPayroll(userId: string) {
   const month = today().slice(0, 7);
   const lastMonth = previousMonth(month);
-  const [payroll, employees, leaves, loans, attendance] = await Promise.all([rowsOfKind(userId, "payroll"), rowsOfKind(userId, "employees"), rowsOfKind(userId, "hr-leaves"), rowsOfKind(userId, "hr-loans"), rowsOfKind(userId, "hr-attendance")]);
+  const [payroll, employees, leaves, loans, attendance, contracts, claims] = await Promise.all([rowsOfKind(userId, "payroll"), rowsOfKind(userId, "employees"), rowsOfKind(userId, "hr-leaves"), rowsOfKind(userId, "hr-loans"), rowsOfKind(userId, "hr-attendance"), rowsOfKind(userId, "hr-contracts"), rowsOfKind(userId, "hr-claims")]);
   const thisMonth = payroll.filter((row) => row.data.month === month);
   const settings = (await rowsOfKind(userId, "settings"))[0]?.data;
   const weekend = weekendDays(settings?.weekendDays);
@@ -171,7 +171,13 @@ async function runMonthlyPayroll(userId: string) {
   const hasEntry = (employeeId: string, name: string) => thisMonth.some((row) => row.data.employeeId === employeeId && row.data.employeeName?.trim() === name.trim());
 
   const sources: Record<string, string>[] = [];
+  const outOfContract: string[] = [];
   for (const employee of employees.filter((row) => row.data.name?.trim() && row.data.status !== "Inactive")) {
+    // No salary once the employee's contract has ended (or before it starts).
+    if (!contractCoversMonth(month, { id: employee.id, name: employee.data.name }, contracts)) {
+      outOfContract.push(employee.data.name.trim());
+      continue;
+    }
     const previous = lastMonthEntries.find((row) => row.data.employeeId === employee.data.employeeId && row.data.employeeName?.trim() === employee.data.name?.trim());
     sources.push(previous ? { ...previous.data } : {
       employeeId: employee.data.employeeId || "",
@@ -186,6 +192,7 @@ async function runMonthlyPayroll(userId: string) {
     });
   }
   for (const entry of lastMonthEntries) {
+    if (outOfContract.includes(entry.data.employeeName?.trim() ?? "")) continue;
     if (!sources.some((source) => source.employeeId === entry.data.employeeId && source.employeeName?.trim() === entry.data.employeeName?.trim())) sources.push({ ...entry.data });
   }
 
@@ -216,9 +223,15 @@ async function runMonthlyPayroll(userId: string) {
     // Salary rules from Settings fill a new employee's allowances and deductions; last month's figures carry over otherwise.
     if (!lastMonthEntries.some((row) => row.data.employeeId === payload.employeeId && row.data.employeeName?.trim() === payload.employeeName.trim())) Object.assign(payload, salaryRuleAmounts(salaryRules, Number(payload.baseSalary) || 0, employee?.data.department));
     payload.workedDays = adjustedWorkedDays(workingDays, hr);
-    if (hr.hasLoans) payload.loanDeduction = hr.loanDeduction.toFixed(2);
+    // This month's figures from HR, not last month's: the current wage, loan installments, fines and overtime.
+    if (employee?.data.baseSalary) payload.baseSalary = employee.data.baseSalary;
+    payload.loanDeduction = hr.loanDeduction.toFixed(2);
+    payload.advanceDeduction = "0";
+    payload.fineDeduction = "0";
+    const claimsDue = claimsToReimburse(month, { id: employee?.id, name: payload.employeeName }, claims);
+    if (claimsDue.amount > 0) Object.assign(payload, { reimbursement: claimsDue.amount.toFixed(2), reimbursedClaims: claimsDue.ids.join(",") });
     if (employee?.data.socialDeduction && !source.socialDeduction) payload.socialDeduction = employee.data.socialDeduction;
-    if (Number(employee?.data.overtimeRate) > 0 && hr.overtimeHours) payload.overtimeAllowance = (Number(employee?.data.overtimeRate) * hr.overtimeHours).toFixed(2);
+    if (Number(employee?.data.overtimeRate) > 0) payload.overtimeAllowance = (Number(employee?.data.overtimeRate) * hr.overtimeHours).toFixed(2);
     try {
       const saved = await saveBookkeepingRecord("payroll", payload);
       items.push({ kind: "payroll", id: saved.id, label: `${payload.employeeName} · salary ${month}`, status: "Pending approval" });
@@ -226,9 +239,10 @@ async function runMonthlyPayroll(userId: string) {
       errors.push(`${payload.employeeName || "Employee"}: ${error instanceof Error ? error.message : "couldn’t be created"}`);
     }
   }
-  const summary = items.length
+  const skipped = outOfContract.length ? ` Not created for ${outOfContract.join(", ")}: no contract covers ${month}.` : "";
+  const summary = (items.length
     ? `Created ${items.length} salary ${items.length === 1 ? "entry" : "entries"} for ${month}.`
-    : errors.length ? `Couldn’t create ${errors.length} salary ${errors.length === 1 ? "entry" : "entries"} for ${month}.` : `Nothing to create; everyone already has a salary for ${month}.`;
+    : errors.length ? `Couldn’t create ${errors.length} salary ${errors.length === 1 ? "entry" : "entries"} for ${month}.` : `Nothing to create; everyone already has a salary for ${month}.`) + skipped;
   return { items, errors, summary };
 }
 

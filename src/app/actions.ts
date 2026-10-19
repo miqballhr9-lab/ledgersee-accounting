@@ -212,6 +212,8 @@ function normalizePayrollData(data: Record<string, string>, rules: PayrollRules 
     fineDeduction: data.fineDeduction || "0",
     socialDeduction: data.socialDeduction || "0",
     adjustment: data.adjustment || "0",
+    reimbursement: data.reimbursement || "0",
+    reimbursedClaims: (data.reimbursedClaims || "").split(",").map((id) => id.trim()).filter(Boolean).join(","),
     description: data.description || "",
   };
 
@@ -233,7 +235,7 @@ function normalizePayrollData(data: Record<string, string>, rules: PayrollRules 
 
   const numericFields: (keyof PayrollValues)[] = [
     "baseSalary", "increment", "workingDays", "workedDays", "incentive", "overtimeAllowance", "gymAllowance",
-    "medicalAllowance", "otherAllowance", "taxDeduction", "advanceDeduction", "loanDeduction", "fineDeduction", "socialDeduction", "adjustment",
+    "medicalAllowance", "otherAllowance", "taxDeduction", "advanceDeduction", "loanDeduction", "fineDeduction", "socialDeduction", "adjustment", "reimbursement",
   ];
   for (const key of numericFields) {
     const value = values[key].trim();

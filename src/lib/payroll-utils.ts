@@ -27,6 +27,10 @@ export interface PayrollValues {
   /** EOBI, provident fund or other social security withheld from pay. */
   socialDeduction: string;
   adjustment: string;
+  /** Approved expense claims paid back with this salary; added to take-home pay, not to gross. */
+  reimbursement: string;
+  /** The ids of those claims, comma separated. */
+  reimbursedClaims: string;
   description: string;
 }
 
@@ -156,7 +160,7 @@ function amount(value: string): number {
 
 export function calculatePayroll(values: Pick<PayrollValues,
   "baseSalary" | "increment" | "workingDays" | "workedDays" | "incentive" | "overtimeAllowance" | "gymAllowance" | "medicalAllowance" | "otherAllowance" | "taxDeduction" | "advanceDeduction" | "loanDeduction" | "fineDeduction" | "adjustment"
-> & Partial<Pick<PayrollValues, "socialDeduction">>, taxRule: SalaryTaxRule = "pakistan-slabs"): PayrollTotals {
+> & Partial<Pick<PayrollValues, "socialDeduction" | "reimbursement">>, taxRule: SalaryTaxRule = "pakistan-slabs"): PayrollTotals {
   const revisedSalary = amount(values.baseSalary) + amount(values.increment);
   const workingDays = amount(values.workingDays);
   const workedDays = amount(values.workedDays);
@@ -166,7 +170,7 @@ export function calculatePayroll(values: Pick<PayrollValues,
   const enteredTax = values.taxDeduction.trim() ? Math.max(0, amount(values.taxDeduction)) : estimatedTax;
   const taxDeduction = Math.round(enteredTax * 100) / 100;
   const totalDeductions = taxDeduction + amount(values.advanceDeduction) + amount(values.loanDeduction) + amount(values.fineDeduction) + amount(values.socialDeduction ?? "0");
-  const payableSalary = grossSalary - totalDeductions + amount(values.adjustment);
+  const payableSalary = grossSalary - totalDeductions + amount(values.adjustment) + amount(values.reimbursement ?? "0");
 
   return {
     revisedSalary: Math.round(revisedSalary * 100) / 100,
@@ -207,6 +211,8 @@ export function emptyPayrollValues(month: string): PayrollValues {
     fineDeduction: "0",
     socialDeduction: "0",
     adjustment: "0",
+    reimbursement: "0",
+    reimbursedClaims: "",
     description: "",
   };
 }

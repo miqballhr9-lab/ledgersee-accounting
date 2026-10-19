@@ -533,7 +533,10 @@ export function buildLedger(allRecords: BookkeepingRecord[], method: AccountingM
       // and income tax and anything else is owed onwards (payroll liabilities).
       const repaid = num(data.loanDeduction) + num(data.advanceDeduction);
       const fines = num(data.fineDeduction);
-      const owed = gross - net - repaid - fines;
+      // Expense claims paid back with the salary clear what is owed to the employee for them.
+      const reimbursed = num(data.reimbursement);
+      const owed = gross + reimbursed - net - repaid - fines;
+      const claimsBack = (share: number): Array<[string, number]> => (reimbursed ? [[reimbursements(), reimbursed * share]] : []);
       const recovered = (share: number): Array<[string, number]> => [...(repaid ? [[employeeLoans(), -repaid * share] as [string, number]] : []), ...(fines ? [[employeeRecoveries(), -fines * share] as [string, number]] : [])];
       const withheld = (share: number): Array<[string, number]> => [...recovered(share), [payrollLiabilities, -owed * share]];
       const base = { number: data.reference ?? "", name: data.employeeName ?? "", customer: "", supplier: "", memo: data.month ? `Salary ${data.month}` : "Salary", sourceKind: "payroll", sourceId: record.id };
@@ -547,12 +550,12 @@ export function buildLedger(allRecords: BookkeepingRecord[], method: AccountingM
       if (paymentsFor.has(record.id) || num(data.paidAmount) > 0) {
         const payments = docPayments(record, month || record.createdAt.slice(0, 10));
         if (method === "accrual") {
-          post({ ...base, type: "Payroll", txnId: `pr-${record.id}`, date: month || record.createdAt.slice(0, 10) }, [[salaries, gross], ...recovered(1), [payrollLiabilities, -(gross - repaid - fines)]]);
+          post({ ...base, type: "Payroll", txnId: `pr-${record.id}`, date: month || record.createdAt.slice(0, 10) }, [[salaries, gross], ...claimsBack(1), ...recovered(1), [payrollLiabilities, -(gross + reimbursed - repaid - fines)]]);
           for (const payment of payments) post({ ...base, type: "Salary payment", txnId: `sp-${payment.id}-${record.id}`, date: payment.date }, [[payrollLiabilities, payment.amount], [payment.account, -payment.amount]]);
         } else if (net > 0) {
           for (const payment of payments) {
             const share = payment.amount / net;
-            post({ ...base, type: "Salary payment", txnId: `sp-${payment.id}-${record.id}`, date: payment.date }, [[salaries, gross * share], ...withheld(share), [payment.account, -payment.amount]]);
+            post({ ...base, type: "Salary payment", txnId: `sp-${payment.id}-${record.id}`, date: payment.date }, [[salaries, gross * share], ...claimsBack(share), ...withheld(share), [payment.account, -payment.amount]]);
           }
         }
         continue;
@@ -562,7 +565,7 @@ export function buildLedger(allRecords: BookkeepingRecord[], method: AccountingM
       const date = (paid ? data.paidDate : "") || month || record.createdAt.slice(0, 10);
       post(
         { txnId: `pr-${record.id}`, date, type: "Payroll", number: data.reference ?? "", name: data.employeeName ?? "", customer: "", supplier: "", memo: data.month ? `Salary ${data.month}` : "Salary", sourceKind: "payroll", sourceId: record.id },
-        [[salaries, gross], ...withheld(1), [paid ? paymentAccountName(data) : payrollLiabilities, -net]],
+        [[salaries, gross], ...claimsBack(1), ...withheld(1), [paid ? paymentAccountName(data) : payrollLiabilities, -net]],
       );
       continue;
     }
@@ -649,6 +652,14 @@ export function buildLedger(allRecords: BookkeepingRecord[], method: AccountingM
       }
       const paid = data.status === "Paid";
       const paidDate = data.paidDate || date;
+      const salary = data.reimbursedInPayroll ? recordById.get(data.reimbursedInPayroll) : undefined;
+      if (salary) {
+        // Paid back with a salary: the salary's payment clears what is owed for it.
+        const salaryPaid = salary.data.status === "Paid" || num(salary.data.paidAmount) > 0;
+        if (method === "accrual") post({ ...base, type: "Employee expense", txnId: `claim-${record.id}`, date }, [[expense, amount], [reimbursements(), -amount]]);
+        else if (salaryPaid) post({ ...base, type: "Employee expense", txnId: `claim-${record.id}`, date: salary.data.paidDate || paidDate }, [[expense, amount], [reimbursements(), -amount]]);
+        continue;
+      }
       if (method === "accrual") {
         post({ ...base, type: "Employee expense", txnId: `claim-${record.id}`, date }, [[expense, amount], [reimbursements(), -amount]]);
         if (paid) post({ ...base, type: "Expense reimbursement", txnId: `claim-pay-${record.id}`, date: paidDate }, [[reimbursements(), amount], [paymentAccountName(data), -amount]]);
