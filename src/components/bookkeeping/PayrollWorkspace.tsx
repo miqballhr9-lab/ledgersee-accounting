@@ -79,9 +79,10 @@ interface PayrollColumn {
 }
 
 const PAYROLL_COLUMNS_KEY = "mikledger:payroll-columns:v1";
-const DEFAULT_PAYROLL_COLUMNS = ["reference", "employee", "phone", "designation", "days", "paymentAccount", "incentive", "overtime", "grossSalary", "tax", "otherDeductions", "payable", "description"];
+const DEFAULT_PAYROLL_COLUMNS = ["reference", "employee", "phone", "designation", "days", "paymentAccount", "incentive", "overtime", "gym", "medical", "otherAllowance", "allowances", "grossSalary", "tax", "otherDeductions", "payable", "description"];
 /** Columns added after people may have saved their choice; shown to them once, then theirs to hide. */
-const NEWER_COLUMNS = ["phone", "incentive", "overtime"];
+const NEWER_COLUMNS: Record<string, string[]> = { "1": ["phone", "incentive", "overtime"], "2": ["gym", "medical", "otherAllowance", "allowances"] };
+const COLUMNS_VERSION = "2";
 const COLUMNS_SEEN_KEY = "mikledger:payroll-columns-seen";
 
 /** The employee's mobile (or work phone) from Employees, matched by ID or name. */
@@ -126,7 +127,11 @@ function payrollColumns(currency: string, employees: BookkeepingRecord[] = []): 
     { key: "increment", label: "Increment", align: "right", render: (record) => money(record.data.increment) },
     { key: "incentive", label: "Incentive", align: "right", render: (record) => money(record.data.incentive) },
     { key: "overtime", label: "Overtime", align: "right", render: (record) => money(record.data.overtimeAllowance) },
-    { key: "allowances", label: "Allowances", align: "right", render: (record) => formatRupees(["incentive", "overtimeAllowance", "gymAllowance", "medicalAllowance", "otherAllowance"].reduce((sum, key) => sum + Number(record.data[key] || 0), 0)) },
+    { key: "gym", label: "Gym", align: "right", render: (record) => money(record.data.gymAllowance) },
+    { key: "medical", label: "Medical", align: "right", render: (record) => money(record.data.medicalAllowance) },
+    { key: "otherAllowance", label: "Other allowance", align: "right", render: (record) => money(record.data.otherAllowance) },
+    // Incentive and overtime have their own columns, so Allowances totals gym, medical and other allowance only.
+    { key: "allowances", label: "Allowances", align: "right", render: (record) => formatRupees(["gymAllowance", "medicalAllowance", "otherAllowance"].reduce((sum, key) => sum + Number(record.data[key] || 0), 0)) },
     { key: "grossSalary", label: "Gross salary", align: "right", render: (record) => <span className="font-medium">{money(record.data.grossSalary)}</span> },
     { key: "tax", label: "Tax", align: "right", render: (record) => money(record.data.taxDeduction) },
     { key: "otherDeductions", label: "Other deductions", align: "right", render: (record) => formatRupees(Math.max(0, Number(record.data.totalDeductions || 0) - Number(record.data.taxDeduction || 0))) },
@@ -174,12 +179,13 @@ export default function PayrollWorkspace({ records, accounts, employees = [], hr
       if (Array.isArray(stored) && stored.length) {
         const keys = stored.filter((key): key is string => typeof key === "string");
         // A saved choice from before Phone, Incentive and Overtime existed gets them once.
-        const seen = window.localStorage.getItem(COLUMNS_SEEN_KEY) === "1";
-        const next = seen ? keys : [...keys, ...NEWER_COLUMNS.filter((key) => !keys.includes(key))];
-        if (!seen) window.localStorage.setItem(PAYROLL_COLUMNS_KEY, JSON.stringify(next));
+        const seenVersion = Number(window.localStorage.getItem(COLUMNS_SEEN_KEY) || "0");
+        const added = Object.entries(NEWER_COLUMNS).filter(([version]) => Number(version) > seenVersion).flatMap(([, columns]) => columns);
+        const next = [...keys, ...added.filter((key) => !keys.includes(key))];
+        if (added.length) window.localStorage.setItem(PAYROLL_COLUMNS_KEY, JSON.stringify(next));
         setVisibleColumnKeys(next);
       }
-      window.localStorage.setItem(COLUMNS_SEEN_KEY, "1");
+      window.localStorage.setItem(COLUMNS_SEEN_KEY, COLUMNS_VERSION);
     } catch {
       // Stored choice unreadable; keep the default columns.
     }
