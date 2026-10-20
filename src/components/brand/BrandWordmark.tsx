@@ -30,11 +30,8 @@ export default function BrandWordmark({ className, size = "default" }: BrandWord
         )}
       >
         <span>MIK LEDGER</span>
-        <span className="absolute inset-x-0 bottom-0 flex h-1">
-          <span className="w-1/3 bg-green-500" />
-          <span className="w-1/3 bg-amber-400" />
-          <span className="w-1/3 bg-red-500" />
-        </span>
+        {/* The same line as under MIK on the icon. */}
+        <span className="absolute inset-x-0 bottom-0 h-1 bg-[#7FD3C4]" />
       </span>
     </span>
   );
