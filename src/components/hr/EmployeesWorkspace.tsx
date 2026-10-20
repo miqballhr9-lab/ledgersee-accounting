@@ -3,10 +3,11 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { CalendarDays, Clock, FileBadge, HandCoins, LayoutGrid, List, Mail, Phone, Plus, ReceiptText, Search, Star, Wallet } from "lucide-react";
+import { CalendarDays, Clock, FileBadge, HandCoins, LayoutGrid, List, Mail, Phone, Plus, ReceiptText, Search, Smartphone, Star, Wallet } from "lucide-react";
 import { toast } from "sonner";
 
 import { getAttachmentUploadTarget, saveBookkeepingRecord } from "@/app/actions";
+import { inviteMember } from "@/app/team-actions";
 import { useNewRecordParam, useOpenRecordParam } from "@/hooks/use-new-record-param";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
@@ -60,6 +61,31 @@ export default function EmployeesWorkspace({ employees, departments, accounts, r
   const [tab, setTab] = useState<(typeof tabs)[number]>("Work information");
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [inviting, setInviting] = useState(false);
+
+  /** Invites the open employee to sign in with the Employee role, which opens their own portal (the employee app). */
+  async function inviteToApp() {
+    if (!editing) return;
+    const email = (values.email ?? editing.data.email ?? "").trim();
+    if (!email) {
+      toast.error("Add the employee's work email first, then save.");
+      return;
+    }
+    setInviting(true);
+    try {
+      const result = await inviteMember({ name: values.name || editing.data.name || "", email, role: "Employee", department: values.department || editing.data.department || "" });
+      try {
+        await navigator.clipboard.writeText(result.link);
+      } catch {
+        // Copying can be blocked; the email still has the link.
+      }
+      toast.success(result.emailed ? `Invitation emailed to ${email}. The link is also copied, to send on WhatsApp.` : `Invitation link copied. Send it to ${email}; email isn't set up.`);
+    } catch (error) {
+      toast.error(error instanceof Error ? readableError(error) : "The invitation couldn't be sent.");
+    } finally {
+      setInviting(false);
+    }
+  }
 
   /** The employee's photo, uploaded like any attachment and shown on the form and the kanban card. */
   async function uploadPhoto(file: File | undefined) {
@@ -282,7 +308,8 @@ export default function EmployeesWorkspace({ employees, departments, accounts, r
               <DialogTitle className="truncate text-lg font-normal">{editing ? editing.data.name : "New"}</DialogTitle>
               <DialogDescription className="sr-only">Employee form</DialogDescription>
             </div>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
+              {editing ? <Button variant="outline" className="gap-1.5" disabled={saving || inviting} title="Email a login for the employee app: check in/out, time off, payslips" onClick={() => void inviteToApp()}><Smartphone size={15} />{inviting ? "Inviting…" : "Invite to employee app"}</Button> : null}
               <Button variant="outline" disabled={saving} onClick={() => setEditing(undefined)}>Discard</Button>
               <Button disabled={saving} onClick={() => void save()}>{saving ? "Saving…" : "Save"}</Button>
             </div>

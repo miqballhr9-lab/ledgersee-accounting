@@ -11,10 +11,12 @@ import type { BookkeepingRecord, RecordKind } from "@/lib/bookkeeping-types";
 import { applyHrRules, attendanceSessions, leaveUsed, timeOffAllowance } from "@/lib/hr-rules";
 import { odooHrData } from "@/lib/hr-status";
 import { canAccess } from "@/lib/permissions";
+import { upcomingCelebrations, type Celebration } from "@/lib/celebrations";
 import { revalidatePath } from "@/lib/revalidate";
 import { runWithRole } from "@/lib/role-override";
 
 type StoredRow = typeof bookkeepingRecord.$inferSelect;
+type CheckLocation = { lat: number; lng: number; accuracy?: number };
 
 function toRecord(row: StoredRow): BookkeepingRecord {
   return { id: row.id, kind: row.kind as RecordKind, data: odooHrData(row.kind, row.data), createdAt: row.createdAt.toISOString(), updatedAt: row.updatedAt.toISOString() };
@@ -83,23 +85,52 @@ export interface MyPortal {
   business: string;
   payslips: BookkeepingRecord[];
   leaves: BookkeepingRecord[];
-  leaveTypes: { id: string; name: string; allowance: number; used: number; paid: boolean }[];
+  /** Each time off type's days for the year (null when unlimited), days taken and days waiting for approval. */
+  leaveTypes: { id: string; name: string; allowance: number | null; used: number; pending: number; paid: boolean }[];
   attendance: BookkeepingRecord[];
   loans: BookkeepingRecord[];
   claims: BookkeepingRecord[];
   documents: BookkeepingRecord[];
   holidays: BookkeepingRecord[];
+  /** Today and the business's time zone, which check ins use. */
+  today: string;
+  timeZone: string;
+  /** Where today's attendance stands: checked in now (and since when), and hours so far. */
+  attendanceNow: { date: string; open: boolean; since: string; sessions: Array<{ in: string; out: string }>; hours: string };
+  /** Colleagues' (and your own) birthdays and work anniversaries in the next 30 days. */
+  celebrations: Celebration[];
 }
 
 export async function getMyPortal(): Promise<MyPortal> {
   const { me, employee } = await myEmployee();
-  const empty: MyPortal = { employee: null, business: me.workspaceName, payslips: [], leaves: [], leaveTypes: [], attendance: [], loans: [], claims: [], documents: [], holidays: [] };
+  const { date: todayDate } = await nowTime(me.id);
+  const [settings] = await rows(me.id, ["settings"]);
+  const timeZone = settings?.data.timeZone || "Asia/Karachi";
+  const empty: MyPortal = { employee: null, business: me.workspaceName, payslips: [], leaves: [], leaveTypes: [], attendance: [], loans: [], claims: [], documents: [], holidays: [], today: todayDate, timeZone, attendanceNow: { date: todayDate, open: false, since: "", sessions: [], hours: "" }, celebrations: [] };
   if (!employee) return empty;
-  const all = await rows(me.id, ["payroll", "hr-leaves", "hr-leave-types", "hr-allocations", "hr-attendance", "hr-loans", "hr-claims", "hr-documents", "hr-holidays"]);
+  const all = await rows(me.id, ["payroll", "hr-leaves", "hr-leave-types", "hr-allocations", "hr-attendance", "hr-loans", "hr-claims", "hr-documents", "hr-holidays", "employees"]);
   const mine = (kind: string) => all.filter((row) => row.kind === kind && (row.data.employeeId === employee.id || (kind === "payroll" && (row.data.employeeEmail?.toLowerCase() === me.email.toLowerCase() || row.data.employeeName === employee.data.name))));
-  const year = new Date().toISOString().slice(0, 4);
+  const year = todayDate.slice(0, 4);
   const leaves = mine("hr-leaves");
+  // Today's attendance, or last night's check in that hasn't been closed yet.
+  const attendanceRows = mine("hr-attendance");
+  const sessionsOf = (row: StoredRow | undefined) => {
+    const list = attendanceSessions(row?.data.sessions);
+    if (!list.length && row?.data.checkIn) list.push({ in: row.data.checkIn, out: row.data.checkOut ?? "" });
+    return list;
+  };
+  const yesterday = new Date(`${todayDate}T12:00:00Z`);
+  yesterday.setUTCDate(yesterday.getUTCDate() - 1);
+  const todayRow = attendanceRows.find((row) => row.data.date === todayDate);
+  const lastNight = attendanceRows.find((row) => row.data.date === yesterday.toISOString().slice(0, 10));
+  const current = !sessionsOf(todayRow).some((session) => !session.out) && sessionsOf(lastNight).some((session) => !session.out) ? lastNight : todayRow;
+  const currentSessions = sessionsOf(current);
+  const openNow = currentSessions.length > 0 && !currentSessions[currentSessions.length - 1].out;
   return {
+    today: todayDate,
+    timeZone,
+    attendanceNow: { date: current?.data.date ?? todayDate, open: openNow, since: openNow ? currentSessions[currentSessions.length - 1].in : "", sessions: currentSessions, hours: current?.data.hoursWorked ?? "" },
+    celebrations: upcomingCelebrations(all.filter((row) => row.kind === "employees").map((row) => ({ id: row.id, data: row.data })), todayDate),
     employee: toRecord(employee),
     business: me.workspaceName,
     payslips: mine("payroll").sort((a, b) => (b.data.month ?? "").localeCompare(a.data.month ?? "")).map(toRecord),
@@ -107,8 +138,9 @@ export async function getMyPortal(): Promise<MyPortal> {
     leaveTypes: all.filter((row) => row.kind === "hr-leave-types").map((type) => ({
       id: type.id,
       name: type.data.leaveName ?? "Leave",
-      allowance: timeOffAllowance({ byKind: (kind) => all.filter((row) => row.kind === kind), actor: "" }, { employeeId: employee.id, leaveTypeId: type.id }, year) ?? 0,
+      allowance: timeOffAllowance({ byKind: (kind) => all.filter((row) => row.kind === kind), actor: "" }, { employeeId: employee.id, leaveTypeId: type.id }, year),
       used: leaveUsed(leaves, { employeeId: employee.id, leaveTypeId: type.id }, year),
+      pending: leaves.filter((leave) => leave.data.leaveTypeId === type.id && ["To Approve", "Second Approval"].includes(leave.data.status ?? "") && (leave.data.fromDate ?? "").startsWith(year)).reduce((sum, leave) => sum + (Number(leave.data.days) || 0), 0),
       paid: type.data.paid !== "false",
     })),
     attendance: mine("hr-attendance").sort((a, b) => (b.data.date ?? "").localeCompare(a.data.date ?? "")).slice(0, 60).map(toRecord),
@@ -134,12 +166,24 @@ async function nowTime(userId: string) {
 }
 
 /** Checks an employee in or out for today, in the business's time zone. */
-async function checkEmployee(me: Awaited<ReturnType<typeof requireUser>>, employee: StoredRow, direction: "in" | "out", self: boolean) {
+async function checkEmployee(me: Awaited<ReturnType<typeof requireUser>>, employee: StoredRow, direction: "in" | "out", self: boolean, location?: CheckLocation) {
   const { date, time } = await nowTime(me.id);
   const all = await rows(me.id, ["hr-attendance", "hr-holidays", "settings"]);
   const byKind = (kind: string) => all.filter((row) => row.kind === kind);
-  const existing = byKind("hr-attendance").find((row) => row.data.employeeId === employee.id && row.data.date === date);
   const who = self ? "You" : employee.data.name || "This employee";
+  const openSession = (row: StoredRow | undefined) => {
+    const list = attendanceSessions(row?.data.sessions);
+    if (!list.length && row?.data.checkIn) list.push({ in: row.data.checkIn, out: row.data.checkOut ?? "" });
+    return list.length > 0 && !list[list.length - 1].out;
+  };
+  let existing = byKind("hr-attendance").find((row) => row.data.employeeId === employee.id && row.data.date === date);
+  // A night shift: checking out after midnight closes yesterday's open check in.
+  if (direction === "out" && !openSession(existing)) {
+    const yesterday = new Date(`${date}T12:00:00Z`);
+    yesterday.setUTCDate(yesterday.getUTCDate() - 1);
+    const previous = byKind("hr-attendance").find((row) => row.data.employeeId === employee.id && row.data.date === yesterday.toISOString().slice(0, 10));
+    if (previous && openSession(previous)) existing = previous;
+  }
   // Each check in starts a session and each check out closes it, so people can step out and come back.
   const sessions = attendanceSessions(existing?.data.sessions);
   if (!sessions.length && existing?.data.checkIn) sessions.push({ in: existing.data.checkIn, out: existing.data.checkOut ?? "" });
@@ -153,6 +197,9 @@ async function checkEmployee(me: Awaited<ReturnType<typeof requireUser>>, employ
     checkIn: sessions[0].in,
     checkOut: sessions[sessions.length - 1].out,
     sessions: JSON.stringify(sessions),
+    // Where the phone was when checking in or out from the app, so HR can see it.
+    ...(location ? { [direction === "in" ? "checkInLocation" : "checkOutLocation"]: `${location.lat.toFixed(5)},${location.lng.toFixed(5)}${location.accuracy ? ` (±${Math.round(location.accuracy)} m)` : ""}` } : {}),
+    ...(self ? { [direction === "in" ? "checkInSource" : "checkOutSource"]: "Employee app" } : {}),
   };
   applyHrRules("hr-attendance", data, existing?.data, { byKind, actor: me.name }, existing?.id);
   if (existing) await db.update(bookkeepingRecord).set({ data, updatedAt: new Date() }).where(eq(bookkeepingRecord.id, existing.id));
@@ -161,11 +208,15 @@ async function checkEmployee(me: Awaited<ReturnType<typeof requireUser>>, employ
   return time;
 }
 
-/** Check in or out for today. */
-export async function selfCheck(direction: "in" | "out"): Promise<string> {
+/** Check in or out for today, with where the phone was when the employee allowed location. */
+export async function selfCheck(direction: "in" | "out", location?: CheckLocation): Promise<string> {
   const { me, employee } = await myEmployee(true);
   if (!employee) throw new ActionError("Your email isn’t linked to an employee yet. Ask HR to add it to your employee profile.");
-  return checkEmployee(me, employee, direction, true);
+  if (direction !== "in" && direction !== "out") throw new ActionError("Choose check in or check out.");
+  const place = location && Number.isFinite(location.lat) && Number.isFinite(location.lng) && Math.abs(location.lat) <= 90 && Math.abs(location.lng) <= 180
+    ? { lat: Number(location.lat), lng: Number(location.lng), accuracy: Number.isFinite(location.accuracy) ? Number(location.accuracy) : undefined }
+    : undefined;
+  return checkEmployee(me, employee, direction, true, place);
 }
 
 /** Kiosk mode in Attendances: HR checks any employee in or out. Returns the time recorded. */
@@ -202,4 +253,31 @@ export async function selfRequest(kind: "hr-leaves" | "hr-loans" | "hr-claims", 
 /** Saves through the shared rules with HR rights, for the employee's own request only. */
 async function saveAsEmployee(kind: string, values: Record<string, string>) {
   await runWithRole("HR manager", () => saveCrmRecord(kind, values));
+}
+
+/** Time off types most businesses use; days are a starting point to change in Time off types. */
+const standardLeaveTypes = [
+  { leaveName: "Annual leave", daysPerYear: "14", paid: "true", description: "Paid holiday earned each year." },
+  { leaveName: "Casual leave", daysPerYear: "10", paid: "true", description: "Short notice personal leave." },
+  { leaveName: "Sick leave", daysPerYear: "8", paid: "true", description: "When unwell; HR may ask for a medical certificate." },
+  { leaveName: "Maternity leave", daysPerYear: "90", paid: "true", description: "Before and after childbirth. Check the law where you operate (e.g. 12–16 weeks in Pakistan)." },
+  { leaveName: "Paternity leave", daysPerYear: "30", paid: "true", description: "For a new father. Check the law where you operate." },
+  { leaveName: "Unpaid leave", daysPerYear: "0", paid: "false", requiresAllocation: "No limit", description: "Deducted from salary in payroll." },
+];
+
+/** Adds the standard time off types the business doesn't have yet, by name. */
+export async function addStandardLeaveTypes(): Promise<number> {
+  const me = await requireUser();
+  assertCanWrite(me, "hr-leave-types");
+  const existing = new Set((await rows(me.id, ["hr-leave-types"])).map((row) => (row.data.leaveName ?? "").trim().toLowerCase()));
+  const missing = standardLeaveTypes.filter((type) => !existing.has(type.leaveName.toLowerCase()));
+  if (missing.length) {
+    await db.insert(bookkeepingRecord).values(missing.map((type) => ({
+      userId: me.id,
+      kind: "hr-leave-types",
+      data: { approval: "By time off officer", requiresAllocation: "Yes", ...type },
+    })));
+  }
+  revalidatePath("/app", "layout");
+  return missing.length;
 }

@@ -94,20 +94,30 @@ async function MyTimeOffPage() {
 /** Odoo Attendances' check in/out screen, with kiosk mode for HR. */
 async function CheckInPage() {
   const me = await requireUser();
-  const { store, today } = await loadHrData();
+  const { store, today, timeZone: settingsTimeZone } = await loadHrData();
   const employees = activeEmployees(store);
   const email = me.email.trim().toLowerCase();
   const mine = employees.find((employee) => employee.data.email?.trim().toLowerCase() === email);
   const canKiosk = canWriteKind(me.role, "hr-attendance");
   const shown = canKiosk ? employees : employees.filter((employee) => employee === mine);
-  const attendance = (store["hr-attendance"] ?? []).filter((row) => row.data.date === today);
+  const yesterday = new Date(`${today}T12:00:00Z`);
+  yesterday.setUTCDate(yesterday.getUTCDate() - 1);
+  const lastNight = yesterday.toISOString().slice(0, 10);
+  const records = store["hr-attendance"] ?? [];
+  // Today's row, or last night's check in still open (a night shift checks out after midnight).
+  const rowFor = (employeeId: string) => {
+    const todays = records.find((entry) => entry.data.date === today && entry.data.employeeId === employeeId);
+    const previous = records.find((entry) => entry.data.date === lastNight && entry.data.employeeId === employeeId);
+    return !(todays && todays.data.checkIn && !todays.data.checkOut) && previous?.data.checkIn && !previous.data.checkOut ? previous : todays;
+  };
   return (
     <AttendanceKiosk
+      timeZone={settingsTimeZone}
       business={me.workspaceName}
       myEmployeeId={mine?.id ?? null}
       canKiosk={canKiosk}
       employees={shown.map((employee) => {
-        const row = attendance.find((entry) => entry.data.employeeId === employee.id);
+        const row = rowFor(employee.id);
         return { id: employee.id, name: employee.data.name || "Employee", job: employee.data.designation ?? "", department: employee.data.department ?? "", checkIn: row?.data.checkIn ?? "", checkOut: row?.data.checkOut ?? "", hours: row?.data.hoursWorked ?? "", needsPin: Boolean(employee.data.kioskPin) };
       })}
     />

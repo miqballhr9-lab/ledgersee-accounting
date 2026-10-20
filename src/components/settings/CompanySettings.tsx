@@ -35,6 +35,9 @@ const tabs: { key: TabKey; label: string }[] = [
   { key: "advanced", label: "Advanced" },
 ];
 
+/** Time zones offered for the business; check ins and HR's "today" use the one chosen. */
+const timeZones = ["Asia/Karachi", "Asia/Dubai", "Asia/Riyadh", "Asia/Kolkata", "Asia/Dhaka", "Asia/Kabul", "Asia/Tehran", "Asia/Qatar", "Asia/Kuwait", "Asia/Muscat", "Asia/Bahrain", "Asia/Singapore", "Asia/Kuala_Lumpur", "Europe/London", "Europe/Stockholm", "Europe/Copenhagen", "Europe/Berlin", "Europe/Paris", "Europe/Istanbul", "Africa/Cairo", "Africa/Nairobi", "America/New_York", "America/Chicago", "America/Los_Angeles", "America/Toronto", "Australia/Sydney", "UTC"];
+
 const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const terms = ["Due on receipt", "15 days", "30 days", "60 days"];
 const companyTypes = ["Sole proprietor", "Partnership", "Private limited company", "Public limited company", "Single member company", "Non-profit / trust", "Other"];
@@ -58,6 +61,7 @@ function withDefaults(data: Data, workspaceName: string): Data {
   filled.invoiceTerms ||= "30 days";
   filled.billTerms ||= "30 days";
   filled.accountingMethod ||= "Accrual";
+  filled.timeZone ||= "Asia/Karachi";
   filled.legalNameSame ||= "true";
   filled.customerEmailSame ||= "true";
   filled.customerAddressSame ||= "true";
@@ -362,6 +366,7 @@ export default function CompanySettings({ settings, workspaceName }: CompanySett
                   <Row label="First month of fiscal year" value={saved.fiscalYear} />
                   <Row label="Accounting method" value={saved.accountingMethod} />
                   <Row label="Weekly days off" value={saved.weekendDays || "Sunday"} />
+                  <Row label="Time zone" value={saved.timeZone || "Asia/Karachi"} />
                   <Row label="Salary rules" value={saved.salaryRules ? `${saved.salaryRules.split("\n").filter(Boolean).length} rules` : "None"} />
                 </>,
                 <>
@@ -369,6 +374,7 @@ export default function CompanySettings({ settings, workspaceName }: CompanySett
                   {select("accountingMethod", "Accounting method", ["Accrual", "Cash"], "The basis reports open with; you can still switch on each report.")}
                   {text("standardDailyHours", "Working day (hours)", { type: "number", help: "Hours worked beyond this each day count as overtime. 8 when empty." })}
                   {select("weekendDays", "Weekly days off", ["Sunday", "Saturday, Sunday", "Friday", "Friday, Saturday"], "Time off and unpaid leave skip these days.")}
+                  {select("timeZone", "Time zone", timeZones.includes(draft.timeZone ?? "") || !draft.timeZone ? timeZones : [draft.timeZone, ...timeZones], "Check in and check out times, and “today” in HR, follow this zone.")}
                   {textArea("salaryRules", "Salary rules", "One per line, filled in on new payroll lines: Medical = 10% of basic, Gym = 2000, EOBI / PF = 1% of basic for Sales. Columns: Incentive, Gym, Medical, Other allowance, Fine, EOBI / PF, Other adjustment.")}
                 </>,
               )}

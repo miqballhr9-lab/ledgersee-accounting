@@ -15,7 +15,7 @@ interface App {
 }
 
 /** HRM home in Odoo's style: the apps menu, one tile per HR app. */
-export default function HrHome({ store }: { store: CrmStore; currency?: string; asOfDate?: string }) {
+export default function HrHome({ store, children }: { store: CrmStore; currency?: string; asOfDate?: string; children?: React.ReactNode }) {
   // Contracts and documents ending within 30 days need attention, as Odoo's activity warnings show.
   const soonDate = new Date();
   soonDate.setUTCDate(soonDate.getUTCDate() + 30);
@@ -47,8 +47,9 @@ export default function HrHome({ store }: { store: CrmStore; currency?: string; 
 
   return (
     <div className="min-h-full bg-gradient-to-b from-[#714B67]/10 via-background to-background">
-      <div className="mx-auto w-full max-w-4xl px-4 py-10 sm:py-14">
+      <div className="mx-auto w-full max-w-5xl px-4 py-8 sm:py-10">
         <h1 className="sr-only">HRM apps</h1>
+        {children}
         <ul className="grid grid-cols-3 gap-x-4 gap-y-8 sm:grid-cols-4 md:grid-cols-5">
           {apps.map((app) => (
             <li key={app.label}>

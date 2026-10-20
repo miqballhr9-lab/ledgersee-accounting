@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
+import { useAutoRefresh } from "@/components/hr/employee-app";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { ArrowDownToLine, CalendarDays, ChevronDown, Scale, Columns3, Ellipsis, KanbanSquare, List, Mail, Pencil, Plus, Search, SlidersHorizontal, Trash2, Upload, UserCheck, Users } from "lucide-react";
@@ -131,6 +132,8 @@ function dueDateOf(record: BookkeepingRecord) {
 
 export default function CrmWorkspace({ page, initialStore, currency, me, owners, openId, jobFilter, weekend, recruitmentStages, accounting = true }: CrmWorkspaceProps) {
   const router = useRouter();
+  // Attendance, time off and requests from the employee app show up while HR has the list open.
+  useAutoRefresh(["attendances", "time-off", "expenses", "salary-attachments", "allocations"].includes(page) ? 30 : 0);
   const [store, setStore] = useState<CrmStore>(initialStore);
   const [lastInitial, setLastInitial] = useState(initialStore);
   if (initialStore !== lastInitial) {

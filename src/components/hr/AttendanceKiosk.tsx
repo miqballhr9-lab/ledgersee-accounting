@@ -10,6 +10,7 @@ import { kioskCheck, selfCheck } from "@/app/hr-actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { errorText } from "@/components/crm/crm-shared";
+import { BusinessClock, useAutoRefresh } from "@/components/hr/employee-app";
 
 export interface KioskEmployee {
   id: string;
@@ -34,28 +35,13 @@ function Avatar({ name, size = "size-12 text-base" }: { name: string; size?: str
   return <span className={`grid shrink-0 place-items-center rounded-md font-semibold text-white ${tone} ${size}`}>{initials(name)}</span>;
 }
 
-function Clock() {
-  const [now, setNow] = useState<Date | null>(null);
-  useEffect(() => {
-    const tick = () => setNow(new Date());
-    const first = window.setTimeout(tick, 0);
-    const timer = window.setInterval(tick, 1000);
-    return () => { window.clearTimeout(first); window.clearInterval(timer); };
-  }, []);
-  if (!now) return <p className="h-14" />;
-  return (
-    <div className="text-center">
-      <p className="text-5xl font-light tabular-nums tracking-tight">{now.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</p>
-      <p className="mt-1 text-sm text-muted-foreground">{now.toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long", year: "numeric" })}</p>
-    </div>
-  );
-}
-
 const isIn = (employee: KioskEmployee) => Boolean(employee.checkIn && !employee.checkOut);
 
 /** Odoo Attendances: check in/out for yourself, and kiosk mode where employees tap their name. */
-export default function AttendanceKiosk({ business, employees, myEmployeeId, canKiosk }: { business: string; employees: KioskEmployee[]; myEmployeeId: string | null; canKiosk: boolean }) {
+export default function AttendanceKiosk({ business, employees, myEmployeeId, canKiosk, timeZone = "Asia/Karachi" }: { business: string; employees: KioskEmployee[]; myEmployeeId: string | null; canKiosk: boolean; timeZone?: string }) {
   const router = useRouter();
+  // Check ins from phones and the kiosk show up here as they happen.
+  useAutoRefresh(30);
   const [mode, setMode] = useState<"me" | "kiosk">(myEmployeeId || !canKiosk ? "me" : "kiosk");
   const [search, setSearch] = useState("");
   const [pickedId, setPickedId] = useState<string | null>(null);
@@ -120,7 +106,7 @@ export default function AttendanceKiosk({ business, employees, myEmployeeId, can
         </div>
       </header>
 
-      <div className="mt-8"><Clock /></div>
+      <div className="mt-8 text-center"><BusinessClock timeZone={timeZone} /></div>
 
       <div className="mt-8">
         {done ? (

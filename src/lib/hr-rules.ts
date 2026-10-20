@@ -119,12 +119,13 @@ export function applyHrRules(kind: string, data: Record<string, string>, existin
       const worked = sessions.reduce((sum, session) => {
         const from = minutes(session.in);
         const to = minutes(session.out);
-        return from !== null && to !== null && to > from ? sum + (to - from) : sum;
+        // Out before in is a check out after midnight.
+        return from !== null && to !== null && to !== from ? sum + (to > from ? to - from : to + 24 * 60 - from) : sum;
       }, 0);
       data.hoursWorked = worked ? String(Math.round((worked / 60) * 100) / 100) : "";
       data.sessionLog = sessions.map((session) => `${session.in}–${session.out || "…"}`).join(", ");
     } else {
-      data.hoursWorked = start !== null && end !== null && end > start ? String(Math.round(((end - start) / 60) * 100) / 100) : "";
+      data.hoursWorked = start !== null && end !== null && end !== start ? String(Math.round((((end > start ? end : end + 24 * 60) - start) / 60) * 100) / 100) : "";
     }
     // Overtime: hours beyond the business's working day (Settings), 8 hours by default.
     const workingDay = money(context.byKind("settings")[0]?.data.standardDailyHours) || 8;

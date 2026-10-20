@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import Script from "next/script";
 import "./globals.css";
 
@@ -14,11 +14,20 @@ export const metadata: Metadata = {
     template: "%s · MIKLEDGER",
   },
   description: "Manage customers, invoices, expenses, banking and reports in one clear workspace.",
+  applicationName: "MIK LEDGER",
+  // Added to a phone's home screen, it opens full screen like an app.
+  appleWebApp: { capable: true, title: "MIK LEDGER", statusBarStyle: "default" },
+  icons: { icon: [{ url: "/icons/icon.svg", type: "image/svg+xml" }, { url: "/icons/icon-192.png", sizes: "192x192" }], apple: "/icons/apple-touch-icon.png" },
   openGraph: {
     title: "MIKLEDGER — simple business accounting",
     description: "A clear place to manage your business finances.",
     type: "website",
   },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#1E6A96",
+  viewportFit: "cover",
 };
 
 export default function RootLayout({

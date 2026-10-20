@@ -40,6 +40,7 @@ export async function loadHrData() {
     recruitmentStages: groups.settings?.[0]?.data.recruitmentStages ?? "",
     weekend: weekendDays(groups.settings?.[0]?.data.weekendDays),
     today: businessToday(groups.settings?.[0]?.data.timeZone),
+    timeZone: groups.settings?.[0]?.data.timeZone || "Asia/Karachi",
   };
 }
 
@@ -58,7 +59,7 @@ export async function ensurePaymentAccounts(me: WorkspaceUser) {
 }
 
 /** Today's date in the business's time zone (Settings), Pakistan time by default. */
-function businessToday(timeZone: string | undefined) {
+export function businessToday(timeZone: string | undefined) {
   try {
     return new Intl.DateTimeFormat("en-CA", { timeZone: timeZone || "Asia/Karachi", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
   } catch {
