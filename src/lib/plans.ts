@@ -38,8 +38,8 @@ export const plans: Plan[] = [
     monthly: 0,
     yearly: 0,
     users: 1,
-    features: ["accounting"],
-    highlights: ["Sales, purchases and banking", "Chart of accounts and journals", "Tax returns and all accounting reports", "1 user (the owner)"],
+    features: ["accounting", "pos"],
+    highlights: ["Sales, purchases and banking", "Chart of accounts and journals", "Point of sale (POS) register", "Tax returns and all accounting reports", "1 user (the owner)"],
   },
   {
     // The key stays "starter" so subscriptions bought before the apps keep working.
@@ -50,8 +50,8 @@ export const plans: Plan[] = [
     monthly: 9,
     yearly: yearly(9),
     users: 3,
-    features: ["accounting"],
-    highlights: ["Sales, purchases and banking", "Chart of accounts, journals and budgets", "Tax returns and all accounting reports", "Up to 3 users"],
+    features: ["accounting", "pos"],
+    highlights: ["Sales, purchases and banking", "Chart of accounts, journals and budgets", "Point of sale (POS) register", "Tax returns and all accounting reports", "Up to 3 users"],
   },
   {
     key: "crm",
@@ -79,7 +79,7 @@ export const plans: Plan[] = [
     key: "pos",
     name: "POS app",
     type: "app",
-    description: "Sell over the counter in your shop.",
+    description: "A till for shops that don't need the full accounting.",
     monthly: 10,
     yearly: yearly(10),
     users: 3,
@@ -134,7 +134,9 @@ export function normalizePlans(keys: string[]): PlanKey[] {
   const chosen = [...new Set(keys)].map((key) => planByKey(key)).filter((plan): plan is Plan => Boolean(plan && plan.monthly > 0));
   if (chosen.some((plan) => plan.key === "enterprise")) return ["enterprise"];
   const bundle = chosen.find((plan) => plan.type === "bundle");
-  return chosen.filter((plan) => !bundle || plan === bundle || !plan.features.every((feature) => bundle.features.includes(feature))).map((plan) => plan.key);
+  const kept = chosen.filter((plan) => !bundle || plan === bundle || !plan.features.every((feature) => bundle.features.includes(feature)));
+  // An app whose parts another chosen plan already has (the POS app beside the Accounting app) isn't bought twice.
+  return kept.filter((plan) => plan.type === "bundle" || !plan.features.every((feature) => kept.some((other) => other !== plan && other.features.includes(feature)))).map((plan) => plan.key);
 }
 
 /** What several plans give together: every feature, and the largest number of users. */
