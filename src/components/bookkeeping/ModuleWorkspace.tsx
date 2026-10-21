@@ -625,7 +625,8 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
             ? { label: "Actions", items: [{ action: "refund", label: "Record refund" }] }
             : module.kind === "journals"
               ? { label: "Actions", items: [{ action: "open", label: "Open" }] }
-              : null;
+              // Every other list can still select records, to delete several at once.
+              : module.kind === "settings" ? null : { label: "Actions", items: [] };
   const supportsBulkActions = Boolean(bulkMenu);
   const [bulkPaymentOpen, setBulkPaymentOpen] = useState(false);
   const [bulkExpenseIds, setBulkExpenseIds] = useState<string[]>([]);

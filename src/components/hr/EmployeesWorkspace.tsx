@@ -3,10 +3,12 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { CalendarDays, Clock, FileBadge, HandCoins, LayoutGrid, List, Mail, Phone, Plus, ReceiptText, Search, Smartphone, Star, Wallet } from "lucide-react";
+import { Archive, ArchiveRestore, CalendarDays, ChevronDown, ListChecks, Trash2, Clock, FileBadge, HandCoins, LayoutGrid, List, Mail, Phone, Plus, ReceiptText, Search, Smartphone, Star, Wallet } from "lucide-react";
 import { toast } from "sonner";
 
-import { getAttachmentUploadTarget, saveBookkeepingRecord } from "@/app/actions";
+import { deleteBookkeepingRecord, getAttachmentUploadTarget, saveBookkeepingRecord } from "@/app/actions";
+import { Checkbox } from "@/components/ui/checkbox";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { inviteMember } from "@/app/team-actions";
 import { useNewRecordParam, useOpenRecordParam } from "@/hooks/use-new-record-param";
 import { Button } from "@/components/ui/button";
@@ -62,6 +64,32 @@ export default function EmployeesWorkspace({ employees, departments, accounts, r
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [inviting, setInviting] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
+
+  /** Archives (or brings back) or deletes the checked employees. Archiving keeps their payroll and history. */
+  async function bulkAction(action: "archive" | "restore" | "delete") {
+    const targets = employees.filter((employee) => selectedIds.has(employee.id));
+    if (!targets.length) return;
+    if (action === "delete" && !window.confirm(`Delete ${targets.length} ${targets.length === 1 ? "employee" : "employees"}? This can’t be undone. Archive keeps their payroll and history instead.`)) return;
+    setBulkBusy(true);
+    let done = 0;
+    const failed: string[] = [];
+    for (const employee of targets) {
+      try {
+        if (action === "delete") await deleteBookkeepingRecord("employees", employee.id);
+        else await saveBookkeepingRecord("employees", { ...employee.data, status: action === "archive" ? "Inactive" : "Active" }, employee.id);
+        done += 1;
+      } catch (error) {
+        failed.push(`${employee.data.name || "Employee"}: ${error instanceof Error ? readableError(error) : "couldn’t be changed"}`);
+      }
+    }
+    setBulkBusy(false);
+    setSelectedIds(new Set());
+    if (done) toast.success(`${done} ${done === 1 ? "employee" : "employees"} ${action === "delete" ? "deleted" : action === "archive" ? "archived" : "restored"}.`);
+    if (failed.length) toast.error(failed.join(" "));
+    router.refresh();
+  }
 
   /** Invites the open employee to sign in with the Employee role, which opens their own portal (the employee app). */
   async function inviteToApp() {
@@ -237,6 +265,16 @@ export default function EmployeesWorkspace({ employees, departments, accounts, r
             <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search…" className="pl-9" aria-label="Search employees" />
           </div>
           <Button variant={showArchived ? "secondary" : "outline"} size="sm" onClick={() => setShowArchived((value) => !value)}>{showArchived ? "Archived" : "Active"}</Button>
+          {view === "list" ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger render={<Button variant="outline" size="sm" className="gap-1.5" disabled={!selectedIds.size || bulkBusy} title={selectedIds.size ? undefined : "Select employees with the checkboxes first"}><ListChecks size={15} />{bulkBusy ? "Working…" : `Actions${selectedIds.size ? ` (${selectedIds.size})` : ""}`}<ChevronDown size={14} /></Button>} />
+              <DropdownMenuContent align="end" className="min-w-44">
+                {showArchived ? <DropdownMenuItem onClick={() => void bulkAction("restore")}><ArchiveRestore size={15} />Restore</DropdownMenuItem> : <DropdownMenuItem onClick={() => void bulkAction("archive")}><Archive size={15} />Archive</DropdownMenuItem>}
+                <DropdownMenuSeparator />
+                <DropdownMenuItem variant="destructive" onClick={() => void bulkAction("delete")}><Trash2 size={15} />Delete</DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : null}
           <div className="flex rounded-md border border-border">
             <Button variant={view === "kanban" ? "secondary" : "ghost"} size="icon-sm" aria-label="Kanban" onClick={() => setView("kanban")}><LayoutGrid size={15} /></Button>
             <Button variant={view === "list" ? "secondary" : "ghost"} size="icon-sm" aria-label="List" onClick={() => setView("list")}><List size={15} /></Button>
@@ -280,10 +318,11 @@ export default function EmployeesWorkspace({ employees, departments, accounts, r
         ) : (
           <section className="overflow-x-auto rounded-lg border border-border bg-card">
             <table className="w-full min-w-[720px] text-sm">
-              <thead><tr className="border-b border-border bg-muted/40 text-left text-xs text-muted-foreground">{["Employee name", "Work phone", "Work email", "Department", "Job position", "Manager"].map((heading) => <th key={heading} className="px-4 py-2.5 font-medium">{heading}</th>)}</tr></thead>
+              <thead><tr className="border-b border-border bg-muted/40 text-left text-xs text-muted-foreground"><th className="w-10 pl-4"><Checkbox aria-label="Select all employees" checked={visible.length > 0 && visible.every((employee) => selectedIds.has(employee.id))} onCheckedChange={(checked) => setSelectedIds((current) => { const next = new Set(current); visible.forEach((employee) => (checked ? next.add(employee.id) : next.delete(employee.id))); return next; })} /></th>{["Employee name", "Work phone", "Work email", "Department", "Job position", "Manager"].map((heading) => <th key={heading} className="px-4 py-2.5 font-medium">{heading}</th>)}</tr></thead>
               <tbody>
                 {visible.map((employee) => (
-                  <tr key={employee.id} className="cursor-pointer border-b border-border/70 hover:bg-muted/40" onClick={() => open(employee)}>
+                  <tr key={employee.id} className={`cursor-pointer border-b border-border/70 hover:bg-muted/40 ${selectedIds.has(employee.id) ? "bg-primary/5" : ""}`} onClick={(event) => { if (!(event.target as HTMLElement).closest("[role=checkbox]")) open(employee); }}>
+                    <td className="w-10 pl-4" onClick={(event) => event.stopPropagation()}><Checkbox aria-label={`Select ${employee.data.name || "employee"}`} checked={selectedIds.has(employee.id)} onCheckedChange={(checked) => setSelectedIds((current) => { const next = new Set(current); if (checked) next.add(employee.id); else next.delete(employee.id); return next; })} /></td>
                     <td className="px-4 py-2.5 font-medium">{employee.data.name}</td>
                     <td className="px-4 py-2.5">{employee.data.workPhone || employee.data.mobile || "—"}</td>
                     <td className="px-4 py-2.5">{employee.data.email || "—"}</td>

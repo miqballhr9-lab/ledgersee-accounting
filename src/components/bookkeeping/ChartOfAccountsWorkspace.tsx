@@ -4,10 +4,12 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { BookOpenText, LockKeyhole, MoreHorizontal, Pencil, Plus, Search, Trash2, WalletCards } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { toast } from "sonner";
 import { readableError } from "@/lib/action-error";
 
 import { deleteBookkeepingRecord } from "@/app/actions";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -114,6 +116,40 @@ export default function ChartOfAccountsWorkspace({ accounts: initialAccounts, cu
     setAccounts((current) => [...added, ...current]);
   }
 
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+  const toggleSelected = (id: string, checked: boolean) => setSelectedIds((current) => {
+    const next = new Set(current);
+    if (checked) next.add(id); else next.delete(id);
+    return next;
+  });
+
+  /** Deletes the checked accounts; locked ones and accounts in use are kept, with the reason shown. */
+  async function deleteSelected() {
+    const targets = accounts.filter((account) => selectedIds.has(account.id));
+    if (!targets.length || !window.confirm(`Delete ${targets.length} ${targets.length === 1 ? "account" : "accounts"}? Accounts that are locked or used in transactions are kept.`)) return;
+    setBulkDeleting(true);
+    const done: string[] = [];
+    const failed: string[] = [];
+    for (const account of targets) {
+      if (account.data.locked === "true") {
+        failed.push(`${account.data.name}: locked`);
+        continue;
+      }
+      try {
+        await deleteBookkeepingRecord("accounts", account.id);
+        done.push(account.id);
+      } catch (error) {
+        failed.push(`${account.data.name || "Account"}: ${error instanceof Error ? readableError(error) : "couldn’t be deleted"}`);
+      }
+    }
+    setAccounts((current) => current.filter((account) => !done.includes(account.id)));
+    setSelectedIds(new Set());
+    setBulkDeleting(false);
+    if (done.length) toast.success(`${done.length} ${done.length === 1 ? "account" : "accounts"} deleted.`);
+    if (failed.length) toast.error(`Not deleted: ${failed.join("; ")}`);
+  }
+
   async function confirmDelete() {
     if (!deletingAccount) return;
     setDeleting(true);
@@ -184,6 +220,7 @@ export default function ChartOfAccountsWorkspace({ accounts: initialAccounts, cu
                 {accounts.some((account) => !account.data.type) ? <SelectItem value="Unclassified">Unclassified</SelectItem> : null}
               </SelectContent>
             </Select>
+            <Button type="button" variant="outline" className="gap-2" disabled={!selectedIds.size || bulkDeleting} title={selectedIds.size ? undefined : "Select accounts with the checkboxes first"} onClick={() => void deleteSelected()}><Trash2 size={15} />{bulkDeleting ? "Deleting…" : `Delete${selectedIds.size ? ` (${selectedIds.size})` : ""}`}</Button>
           </div>
         </div>
 
@@ -191,7 +228,8 @@ export default function ChartOfAccountsWorkspace({ accounts: initialAccounts, cu
           <Table>
             <TableHeader>
               <TableRow className="bg-muted/35 hover:bg-muted/35">
-                <TableHead className="w-32 px-5 text-xs font-medium text-muted-foreground">Account no.</TableHead>
+                <TableHead className="w-10 pl-5"><Checkbox aria-label="Select all accounts" checked={sortedAccounts.length > 0 && sortedAccounts.every((account) => selectedIds.has(account.id))} onCheckedChange={(checked) => setSelectedIds((current) => { const next = new Set(current); sortedAccounts.forEach((account) => (checked ? next.add(account.id) : next.delete(account.id))); return next; })} /></TableHead>
+                <TableHead className="w-32 px-3 text-xs font-medium text-muted-foreground">Account no.</TableHead>
                 <TableHead className="min-w-52 text-xs font-medium text-muted-foreground">Name</TableHead>
                 <TableHead className="min-w-48 text-xs font-medium text-muted-foreground">Type / detail type</TableHead>
                 <TableHead className="text-right text-xs font-medium text-muted-foreground">Opening balance</TableHead>
@@ -202,8 +240,9 @@ export default function ChartOfAccountsWorkspace({ accounts: initialAccounts, cu
             </TableHeader>
             <TableBody>
               {sortedAccounts.map((account) => (
-                <TableRow key={account.id} className="group cursor-pointer" onClick={(event) => { if (!(event.target as HTMLElement).closest("button, a, [role=menu]")) openEditAccount(account); }}>
-                  <TableCell className="px-5 font-mono text-xs tabular-nums text-muted-foreground">{account.data.code || "—"}</TableCell>
+                <TableRow key={account.id} data-state={selectedIds.has(account.id) ? "selected" : undefined} className="group cursor-pointer" onClick={(event) => { if (!(event.target as HTMLElement).closest("button, a, [role=menu], [role=checkbox]")) openEditAccount(account); }}>
+                  <TableCell className="w-10 pl-5" onClick={(event) => event.stopPropagation()}><Checkbox aria-label={`Select ${account.data.name || "account"}`} checked={selectedIds.has(account.id)} onCheckedChange={(checked) => toggleSelected(account.id, checked === true)} /></TableCell>
+                  <TableCell className="px-3 font-mono text-xs tabular-nums text-muted-foreground">{account.data.code || "—"}</TableCell>
                   <TableCell>
                     <button type="button" className="max-w-full text-left" onClick={() => openEditAccount(account)}>
                       <span className="block max-w-[320px] truncate text-sm font-medium text-primary">{account.data.name || "Untitled account"}</span>

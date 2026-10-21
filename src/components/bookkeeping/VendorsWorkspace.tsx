@@ -11,6 +11,7 @@ import RecordDetailPanel from "@/components/bookkeeping/RecordDetailPanel";
 import { StatusBadge } from "@/components/crm/crm-shared";
 import { useNewRecordParam, useOpenRecordParam } from "@/hooks/use-new-record-param";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -134,6 +135,35 @@ export default function VendorsWorkspace({ records: initialRecords, bills, accou
     router.refresh();
   }
 
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
+  const toggleSelected = (id: string, checked: boolean) => setSelectedIds((current) => {
+    const next = new Set(current);
+    if (checked) next.add(id); else next.delete(id);
+    return next;
+  });
+
+  /** Deletes every checked supplier; their bills stay in the books. */
+  async function deleteSelected() {
+    const targets = records.filter((record) => selectedIds.has(record.id));
+    if (!targets.length || !window.confirm(`Delete ${targets.length} ${targets.length === 1 ? "supplier" : "suppliers"}? Existing bills will remain in your records.`)) return;
+    setPendingDelete("bulk");
+    setActionMessage("");
+    const failed: string[] = [];
+    const done: string[] = [];
+    for (const vendor of targets) {
+      try {
+        await deleteBookkeepingRecord("vendors", vendor.id);
+        done.push(vendor.id);
+      } catch (error) {
+        failed.push(`${vendor.data.displayName || vendor.data.name || "Supplier"}: ${error instanceof Error ? readableError(error) : "couldn’t be deleted"}`);
+      }
+    }
+    setRecords((current) => current.filter((record) => !done.includes(record.id)));
+    setSelectedIds(new Set());
+    setPendingDelete(null);
+    setActionMessage([done.length ? `${done.length} ${done.length === 1 ? "supplier" : "suppliers"} deleted. Existing bills were kept.` : "", ...failed].filter(Boolean).join(" "));
+  }
+
   async function handleDelete(vendor: BookkeepingRecord) {
     const displayName = vendor.data.displayName || vendor.data.company || vendor.data.name || "this supplier";
     if (!window.confirm(`Delete ${displayName}? Existing bills will remain in your records.`)) return;
@@ -222,6 +252,7 @@ export default function VendorsWorkspace({ records: initialRecords, bills, accou
                 <SelectItem value="clear">No open balance</SelectItem>
               </SelectContent>
             </Select>
+            <Button type="button" variant="outline" className="gap-2" disabled={!selectedIds.size || pendingDelete === "bulk"} title={selectedIds.size ? undefined : "Select suppliers with the checkboxes first"} onClick={() => void deleteSelected()}><Trash2 size={15} />{pendingDelete === "bulk" ? "Deleting…" : `Delete${selectedIds.size ? ` (${selectedIds.size})` : ""}`}</Button>
           </div>
         </div>
 
@@ -229,6 +260,7 @@ export default function VendorsWorkspace({ records: initialRecords, bills, accou
           <Table>
             <TableHeader>
               <TableRow className="bg-muted/40 hover:bg-muted/40">
+                <TableHead className="w-10 pl-4"><Checkbox aria-label="Select all suppliers" checked={visibleVendors.length > 0 && visibleVendors.every(({ vendor }) => selectedIds.has(vendor.id))} onCheckedChange={(checked) => setSelectedIds((current) => { const next = new Set(current); visibleVendors.forEach(({ vendor }) => (checked ? next.add(vendor.id) : next.delete(vendor.id))); return next; })} /></TableHead>
                 {["Supplier", "Email", "Phone", "Open bills", "Balance", ""].map((heading) => (
                   <TableHead key={heading || "actions"} className="whitespace-nowrap text-xs font-medium text-muted-foreground">{heading}</TableHead>
                 ))}
@@ -236,7 +268,8 @@ export default function VendorsWorkspace({ records: initialRecords, bills, accou
             </TableHeader>
             <TableBody>
               {visibleVendors.map(({ vendor, openBills, currentBalance }) => (
-                <TableRow key={vendor.id} className="group cursor-pointer" onClick={(event) => { if (!(event.target as HTMLElement).closest("button, a, [role=menu]")) setDetailId(vendor.id); }}>
+                <TableRow key={vendor.id} data-state={selectedIds.has(vendor.id) ? "selected" : undefined} className="group cursor-pointer" onClick={(event) => { if (!(event.target as HTMLElement).closest("button, a, [role=menu], [role=checkbox]")) setDetailId(vendor.id); }}>
+                  <TableCell className="w-10 pl-4" onClick={(event) => event.stopPropagation()}><Checkbox aria-label={`Select ${vendor.data.displayName || vendor.data.name || "supplier"}`} checked={selectedIds.has(vendor.id)} onCheckedChange={(checked) => toggleSelected(vendor.id, checked === true)} /></TableCell>
                   <TableCell className="max-w-[280px]">
                     <Button type="button" variant="link" className="block h-auto max-w-full justify-start p-0 text-left" onClick={() => setDetailId(vendor.id)}>
                       <span className="block truncate text-[13px] font-medium text-primary" title={vendor.data.displayName || vendor.data.company || vendor.data.name || ""}>{vendor.data.displayName || vendor.data.company || vendor.data.name || "Unnamed supplier"}</span>
@@ -261,7 +294,7 @@ export default function VendorsWorkspace({ records: initialRecords, bills, accou
               ))}
               {!visibleVendors.length ? (
                 <TableRow>
-                  <TableCell colSpan={6} className="h-52 whitespace-normal text-center">
+                  <TableCell colSpan={7} className="h-52 whitespace-normal text-center">
                     <div className="sticky left-0 w-[calc(100vw-4.5rem)] sm:static sm:mx-auto sm:w-auto sm:max-w-sm">
                       <p className="text-sm font-medium">{records.length ? "No suppliers match this search" : "No suppliers yet"}</p>
                       <p className="mt-1 text-sm text-muted-foreground">{records.length ? "Try another search or balance filter." : "Add a supplier to keep contact details and bills connected."}</p>
