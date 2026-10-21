@@ -34,6 +34,10 @@ const documentDetails = {
 
 export default function InvoiceDocument({ invoice, companyName, documentKind = "invoices", seller, customer }: InvoiceDocumentProps) {
   const pack = packFor(seller?.taxCountry);
+  // The address customers see: the customer-facing one when it is filled in, else the company address
+  // (saved whole, or in parts by Settings).
+  const companyAddress = seller?.address?.trim() || [seller?.addressStreet, [seller?.addressCity, seller?.addressState, seller?.addressPostal].map((part) => part?.trim()).filter(Boolean).join(", "), seller?.addressCountry].map((part) => part?.trim()).filter(Boolean).join("\n");
+  const sellerAddress = (seller?.customerAddressSame === "false" && seller?.customerAddress?.trim()) || companyAddress;
   // Where to pay, from Settings > Bank details; invoices only, and not on a paid sales receipt.
   const bankRows: Array<[string, string]> = documentKind === "invoices" && invoice.docType !== "Sales receipt" ? ([
     ["A/C title", seller?.bankAccountTitle],
@@ -45,15 +49,20 @@ export default function InvoiceDocument({ invoice, companyName, documentKind = "
   ] as Array<[string, string | undefined]>).map(([label, value]) => [label, value?.trim() ?? ""] as [string, string]).filter(([, value]) => value) : [];
   // The customer's details from their record, at the end of the document.
   const clientName = customer?.name?.trim() || invoice.customer || "";
-  const clientRows: Array<[string, string]> = customer ? ([
+  // Left: who and where. Right: number, phone, email, website, tax ID, in that order.
+  const keep = (rows: Array<[string, string]>) => rows.filter(([, value]) => value);
+  const customerLeft: Array<[string, string]> = customer ? keep([
     ["Customer", [clientName, customer.company?.trim() && customer.company.trim() !== clientName ? customer.company.trim() : ""].filter(Boolean).join(" · ")],
-    ["Customer no.", customer.customerNumber?.trim() ?? ""],
     ["Address", [...new Set(formatCustomerAddress(customer).split("\n").map((line) => line.trim()).filter(Boolean))].join("\n")],
-    ["Email", customer.email?.trim() ?? ""],
+  ]) : [];
+  const customerRight: Array<[string, string]> = customer ? keep([
+    ["Customer no.", customer.customerNumber?.trim() ?? ""],
     ["Phone", [...new Set([customer.phone, customer.mobile].map((value) => value?.trim()).filter(Boolean))].join(" · ")],
+    ["Email", customer.email?.trim() ?? ""],
     ["Website", customer.website?.trim() ?? ""],
     ["Tax ID", customer.taxId?.trim() ?? ""],
-  ] as Array<[string, string]>).filter(([, value]) => value) : [];
+  ]) : [];
+  const clientRows = [...customerLeft, ...customerRight];
   const registrations = (pack?.registrations ?? []).filter((field) => seller?.[field.key]).map((field) => `${field.label}: ${seller?.[field.key]}`);
   // VAT and GST countries call a taxed invoice a "tax invoice".
   const isTaxInvoice = documentKind === "invoices" && Boolean(pack) && pack?.code !== "US" && Number(invoice.taxAmount) > 0;
@@ -84,8 +93,10 @@ export default function InvoiceDocument({ invoice, companyName, documentKind = "
           {seller?.logo ? <img src={seller.logo} alt="" className="h-14 w-auto max-w-[200px] object-contain" /> : null}
           <p className={`${seller?.logo ? "mt-3" : ""} text-lg font-semibold`}>{companyName || "Business"}</p>
           <div className="mt-1 space-y-0.5 text-sm text-muted-foreground">
-            {(seller?.customerAddressSame === "false" ? seller?.customerAddress : seller?.address) ? <p className="whitespace-pre-line leading-5">{seller?.customerAddressSame === "false" ? seller?.customerAddress : seller?.address}</p> : null}
-            {[seller?.customerEmail || seller?.companyEmail, seller?.phone, seller?.website].filter(Boolean).length ? <p>{[seller?.customerEmail || seller?.companyEmail, seller?.phone, seller?.website].filter(Boolean).join(" · ")}</p> : null}
+            {sellerAddress ? <p className="whitespace-pre-line leading-5">{sellerAddress}</p> : null}
+            {seller?.phone?.trim() ? <p>{seller.phone.trim()}</p> : null}
+            {(seller?.customerEmail || seller?.companyEmail)?.trim() ? <p>{(seller?.customerEmail || seller?.companyEmail)?.trim()}</p> : null}
+            {seller?.website?.trim() ? <p>{seller.website.trim()}</p> : null}
             {registrations.length ? <p>{registrations.join(" · ")}</p> : null}
           </div>
         </div>
@@ -196,11 +207,15 @@ export default function InvoiceDocument({ invoice, companyName, documentKind = "
       {clientRows.length ? (
         <section className="mt-8 border-t border-border pt-5" aria-label="Customer details">
           <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Customer details</h2>
-          <dl className="mt-3 grid gap-x-8 gap-y-3 text-sm sm:grid-cols-2 print:grid-cols-2">
-            {clientRows.map(([label, value]) => (
-              <div key={label} className="min-w-0"><dt className="text-xs text-muted-foreground">{label}</dt><dd className="mt-0.5 whitespace-pre-line break-words">{value}</dd></div>
+          <div className="mt-3 grid gap-x-8 gap-y-3 text-sm sm:grid-cols-2 print:grid-cols-2">
+            {[customerLeft, customerRight].map((column, index) => (
+              <dl key={index} className="min-w-0 space-y-3">
+                {column.map(([label, value]) => (
+                  <div key={label} className="min-w-0"><dt className="text-xs text-muted-foreground">{label}</dt><dd className="mt-0.5 whitespace-pre-line break-words">{value}</dd></div>
+                ))}
+              </dl>
             ))}
-          </dl>
+          </div>
         </section>
       ) : null}
       {bankRows.length ? (
