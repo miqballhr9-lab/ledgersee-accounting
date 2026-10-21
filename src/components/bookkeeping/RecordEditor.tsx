@@ -3,7 +3,7 @@
 import { Fragment, useEffect, useRef, useState, type FormEvent } from "react";
 import { toast } from "sonner";
 import Link from "next/link";
-import { AlertTriangle, ChevronDown, Copy, LoaderCircle, Repeat, Mail, MessageCircle, MessageSquareText, Plus, Printer, Share2, Trash2, UploadCloud, X } from "lucide-react";
+import { AlertTriangle, ChevronDown, Copy, LoaderCircle, Repeat, Mail, MessageCircle, MessageSquareText, Paperclip, Plus, Printer, Share2, Trash2, UploadCloud, X } from "lucide-react";
 import { readableError } from "@/lib/action-error";
 
 import {
@@ -162,6 +162,8 @@ function getInitialValues(module: ModuleDefinition, record: BookkeepingRecord | 
       record?.data[field.key] ?? defaults[field.key] ?? (field.type === "checkbox" ? "false" : ""),
     ])),
     customerId: record?.data.customerId ?? "",
+    // An attached file keeps its name, so the form shows which file it is.
+    ...Object.fromEntries(module.fields.filter((field) => field.type === "file" && record?.data[`${field.key}Name`]).map((field) => [`${field.key}Name`, record?.data[`${field.key}Name`] ?? ""])),
   };
   if (module.kind === "employees") values.currency = record?.data.currency || defaults.currency || "";
   if (module.kind === "vendors") {
@@ -891,17 +893,31 @@ export default function RecordEditor({ module, record, customers, vendors, items
 
         {field.type === "file" ? (
           <div className="rounded-lg border border-dashed border-border bg-muted/30 p-3">
+            {value && uploading !== field.key ? (
+              // An attached file: open it, swap it for another, or take it off.
+              <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-card px-3 py-2">
+                <a href={value} target="_blank" rel="noreferrer" className="flex min-w-0 items-center gap-2 text-sm font-medium text-primary underline-offset-4 hover:underline">
+                  <Paperclip size={14} className="shrink-0" />
+                  <span className="truncate">{values[`${field.key}Name`] || "Attached file"}</span>
+                </a>
+                <span className="flex shrink-0 gap-1.5">
+                  <Button type="button" variant="outline" size="sm" onClick={() => document.getElementById(`field-${field.key}`)?.click()}>Replace</Button>
+                  <Button type="button" variant="ghost" size="sm" className="text-destructive hover:text-destructive" onClick={() => setValues((current) => ({ ...current, [field.key]: "", [`${field.key}Name`]: "" }))}><Trash2 size={14} />Remove</Button>
+                </span>
+              </div>
+            ) : null}
             <Input
+              key={value || "empty"}
               id={`field-${field.key}`}
               type="file"
               accept={field.key === "logo" ? "image/png,image/jpeg,image/webp,image/gif" : "application/pdf,image/png,image/jpeg,image/webp,text/csv"}
               onChange={(event) => void uploadFile(field.key, event.target.files?.[0])}
               disabled={uploading === field.key}
-              className="h-10 cursor-pointer bg-card file:mr-3 file:rounded-md file:border-0 file:bg-secondary file:px-2.5 file:py-1 file:text-xs file:font-medium file:text-secondary-foreground"
+              className={`h-10 cursor-pointer bg-card file:mr-3 file:rounded-md file:border-0 file:bg-secondary file:px-2.5 file:py-1 file:text-xs file:font-medium file:text-secondary-foreground ${value && uploading !== field.key ? "sr-only" : ""}`}
             />
             <p className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground">
               {uploading === field.key ? <LoaderCircle size={13} className="animate-spin" /> : <UploadCloud size={13} />}
-              <span className="truncate">{values[`${field.key}Name`] ?? (value ? "A file is attached" : field.help ?? "Choose a file to attach")}</span>
+              <span className="truncate">{uploading === field.key ? "Uploading…" : value ? "Replace it with another file, or remove it." : field.help ?? "Choose a file to attach"}</span>
             </p>
           </div>
         ) : null}
