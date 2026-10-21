@@ -83,8 +83,10 @@ export default function InvoiceDocument({ invoice, companyName, documentKind = "
   return (
     <article className="mx-auto w-full max-w-4xl border border-border bg-card p-6 text-card-foreground shadow-sm sm:p-10 print:max-w-none print:border-0 print:p-0 print:shadow-none">
       <header className="grid gap-6 border-b border-border pb-7 sm:grid-cols-[minmax(0,1fr)_auto] print:grid-cols-[minmax(0,1fr)_auto]">
-        {/* The customer on the left: who the document is for, and how to reach them. */}
+        {/* The business's logo, then the customer: who the document is for, and how to reach them. */}
         <div className="min-w-0">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          {seller?.logo ? <img src={seller.logo} alt={companyName} className="mb-4 h-14 w-auto max-w-[200px] object-contain" /> : null}
           <p className="text-xs font-semibold uppercase tracking-[0.1em] text-muted-foreground">{documentKind === "credit-notes" ? "Credit to" : "Bill to"}</p>
           <p className="mt-1 text-lg font-semibold">{clientName || "Customer"}</p>
           <div className="mt-1 space-y-0.5 text-sm text-muted-foreground">
@@ -192,8 +194,6 @@ export default function InvoiceDocument({ invoice, companyName, documentKind = "
       {/* The business and its bank details side by side in small type, at the foot of the document. */}
       <div className="mt-6 grid gap-x-8 gap-y-4 border-t border-border pt-4 text-xs leading-5 sm:grid-cols-2 print:grid-cols-2">
         <section aria-label="From" className="min-w-0">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          {seller?.logo ? <img src={seller.logo} alt="" className="mb-1.5 h-9 w-auto max-w-[140px] object-contain" /> : null}
           <p className="text-sm font-semibold">{companyName || "Business"}</p>
           <div className="text-muted-foreground">
             {sellerAddress ? <p className="whitespace-pre-line">{sellerAddress}</p> : null}
