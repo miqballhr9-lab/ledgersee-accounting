@@ -565,6 +565,11 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
     if (module.kind === "journals" || module.kind === "settings") openEditRecord(record);
     else setDetailId(id);
   });
+  // `?edit=<id>` (e.g. Edit item from Inventory) opens the record's form straight away.
+  useOpenRecordParam((id) => {
+    const record = records.find((item) => item.id === id);
+    if (record) openEditRecord(record);
+  }, "edit");
 
   function openEditRecord(record: BookkeepingRecord) {
     setEditingRecord(record);

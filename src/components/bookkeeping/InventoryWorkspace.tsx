@@ -4,10 +4,11 @@ import { useMemo, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { AlertTriangle, ArrowDownToLine, ArrowUpFromLine, Boxes, ClipboardCheck, History, MoreHorizontal, Package, PackageX, Search } from "lucide-react";
+import { AlertTriangle, ArrowDownToLine, ArrowUpFromLine, Boxes, ChevronDown, ClipboardCheck, FileSpreadsheet, History, ListChecks, MoreHorizontal, Package, PackageX, Pencil, Search, Trash2 } from "lucide-react";
 import { readableError } from "@/lib/action-error";
 
-import { createInventoryMovement } from "@/app/actions";
+import { createInventoryMovement, deleteBookkeepingRecord } from "@/app/actions";
+import { Checkbox } from "@/components/ui/checkbox";
 import InventoryBulkCount from "@/components/bookkeeping/InventoryBulkCount";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
 import { Badge } from "@/components/ui/badge";
@@ -85,6 +86,43 @@ export default function InventoryWorkspace({ products: productRecords, stock: st
   const [serials, setSerials] = useState("");
   const [formError, setFormError] = useState("");
   const [isSaving, setIsSaving] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
+  const selectedProducts = products.filter((product) => selectedIds.has(product.id));
+
+  /** The checked products' stock, as a spreadsheet. */
+  function exportSelected() {
+    const cell = (value: string | number) => `"${String(value).replace(/"/g, '""')}"`;
+    const rows: (string | number)[][] = [["Product", "SKU", "Unit", "Qty on hand", "Reorder point", "Avg cost", "Asset value"]];
+    for (const product of selectedProducts) {
+      const summary = stockById[product.id] ?? { onHand: 0, value: 0, averageCost: Number(product.data.cost || 0) || 0 };
+      rows.push([product.data.name || "", product.data.sku || "", product.data.unit || "", summary.onHand, Number(product.data.reorderPoint || 0) || 0, summary.averageCost.toFixed(2), summary.value.toFixed(2)]);
+    }
+    const url = URL.createObjectURL(new Blob([`\uFEFF${rows.map((row) => row.map(cell).join(",")).join("\r\n")}`], { type: "text/csv;charset=utf-8" }));
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `inventory-${new Date().toISOString().slice(0, 10)}.csv`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  }
+
+  /** Deletes the checked items; ones used on documents are kept, with the reason shown. */
+  async function deleteSelected() {
+    if (!selectedProducts.length || !window.confirm(`Delete ${selectedProducts.length} ${selectedProducts.length === 1 ? "item" : "items"}? Items used on invoices, bills or stock movements can't be deleted.`)) return;
+    let done = 0;
+    const failed: string[] = [];
+    for (const product of selectedProducts) {
+      try {
+        await deleteBookkeepingRecord("items", product.id);
+        done += 1;
+      } catch (error) {
+        failed.push(`${product.data.name || "Item"}: ${error instanceof Error ? readableError(error) : "couldn’t be deleted"}`);
+      }
+    }
+    setSelectedIds(new Set());
+    if (done) toast.success(`${done} ${done === 1 ? "item" : "items"} deleted.`);
+    if (failed.length) toast.error(failed.join(" "));
+    router.refresh();
+  }
 
   const stockDetails = useMemo(() => products.map((product) => {
     const summary = stockById[product.id] ?? { onHand: 0, value: 0, averageCost: Number(product.data.cost || 0) || 0 };
@@ -195,6 +233,15 @@ export default function InventoryWorkspace({ products: productRecords, stock: st
               {([["all", "All"], ["low", "Low stock"], ["out", "Out of stock"]] as const).map(([value, label]) => (
                 <Button key={value} type="button" variant={stockFilter === value ? "secondary" : "outline"} aria-pressed={stockFilter === value} onClick={() => setStockFilter(value)}>{label}</Button>
               ))}
+              <DropdownMenu>
+                <DropdownMenuTrigger render={<Button type="button" variant="outline" className="gap-1.5" disabled={!selectedProducts.length} title={selectedProducts.length ? undefined : "Select products with the checkboxes first"}><ListChecks size={15} />Actions{selectedProducts.length ? ` (${selectedProducts.length})` : ""}<ChevronDown size={14} /></Button>} />
+                <DropdownMenuContent align="end" className="min-w-48">
+                  {selectedProducts.length === 1 ? <DropdownMenuItem onClick={() => router.push(`/app/items?edit=${encodeURIComponent(selectedProducts[0].id)}`)}><Pencil size={14} />Edit item</DropdownMenuItem> : null}
+                  <DropdownMenuItem onClick={exportSelected}><FileSpreadsheet size={14} />Export to Excel (CSV)</DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem variant="destructive" onClick={() => void deleteSelected()}><Trash2 size={14} />Delete</DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
           ) : null}
         </div>
@@ -204,13 +251,15 @@ export default function InventoryWorkspace({ products: productRecords, stock: st
             <div className="overflow-x-auto">
               <Table>
                 <TableHeader><TableRow>
+                  <TableHead className="w-10"><Checkbox aria-label="Select all products" checked={visibleProducts.length > 0 && visibleProducts.every(({ product }) => selectedIds.has(product.id))} onCheckedChange={(checked) => setSelectedIds((current) => { const next = new Set(current); visibleProducts.forEach(({ product }) => (checked ? next.add(product.id) : next.delete(product.id))); return next; })} /></TableHead>
                   <TableHead>Product</TableHead><TableHead>SKU</TableHead><TableHead className="text-right">Qty on hand</TableHead><TableHead className="text-right">Reorder point</TableHead><TableHead className="text-right">Avg cost</TableHead><TableHead className="text-right">Asset value</TableHead><TableHead>Status</TableHead><TableHead><span className="sr-only">Actions</span></TableHead>
                 </TableRow></TableHeader>
                 <TableBody>
                   {visibleProducts.length ? visibleProducts.map((row) => {
                     const { product, stock, reorderPoint, value, averageCost } = row;
                     return (
-                      <TableRow key={product.id}>
+                      <TableRow key={product.id} data-state={selectedIds.has(product.id) ? "selected" : undefined}>
+                        <TableCell className="w-10"><Checkbox aria-label={`Select ${product.data.name || "product"}`} checked={selectedIds.has(product.id)} onCheckedChange={(checked) => setSelectedIds((current) => { const next = new Set(current); if (checked) next.add(product.id); else next.delete(product.id); return next; })} /></TableCell>
                         <TableCell className="min-w-48 font-medium"><Link href={`/app/items?open=${product.id}`} className="text-primary hover:underline">{product.data.name || "Unnamed product"}</Link><div className="mt-1 text-xs font-normal text-muted-foreground">{product.data.unit || "Unit not set"}</div>{warehouses.length > 1 && byWarehouse[product.id] ? <div className="mt-1 text-xs font-normal text-muted-foreground">{Object.entries(byWarehouse[product.id]).filter(([, qty]) => qty).map(([place, qty]) => `${place}: ${formatQuantity(qty)}`).join(" · ") || "Nothing in any warehouse"}</div> : null}</TableCell>
                         <TableCell className="text-muted-foreground">{product.data.sku || "—"}</TableCell>
                         <TableCell className="text-right font-medium tabular-nums">{formatQuantity(stock, product.data.unit)}</TableCell>
@@ -222,6 +271,8 @@ export default function InventoryWorkspace({ products: productRecords, stock: st
                           <DropdownMenu>
                             <DropdownMenuTrigger render={<Button type="button" variant="ghost" size="icon-sm" aria-label={`Actions for ${product.data.name || "item"}`}><MoreHorizontal size={15} /></Button>} />
                             <DropdownMenuContent align="end" className="min-w-48">
+                              <DropdownMenuItem onClick={() => router.push(`/app/items?edit=${encodeURIComponent(product.id)}`)}><Pencil size={14} />Edit item</DropdownMenuItem>
+                              <DropdownMenuSeparator />
                               <DropdownMenuItem onClick={() => openMovement("Adjustment", product.id)}><ClipboardCheck size={14} />Adjust quantity</DropdownMenuItem>
                               <DropdownMenuItem onClick={() => openMovement("Receipt", product.id)}><ArrowDownToLine size={14} />Receive stock</DropdownMenuItem>
                               <DropdownMenuItem onClick={() => openMovement("Delivery", product.id)}><ArrowUpFromLine size={14} />Record delivery</DropdownMenuItem>
@@ -233,7 +284,7 @@ export default function InventoryWorkspace({ products: productRecords, stock: st
                         </TableCell>
                       </TableRow>
                     );
-                  }) : <TableRow><TableCell colSpan={8} className="py-10 text-center text-sm text-muted-foreground">No products match this view.</TableCell></TableRow>}
+                  }) : <TableRow><TableCell colSpan={9} className="py-10 text-center text-sm text-muted-foreground">No products match this view.</TableCell></TableRow>}
                 </TableBody>
               </Table>
             </div>

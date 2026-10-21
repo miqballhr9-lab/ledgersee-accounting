@@ -28,18 +28,18 @@ export function useNewRecordParam(openNew: () => void) {
  * each transaction to the invoice, bill or journal it came from), then
  * removes the parameter.
  */
-export function useOpenRecordParam(open: (id: string) => void) {
+export function useOpenRecordParam(open: (id: string) => void, param = "open") {
   const router = useRouter();
   const pathname = usePathname();
   const onOpen = useEffectEvent(open);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    const id = params.get("open");
+    const id = params.get(param);
     if (!id) return;
-    params.delete("open");
+    params.delete(param);
     const query = params.toString();
     router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
     onOpen(id);
-  }, [pathname, router]);
+  }, [pathname, router, param]);
 }
