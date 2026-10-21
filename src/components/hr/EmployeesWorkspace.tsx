@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { Archive, ArchiveRestore, CalendarDays, ChevronDown, ListChecks, Trash2, Clock, FileBadge, HandCoins, LayoutGrid, List, Mail, Phone, Plus, ReceiptText, Search, Smartphone, Star, Wallet } from "lucide-react";
 import { toast } from "sonner";
 
-import { deleteBookkeepingRecord, getAttachmentUploadTarget, saveBookkeepingRecord } from "@/app/actions";
+import { deleteBookkeepingRecord, saveBookkeepingRecord } from "@/app/actions";
 import { Checkbox } from "@/components/ui/checkbox";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { inviteMember } from "@/app/team-actions";
@@ -21,6 +21,7 @@ import { readableError } from "@/lib/action-error";
 import { moduleBySlug, type FormField } from "@/lib/bookkeeping-config";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
 import { paymentAccountLabel, paymentAccountType } from "@/lib/payment-accounts";
+import { uploadFile } from "@/lib/upload-file";
 
 interface EmployeesWorkspaceProps {
   employees: BookkeepingRecord[];
@@ -124,10 +125,8 @@ export default function EmployeesWorkspace({ employees, departments, accounts, r
     }
     setUploading(true);
     try {
-      const target = await getAttachmentUploadTarget(file.name, file.type, file.size);
-      const response = await fetch(target.uploadUrl, { method: "PUT", headers: { "Content-Type": file.type }, body: file });
-      if (!response.ok) throw new Error("The upload didn’t finish. Please try again.");
-      setValues((current) => ({ ...current, photo: target.publicUrl }));
+      const uploadedUrl = await uploadFile(file);
+            setValues((current) => ({ ...current, photo: uploadedUrl }));
     } catch (error) {
       toast.error(error instanceof Error ? readableError(error) : "The photo couldn’t be uploaded.");
     } finally {

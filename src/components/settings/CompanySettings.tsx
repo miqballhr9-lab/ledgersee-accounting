@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { LoaderCircle, Pencil, UploadCloud } from "lucide-react";
 import { toast } from "sonner";
 
-import { getAttachmentUploadTarget, saveBookkeepingRecord } from "@/app/actions";
+import { saveBookkeepingRecord } from "@/app/actions";
 import { CurrencyPicker } from "@/components/bookkeeping/CurrencyPicker";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -19,6 +19,7 @@ import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
 import { packFor } from "@/lib/tax-packs";
 import { customFieldKinds, customFieldSettingKey, moduleBySlug } from "@/lib/bookkeeping-config";
 import { defaultRecruitmentStages } from "@/lib/hr-config";
+import { uploadFile } from "@/lib/upload-file";
 
 interface CompanySettingsProps {
   settings: BookkeepingRecord | null;
@@ -125,10 +126,8 @@ export default function CompanySettings({ settings, workspaceName }: CompanySett
     setUploading(true);
     setError("");
     try {
-      const target = await getAttachmentUploadTarget(file.name, file.type, file.size);
-      const response = await fetch(target.uploadUrl, { method: "PUT", headers: { "Content-Type": file.type }, body: file });
-      if (!response.ok) throw new Error("The upload didn’t finish. Please try again.");
-      setDraft((current) => ({ ...current, logo: target.publicUrl, logoName: file.name }));
+      const uploadedUrl = await uploadFile(file);
+            setDraft((current) => ({ ...current, logo: uploadedUrl, logoName: file.name }));
     } catch (uploadError) {
       setError(uploadError instanceof Error ? readableError(uploadError) : "The upload didn’t finish. Please try again.");
     } finally {

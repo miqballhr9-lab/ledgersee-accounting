@@ -9,7 +9,6 @@ import { readableError } from "@/lib/action-error";
 import {
   createCustomerDocumentShareLink,
   createInvoiceShareLink,
-  getAttachmentUploadTarget,
   listBookkeepingRecords,
   recordExpensePayment,
   saveBookkeepingRecord,
@@ -38,6 +37,7 @@ import { creditFromInvoice, currencyAmount, dueDateForTerms, invoiceSubtotal, in
 import { accountCategoryForType } from "@/lib/account-types";
 import { paymentAccountLabel, paymentAccountType, receivingAccountType } from "@/lib/payment-accounts";
 import { customerPriceBook, priceBookPrice } from "@/lib/price-books";
+import { uploadFile as uploadToStorage } from "@/lib/upload-file";
 
 interface RecordEditorProps {
   module: ModuleDefinition;
@@ -416,14 +416,8 @@ export default function RecordEditor({ module, record, customers, vendors, items
     setError("");
     setUploading(key);
     try {
-      const target = await getAttachmentUploadTarget(file.name, file.type, file.size);
-      const response = await fetch(target.uploadUrl, {
-        method: "PUT",
-        headers: { "Content-Type": file.type },
-        body: file,
-      });
-      if (!response.ok) throw new Error("The upload didn’t finish. Please try again.");
-      setValues((current) => ({ ...current, [key]: target.publicUrl, [`${key}Name`]: file.name }));
+      const uploadedUrl = await uploadToStorage(file);
+            setValues((current) => ({ ...current, [key]: uploadedUrl, [`${key}Name`]: file.name }));
     } catch (uploadError) {
       setError(uploadError instanceof Error ? readableError(uploadError) : "The upload didn’t finish. Please try again.");
     } finally {

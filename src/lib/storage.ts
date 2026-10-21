@@ -31,6 +31,10 @@
  *   // then save target.publicUrl on the user's row
  */
 import "server-only";
+import { randomUUID } from "node:crypto";
+
+import { generateClientTokenFromReadWriteToken } from "@vercel/blob/client";
+
 import { ActionError } from "@/lib/action-error";
 
 export type UploadTarget = {
@@ -111,4 +115,27 @@ export async function createUploadUrl(input: {
     key: data.key,
     expiresIn: data.expires_in,
   };
+}
+
+/** Whether a Vercel Blob store is connected (Vercel adds BLOB_READ_WRITE_TOKEN when it is). */
+export function blobConfigured() {
+  return Boolean(process.env.BLOB_READ_WRITE_TOKEN?.trim());
+}
+
+/**
+ * A short-lived token that lets the browser upload one file to the Blob store,
+ * under the business's own folder, with the same types and size limit as above.
+ */
+export async function blobUploadToken(ownerId: string, filename: string, contentType: string) {
+  if (contentType && !(ALLOWED_UPLOAD_TYPES as readonly string[]).includes(contentType)) throw new ActionError("That file type isn't supported.");
+  const safeName = (filename.split(/[\\/]/).pop() ?? "file").replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "").slice(-80) || "file";
+  const pathname = `${ownerId}/${randomUUID()}-${safeName}`;
+  const clientToken = await generateClientTokenFromReadWriteToken({
+    pathname,
+    allowedContentTypes: [...ALLOWED_UPLOAD_TYPES],
+    maximumSizeInBytes: 10 * 1024 * 1024,
+    validUntil: Date.now() + 10 * 60 * 1000,
+    addRandomSuffix: false,
+  });
+  return { pathname, clientToken };
 }

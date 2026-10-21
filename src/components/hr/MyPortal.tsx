@@ -6,7 +6,6 @@ import { toast } from "sonner";
 import { Award, Cake, CalendarDays, Clock, FileText, HandCoins, LogIn, LogOut, PartyPopper, ReceiptText, Wallet } from "lucide-react";
 import { BusinessClock, InstallAppButton, currentLocation, useAutoRefresh } from "@/components/hr/employee-app";
 
-import { getAttachmentUploadTarget } from "@/app/actions";
 import { selfCheck, selfRequest, type MyPortal as Portal } from "@/app/hr-actions";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -16,6 +15,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { errorText, formatMoney, StatusBadge } from "@/components/crm/crm-shared";
+import { uploadFile } from "@/lib/upload-file";
 
 type RequestKind = "hr-leaves" | "hr-loans" | "hr-claims";
 
@@ -65,10 +65,8 @@ export default function MyPortal({ portal, name, email, currency, canRequest }: 
     if (!file) return;
     setBusy("upload");
     try {
-      const target = await getAttachmentUploadTarget(file.name, file.type, file.size);
-      const response = await fetch(target.uploadUrl, { method: "PUT", headers: { "Content-Type": file.type }, body: file });
-      if (!response.ok) throw new Error("The upload didn’t finish. Please try again.");
-      setForm((current) => ({ ...current, receipt: target.publicUrl, receiptName: file.name }));
+      const uploadedUrl = await uploadFile(file);
+            setForm((current) => ({ ...current, receipt: uploadedUrl, receiptName: file.name }));
     } catch (error) {
       toast.error(errorText(error));
     } finally {

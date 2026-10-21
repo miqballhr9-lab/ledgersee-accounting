@@ -4,7 +4,6 @@ import { useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
-import { getAttachmentUploadTarget } from "@/app/actions";
 import { saveCrmRecord } from "@/app/crm-actions";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -18,6 +17,7 @@ import { paymentAccountLabel, paymentAccountType } from "@/lib/payment-accounts"
 import { customerPriceBook, priceBookPrice, readPriceBookEntries, type PriceBookEntry } from "@/lib/price-books";
 import { relatedKind, relatedTypes, stageProbability, type CrmField, type CrmModule, type RelatedType } from "@/lib/crm-config";
 import { errorText, formatMoney, recordTitle, today, type CrmContextValue } from "@/components/crm/crm-shared";
+import { uploadFile } from "@/lib/upload-file";
 
 interface CrmRecordEditorProps {
   module: CrmModule;
@@ -113,10 +113,8 @@ export default function CrmRecordEditor({ module, record, preset, open, onOpenCh
     if (!file) return;
     setUploading(key);
     try {
-      const target = await getAttachmentUploadTarget(file.name, file.type, file.size);
-      const response = await fetch(target.uploadUrl, { method: "PUT", headers: { "Content-Type": file.type }, body: file });
-      if (!response.ok) throw new Error("The upload didn’t finish. Please try again.");
-      set({ [key]: target.publicUrl, [`${key}Name`]: file.name });
+      const uploadedUrl = await uploadFile(file);
+            set({ [key]: uploadedUrl, [`${key}Name`]: file.name });
     } catch (error) {
       toast.error(errorText(error));
     } finally {

@@ -10,6 +10,8 @@
  * from a server action, a server component, or `@/lib/auth`.
  */
 import "server-only";
+import nodemailer from "nodemailer";
+
 import { ActionError } from "@/lib/action-error";
 
 type SendEmail = {
@@ -56,6 +58,8 @@ export async function sendEmail({
   replyTo,
   fromName,
 }: SendEmail): Promise<boolean> {
+  const smtp = smtpSettings();
+  if (smtp) return sendBySmtp(smtp, { to, subject, html, replyTo, fromName });
   const base = process.env.IMAGINE_SERVICES_URL;
   const token = process.env.IMAGINE_APP_TOKEN;
   if (!base || !token) {
@@ -104,4 +108,47 @@ export async function sendEmail({
     }
   }
   return false;
+}
+
+interface SmtpSettings {
+  host: string;
+  port: number;
+  user: string;
+  pass: string;
+  from: string;
+}
+
+/**
+ * Your own mailbox as the sender, when it is set up: a Gmail address with an
+ * app password (GMAIL_USER, GMAIL_APP_PASSWORD), or any SMTP server (SMTP_HOST,
+ * SMTP_PORT, SMTP_USER, SMTP_PASS, optional SMTP_FROM). Without either, mail goes
+ * through the platform as before.
+ */
+export function smtpSettings(): SmtpSettings | null {
+  const gmailUser = process.env.GMAIL_USER?.trim();
+  const gmailPass = process.env.GMAIL_APP_PASSWORD?.replace(/\s+/g, "");
+  if (gmailUser && gmailPass) return { host: "smtp.gmail.com", port: 465, user: gmailUser, pass: gmailPass, from: gmailUser };
+  const host = process.env.SMTP_HOST?.trim();
+  const user = process.env.SMTP_USER?.trim();
+  const pass = process.env.SMTP_PASS;
+  if (host && user && pass) return { host, port: Number(process.env.SMTP_PORT) || 465, user, pass, from: process.env.SMTP_FROM?.trim() || user };
+  return null;
+}
+
+/** Whether any way of sending email is set up. */
+export function emailConfigured() {
+  return Boolean(smtpSettings() || (process.env.IMAGINE_SERVICES_URL && process.env.IMAGINE_APP_TOKEN));
+}
+
+async function sendBySmtp(settings: SmtpSettings, { to, subject, html, replyTo, fromName }: SendEmail): Promise<boolean> {
+  const transport = nodemailer.createTransport({ host: settings.host, port: settings.port, secure: settings.port === 465, auth: { user: settings.user, pass: settings.pass }, connectionTimeout: 15_000, greetingTimeout: 10_000, socketTimeout: 20_000 });
+  const name = (fromName ?? process.env.NEXT_PUBLIC_APP_NAME ?? "MIK LEDGER").replace(/["<>]/g, "").trim() || "MIK LEDGER";
+  try {
+    await transport.sendMail({ from: `"${name}" <${settings.from}>`, to, subject, html, replyTo, text: html.replace(/<style[\s\S]*?<\/style>/gi, "").replace(/<br\s*\/?>/gi, "\n").replace(/<\/(p|div|h[1-6]|li|tr)>/gi, "\n").replace(/<[^>]+>/g, "").replace(/&nbsp;/g, " ").replace(/\n{3,}/g, "\n\n").trim() });
+    return true;
+  } catch (error) {
+    // Never log the message or the password; the code says enough (EAUTH is a wrong app password).
+    console.error("[email] smtp send failed (%s)", (error as { code?: string })?.code ?? "unknown");
+    return false;
+  }
 }

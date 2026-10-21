@@ -13,7 +13,7 @@ import { assertCanRead, assertCanWrite, requireUser } from "@/lib/auth";
 import { canReadKind } from "@/lib/permissions";
 import { syncAttachmentRepayments } from "@/lib/hr-rules";
 import { sendEmailOrThrow } from "@/lib/email";
-import { createUploadUrl } from "@/lib/storage";
+import { blobConfigured, blobUploadToken, createUploadUrl } from "@/lib/storage";
 import { dueDateForTerms, invoiceTax, parseInvoiceLines, serialList } from "@/lib/invoice-utils";
 import { defaultWarehouse, lotRegister, stockByWarehouse } from "@/lib/warehouses";
 import { buildInventory, inventoryKinds, isInventoryItem } from "@/lib/inventory";
@@ -2914,12 +2914,14 @@ export async function getAttachmentUploadTarget(
   filename: string,
   contentType: string,
   size: number,
-): Promise<{ uploadUrl: string; publicUrl: string }> {
+): Promise<{ provider: "blob"; pathname: string; clientToken: string } | { provider: "platform"; uploadUrl: string; publicUrl: string }> {
   const me = await requireUser();
   if (me.role === "Viewer") throw new ActionError("Your role doesn’t allow changing records. Ask an Admin in your business.");
   if (size > 10 * 1024 * 1024) throw new ActionError("Attachments must be 10 MB or smaller.");
+  // A connected Vercel Blob store takes the file; the browser gets a one-hour token for this one path.
+  if (blobConfigured()) return { provider: "blob", ...(await blobUploadToken(me.ownerId, filename, contentType)) };
   const target = await createUploadUrl({ filename, contentType, size });
-  return { uploadUrl: target.uploadUrl, publicUrl: target.publicUrl };
+  return { provider: "platform", uploadUrl: target.uploadUrl, publicUrl: target.publicUrl };
 }
 export async function saveBulkInventoryCount(input: {
   rows: InventoryCountRow[];

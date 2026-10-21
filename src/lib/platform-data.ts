@@ -4,7 +4,9 @@ import { desc, eq, inArray, sql } from "drizzle-orm";
 
 import { db } from "@/db";
 import { bookkeepingRecord, session, user } from "@/db/schema";
+import { emailConfigured, smtpSettings } from "@/lib/email";
 import { planByKey, planKeysOf } from "@/lib/plans";
+import { blobConfigured } from "@/lib/storage";
 import { ANNOUNCEMENT_KIND, BUSINESS_FLAGS_KIND, FEEDBACK_KIND } from "@/lib/platform";
 
 /** Kinds that aren't a business's own work, left out of its record counts. */
@@ -143,8 +145,8 @@ export function systemStatus(): StatusCheck[] {
     { name: "Database", ok: true, detail: "Connected (this page read from it)." },
     { name: "Sign-in secret", ok: has("BETTER_AUTH_SECRET"), detail: has("BETTER_AUTH_SECRET") ? "Set." : "BETTER_AUTH_SECRET is missing: sign-in won't work." },
     { name: "Site address", ok: Boolean(site), detail: site || "Set BETTER_AUTH_URL to your live address." },
-    { name: "Email", ok: has("IMAGINE_SERVICES_URL", "IMAGINE_APP_TOKEN"), detail: has("IMAGINE_SERVICES_URL", "IMAGINE_APP_TOKEN") ? "Set. Use “Send test email” to be sure." : "Not set: password resets, invites and invoice emails won't send." },
-    { name: "File uploads", ok: has("IMAGINE_SERVICES_URL", "IMAGINE_APP_TOKEN"), detail: has("IMAGINE_SERVICES_URL", "IMAGINE_APP_TOKEN") ? "Set." : "Not set: attachments can't be uploaded." },
+    { name: "Email", ok: emailConfigured(), detail: smtpSettings() ? `Sends from ${smtpSettings()!.from}. Use “Send test email” to be sure.` : emailConfigured() ? "Set (platform). Use “Send test email” to be sure." : "Not set: password resets, invites and invoice emails won't send. Add GMAIL_USER and GMAIL_APP_PASSWORD in Vercel." },
+    { name: "File uploads", ok: blobConfigured() || has("IMAGINE_SERVICES_URL", "IMAGINE_APP_TOKEN"), detail: blobConfigured() ? "Vercel Blob is connected." : has("IMAGINE_SERVICES_URL", "IMAGINE_APP_TOKEN") ? "Set (platform)." : "Not set: attachments can't be uploaded. Connect a Vercel Blob store (Storage → Blob)." },
     { name: "Payments (Stripe)", ok: has("STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET"), detail: has("STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET") ? "On: businesses choose and pay for plans." : has("STRIPE_SECRET_KEY") ? "Secret key set, but STRIPE_WEBHOOK_SECRET is missing: paid plans won't update." : "Off: everything is free for every business (beta)." },
     { name: "Scheduled jobs (cron)", ok: has("CRON_SECRET"), detail: has("CRON_SECRET") ? "Set: reminders and recurring invoices run daily." : "CRON_SECRET is missing: daily automation won't run on its own." },
     { name: "AI assistant", ok: has("IMAGINE_AI_URL", "IMAGINE_AI_KEY"), detail: has("IMAGINE_AI_URL", "IMAGINE_AI_KEY") ? "On: free questions are answered." : "Off: suggested questions work; free questions don't." },
