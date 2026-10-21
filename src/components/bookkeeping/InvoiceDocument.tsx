@@ -34,14 +34,14 @@ const documentDetails = {
 
 export default function InvoiceDocument({ invoice, companyName, documentKind = "invoices", seller, customer }: InvoiceDocumentProps) {
   const pack = packFor(seller?.taxCountry);
-  // The client's details from their customer record, at the end of the document.
+  // The customer's details from their record, at the end of the document.
   const clientName = customer?.name?.trim() || invoice.customer || "";
   const clientRows: Array<[string, string]> = customer ? ([
-    ["Client", [clientName, customer.company?.trim() && customer.company.trim() !== clientName ? customer.company.trim() : ""].filter(Boolean).join(" · ")],
+    ["Customer", [clientName, customer.company?.trim() && customer.company.trim() !== clientName ? customer.company.trim() : ""].filter(Boolean).join(" · ")],
     ["Customer no.", customer.customerNumber?.trim() ?? ""],
-    ["Address", formatCustomerAddress(customer)],
+    ["Address", [...new Set(formatCustomerAddress(customer).split("\n").map((line) => line.trim()).filter(Boolean))].join("\n")],
     ["Email", customer.email?.trim() ?? ""],
-    ["Phone", [customer.phone, customer.mobile].map((value) => value?.trim()).filter(Boolean).join(" · ")],
+    ["Phone", [...new Set([customer.phone, customer.mobile].map((value) => value?.trim()).filter(Boolean))].join(" · ")],
     ["Website", customer.website?.trim() ?? ""],
     ["Tax ID", customer.taxId?.trim() ?? ""],
   ] as Array<[string, string]>).filter(([, value]) => value) : [];
@@ -185,8 +185,8 @@ export default function InvoiceDocument({ invoice, companyName, documentKind = "
 
       {documentKind === "invoices" && seller?.invoiceMessage && !invoice.notes ? <section className="mt-8 border-t border-border pt-5"><p className="whitespace-pre-wrap text-sm">{seller.invoiceMessage}</p></section> : null}
       {clientRows.length ? (
-        <section className="mt-8 border-t border-border pt-5" aria-label="Client details">
-          <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Client details</h2>
+        <section className="mt-8 border-t border-border pt-5" aria-label="Customer details">
+          <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Customer details</h2>
           <dl className="mt-3 grid gap-x-8 gap-y-3 text-sm sm:grid-cols-2 print:grid-cols-2">
             {clientRows.map(([label, value]) => (
               <div key={label} className="min-w-0"><dt className="text-xs text-muted-foreground">{label}</dt><dd className="mt-0.5 whitespace-pre-line break-words">{value}</dd></div>
