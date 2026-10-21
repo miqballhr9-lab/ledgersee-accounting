@@ -5,6 +5,8 @@ import AppFrame from "@/components/bookkeeping/AppFrame";
 import { runDueAutomations } from "@/app/automation-actions";
 import { getWorkspaceUser } from "@/lib/auth";
 import { daysUntil } from "@/lib/plans";
+import AnnouncementBar from "@/components/bookkeeping/AnnouncementBar";
+import { activeAnnouncement, isPlatformAdmin } from "@/lib/platform";
 
 export default async function BookkeepingLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   const user = await getWorkspaceUser();
@@ -13,6 +15,7 @@ export default async function BookkeepingLayout({ children }: Readonly<{ childre
   await runDueAutomations().catch(() => undefined);
 
   const { access } = user;
+  const announcement = await activeAnnouncement();
   const daysLeft = daysUntil(access.trialEndsAt);
   // A strip above every page while on trial, behind on payment, or read-only after the plan ran out.
   const billingNotice = !access.enabled ? null
@@ -23,14 +26,23 @@ export default async function BookkeepingLayout({ children }: Readonly<{ childre
     : null;
 
   return (
-    <AppFrame userName={user.name} userEmail={user.email} role={user.role} workspaceName={user.workspaceName} isOwner={user.isOwner} features={access.locked ? undefined : access.features}>
+    <AppFrame userName={user.name} userEmail={user.email} role={user.role} workspaceName={user.workspaceName} isOwner={user.isOwner} features={access.locked ? undefined : access.features} platformAdmin={isPlatformAdmin(user.email)}>
+      {announcement ? <AnnouncementBar id={announcement.id} message={announcement.message} tone={announcement.tone} /> : null}
+      {access.suspended ? (
+        <div className="mx-auto max-w-lg px-4 py-20 text-center" role="alert">
+          <h1 className="text-xl font-semibold">This business is paused</h1>
+          <p className="mt-2 text-sm text-muted-foreground">MIK LEDGER has paused {user.workspaceName}. Your records are safe, but nothing can be changed for now.</p>
+          {access.suspendedNote ? <p className="mt-3 rounded-md border border-border bg-muted/40 px-3 py-2 text-sm">{access.suspendedNote}</p> : null}
+          <p className="mt-3 text-sm text-muted-foreground">Use &quot;Send feedback&quot; at the top to reach us.</p>
+        </div>
+      ) : null}
       {billingNotice ? (
         <div className={`flex flex-wrap items-center justify-between gap-2 border-b px-4 py-2 text-sm sm:px-7 ${billingNotice.tone}`} role="status">
           <span>{billingNotice.text}</span>
           <Link href="/app/billing" className="font-medium underline underline-offset-4">{user.isOwner ? "Choose a plan" : "See billing"}</Link>
         </div>
       ) : null}
-      {children}
+      {access.suspended ? null : children}
     </AppFrame>
   );
 }

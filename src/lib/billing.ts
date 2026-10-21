@@ -7,6 +7,7 @@ import { cache } from "react";
 import { db } from "@/db";
 import { bookkeepingRecord } from "@/db/schema";
 import { ActionError } from "@/lib/action-error";
+import { businessFlagsFor } from "@/lib/platform";
 import { combinePlans, planByKey, planKeysOf, TRIAL_MONTHS, type Feature, type PlanKey } from "@/lib/plans";
 
 /**
@@ -39,6 +40,9 @@ export interface BillingAccess {
   interval: string;
   features: Feature[];
   users: number;
+  /** Paused by the platform owner (Super Admin): nothing can be changed. */
+  suspended: boolean;
+  suspendedNote: string;
 }
 
 const allFeatures: Feature[] = ["accounting", "inventory", "crm", "hr", "pos"];
@@ -65,9 +69,20 @@ export async function saveSubscription(ownerId: string, patch: Record<string, st
   return saved;
 }
 
-/** What a workspace may do under its plan right now. Read once per request. */
+/** What a workspace may do under its plan right now, and whether the platform owner paused it. Read once per request. */
 export const billingAccess = cache(async function billingAccess(ownerId: string, ownerEmail: string): Promise<BillingAccess> {
-  const open: BillingAccess = { enabled: false, locked: false, plan: "enterprise", plans: ["enterprise"], planName: "Enterprise bundle", status: "free", trialEndsAt: "", currentPeriodEnd: "", cancelAtPeriodEnd: false, interval: "", features: allFeatures, users: Number.POSITIVE_INFINITY };
+  const flags = await businessFlagsFor(ownerId);
+  const access = flags.freeAccess ? openAccess() : await planAccess(ownerId, ownerEmail);
+  return { ...access, suspended: flags.suspended, suspendedNote: flags.suspendedNote };
+});
+
+/** Everything, free: billing is off, or the business is on the free list. */
+function openAccess(): BillingAccess {
+  return { enabled: false, locked: false, plan: "enterprise", plans: ["enterprise"], planName: "Enterprise bundle", status: "free", trialEndsAt: "", currentPeriodEnd: "", cancelAtPeriodEnd: false, interval: "", features: allFeatures, users: Number.POSITIVE_INFINITY, suspended: false, suspendedNote: "" };
+}
+
+async function planAccess(ownerId: string, ownerEmail: string): Promise<BillingAccess> {
+  const open = openAccess();
   if (!billingEnabled() || exempt(ownerEmail)) return open;
   const data = (await subscriptionFor(ownerId)).data;
   const now = Date.now();
@@ -90,7 +105,7 @@ export const billingAccess = cache(async function billingAccess(ownerId: string,
     default:
       return before(data.currentPeriodEnd) ? { ...paidUp, status: "canceled" } : { ...onFree, status: data.status === "canceled" ? "canceled" : "trial_ended" };
   }
-});
+}
 
 /** The Stripe subscription line for each plan bought, by plan key. Older records kept one line in stripeItemId. */
 export function stripeItemsOf(data: Record<string, string>): Record<string, string> {

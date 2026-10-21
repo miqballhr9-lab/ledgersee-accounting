@@ -82,6 +82,7 @@ import {
 import BrandWordmark from "@/components/brand/BrandWordmark";
 import AssistantPanel from "@/components/bookkeeping/AssistantPanel";
 import CommandMenu from "@/components/bookkeeping/CommandMenu";
+import FeedbackDialog from "@/components/bookkeeping/FeedbackDialog";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -110,6 +111,8 @@ interface AppFrameProps {
   isOwner: boolean;
   /** The apps the business has; the menu shows only these. All when not given. */
   features?: Feature[];
+  /** The MIK LEDGER owner, who also sees the Super Admin panel. */
+  platformAdmin?: boolean;
   children: React.ReactNode;
 }
 
@@ -234,7 +237,7 @@ function initials(name: string) {
   return name.trim().split(/\s+/).slice(0, 2).map((part) => part[0]?.toUpperCase() ?? "").join("") || "LL";
 }
 
-export default function AppFrame({ userName, userEmail, role, workspaceName, isOwner, features, children }: AppFrameProps) {
+export default function AppFrame({ userName, userEmail, role, workspaceName, isOwner, features, platformAdmin = false, children }: AppFrameProps) {
   const pathname = usePathname();
   const router = useRouter();
   const allowed = (href: string) => {
@@ -385,6 +388,7 @@ export default function AppFrame({ userName, userEmail, role, workspaceName, isO
           </div>
           <div className="flex items-center gap-2 sm:gap-3">
             <CommandMenu icons={icons} canOpen={allowed} />
+            <FeedbackDialog />
             {role !== "Employee" ? (
               <Button variant={assistantOpen ? "secondary" : "outline"} size="icon" aria-label="Open the assistant" aria-pressed={assistantOpen} title="Ask the assistant" className="shrink-0 text-primary" onClick={() => setAssistantOpen((open) => !open)}>
                 <Sparkles size={17} strokeWidth={1.8} />
@@ -420,6 +424,12 @@ export default function AppFrame({ userName, userEmail, role, workspaceName, isO
                       <p className="truncate text-xs text-muted-foreground">{userEmail}</p>
                     </div>
                     <div className="space-y-1">
+                      {platformAdmin ? (
+                        <DropdownMenuItem render={<Link href="/admin" />} className="min-h-10 gap-3 px-2.5 text-[13px]">
+                          <ShieldCheck size={16} strokeWidth={1.7} className="text-primary" />
+                          <span>Super Admin</span>
+                        </DropdownMenuItem>
+                      ) : null}
                       <DropdownMenuItem render={<Link href="/app/profile" />} className="min-h-10 gap-3 px-2.5 text-[13px]">
                         <UserRound size={16} strokeWidth={1.7} className="text-primary" />
                         <span>Profile & privacy</span>
