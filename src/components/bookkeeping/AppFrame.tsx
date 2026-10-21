@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
@@ -65,6 +65,7 @@ import {
   Repeat2,
   Settings,
   Settings2,
+  Sparkles,
   ShieldCheck,
   ShoppingBag,
   ShoppingCart,
@@ -79,6 +80,7 @@ import {
 } from "lucide-react";
 
 import BrandWordmark from "@/components/brand/BrandWordmark";
+import AssistantPanel from "@/components/bookkeeping/AssistantPanel";
 import CommandMenu from "@/components/bookkeeping/CommandMenu";
 import { Button } from "@/components/ui/button";
 import {
@@ -258,6 +260,8 @@ export default function AppFrame({ userName, userEmail, role, workspaceName, isO
     if (blocked && pathname === "/app") router.replace(homeFor(role));
   }, [blocked, pathname, role, router]);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [assistantOpen, setAssistantOpen] = useState(false);
+  const closeAssistant = useCallback(() => setAssistantOpen(false), []);
   const [isSigningOut, setIsSigningOut] = useState(false);
   const [openGroup, setOpenGroup] = useState<string | null>(() => groupForPath(pathname) ?? "Overview");
   // Follow navigation from outside the sidebar (gear menu, quick search, links in pages).
@@ -381,6 +385,11 @@ export default function AppFrame({ userName, userEmail, role, workspaceName, isO
           </div>
           <div className="flex items-center gap-2 sm:gap-3">
             <CommandMenu icons={icons} canOpen={allowed} />
+            {role !== "Employee" ? (
+              <Button variant={assistantOpen ? "secondary" : "outline"} size="icon" aria-label="Open the assistant" aria-pressed={assistantOpen} title="Ask the assistant" className="shrink-0 text-primary" onClick={() => setAssistantOpen((open) => !open)}>
+                <Sparkles size={17} strokeWidth={1.8} />
+              </Button>
+            ) : null}
             <span className="hidden rounded-full border border-border bg-background px-3 py-1.5 text-[11px] font-medium text-muted-foreground xl:inline-flex">Business account</span>
             <DropdownMenu>
               <DropdownMenuTrigger render={<Button variant="outline" size="icon" aria-label="Open settings and tools" title="Settings and tools" className="shrink-0" />}>
@@ -438,6 +447,7 @@ export default function AppFrame({ userName, userEmail, role, workspaceName, isO
           ) : children}
         </main>
       </div>
+      {assistantOpen ? <AssistantPanel onClose={closeAssistant} /> : null}
     </div>
   );
 }
