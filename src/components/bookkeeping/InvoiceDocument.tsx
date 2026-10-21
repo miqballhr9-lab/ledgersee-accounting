@@ -49,20 +49,15 @@ export default function InvoiceDocument({ invoice, companyName, documentKind = "
   ] as Array<[string, string | undefined]>).map(([label, value]) => [label, value?.trim() ?? ""] as [string, string]).filter(([, value]) => value) : [];
   // The customer's details from their record, at the end of the document.
   const clientName = customer?.name?.trim() || invoice.customer || "";
-  // Left: who and where. Right: number, phone, email, website, tax ID, in that order.
-  const keep = (rows: Array<[string, string]>) => rows.filter(([, value]) => value);
-  const customerLeft: Array<[string, string]> = customer ? keep([
+  const clientRows: Array<[string, string]> = customer ? ([
     ["Customer", [clientName, customer.company?.trim() && customer.company.trim() !== clientName ? customer.company.trim() : ""].filter(Boolean).join(" · ")],
-    ["Address", [...new Set(formatCustomerAddress(customer).split("\n").map((line) => line.trim()).filter(Boolean))].join("\n")],
-  ]) : [];
-  const customerRight: Array<[string, string]> = customer ? keep([
     ["Customer no.", customer.customerNumber?.trim() ?? ""],
+    ["Address", [...new Set(formatCustomerAddress(customer).split("\n").map((line) => line.trim()).filter(Boolean))].join("\n")],
     ["Phone", [...new Set([customer.phone, customer.mobile].map((value) => value?.trim()).filter(Boolean))].join(" · ")],
     ["Email", customer.email?.trim() ?? ""],
     ["Website", customer.website?.trim() ?? ""],
     ["Tax ID", customer.taxId?.trim() ?? ""],
-  ]) : [];
-  const clientRows = [...customerLeft, ...customerRight];
+  ] as Array<[string, string]>).filter(([, value]) => value) : [];
   const registrations = (pack?.registrations ?? []).filter((field) => seller?.[field.key]).map((field) => `${field.label}: ${seller?.[field.key]}`);
   // VAT and GST countries call a taxed invoice a "tax invoice".
   const isTaxInvoice = documentKind === "invoices" && Boolean(pack) && pack?.code !== "US" && Number(invoice.taxAmount) > 0;
@@ -204,30 +199,31 @@ export default function InvoiceDocument({ invoice, companyName, documentKind = "
       </section>
 
       {documentKind === "invoices" && seller?.invoiceMessage && !invoice.notes ? <section className="mt-8 border-t border-border pt-5"><p className="whitespace-pre-wrap text-sm">{seller.invoiceMessage}</p></section> : null}
-      {clientRows.length ? (
-        <section className="mt-8 border-t border-border pt-5" aria-label="Customer details">
-          <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Customer details</h2>
-          <div className="mt-3 grid gap-x-8 gap-y-3 text-sm sm:grid-cols-2 print:grid-cols-2">
-            {[customerLeft, customerRight].map((column, index) => (
-              <dl key={index} className="min-w-0 space-y-3">
-                {column.map(([label, value]) => (
-                  <div key={label} className="min-w-0"><dt className="text-xs text-muted-foreground">{label}</dt><dd className="mt-0.5 whitespace-pre-line break-words">{value}</dd></div>
+      {clientRows.length || bankRows.length ? (
+        // Customer and bank details side by side in small type, so the invoice stays short.
+        <div className="mt-6 grid gap-x-8 gap-y-4 border-t border-border pt-4 text-xs leading-5 sm:grid-cols-2 print:grid-cols-2">
+          {clientRows.length ? (
+            <section aria-label="Customer details" className="min-w-0">
+              <h2 className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Customer details</h2>
+              <dl>
+                {clientRows.map(([label, value]) => (
+                  <div key={label} className="flex gap-1.5"><dt className="shrink-0 text-muted-foreground">{label}:</dt><dd className="min-w-0 whitespace-pre-line break-words">{label === "Address" ? value.replace(/\n/g, ", ") : value}</dd></div>
                 ))}
               </dl>
-            ))}
-          </div>
-        </section>
-      ) : null}
-      {bankRows.length ? (
-        <section className="mt-8 border-t border-border pt-5" aria-label="Bank details">
-          <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Bank details</h2>
-          {seller?.bankNote?.trim() ? <p className="mt-2 text-sm">{seller.bankNote.trim()}</p> : null}
-          <dl className="mt-3 grid gap-x-8 gap-y-3 text-sm sm:grid-cols-2 print:grid-cols-2">
-            {bankRows.map(([label, value]) => (
-              <div key={label} className="min-w-0"><dt className="text-xs text-muted-foreground">{label}</dt><dd className="mt-0.5 break-words font-medium tabular-nums">{value}</dd></div>
-            ))}
-          </dl>
-        </section>
+            </section>
+          ) : null}
+          {bankRows.length ? (
+            <section aria-label="Bank details" className="min-w-0">
+              <h2 className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Bank details</h2>
+              {seller?.bankNote?.trim() ? <p className="mb-0.5">{seller.bankNote.trim()}</p> : null}
+              <dl>
+                {bankRows.map(([label, value]) => (
+                  <div key={label} className="flex gap-1.5"><dt className="shrink-0 text-muted-foreground">{label}:</dt><dd className="min-w-0 break-words font-medium tabular-nums">{value}</dd></div>
+                ))}
+              </dl>
+            </section>
+          ) : null}
+        </div>
       ) : null}
       {invoice.notes || invoice.reason ? <section className="mt-8 border-t border-border pt-5"><h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{invoice.reason ? "Reason" : "Message"}</h2><p className="mt-2 whitespace-pre-wrap text-sm">{invoice.reason || invoice.notes}</p></section> : null}
     </article>
