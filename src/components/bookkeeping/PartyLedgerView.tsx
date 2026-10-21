@@ -107,8 +107,8 @@ export default function PartyLedgerView({ party, partyId, name, details, company
                 const page = sourcePages[row.sourceKind];
                 return (
                   <tr key={`${row.sourceId}-${index}`} className="border-b border-border">
-                    <td className="py-2 pr-3 tabular-nums">{row.date}</td>
-                    <td className="py-2 pr-3">{page ? <Link href={`/app/${page}?open=${encodeURIComponent(row.sourceId)}`} className="text-primary hover:underline print:text-foreground">{row.type}</Link> : row.type}</td>
+                    <td className="whitespace-nowrap py-2 pr-3 tabular-nums">{row.date}</td>
+                    <td className="whitespace-nowrap py-2 pr-3">{page ? <Link href={`/app/${page}?open=${encodeURIComponent(row.sourceId)}`} className="text-primary hover:underline print:text-foreground">{row.type}</Link> : row.type}</td>
                     <td className="py-2 pr-3">{row.number}</td>
                     <td className="max-w-56 truncate py-2 pr-3 text-muted-foreground">{row.memo}</td>
                     <td className="py-2 pr-3 text-right tabular-nums">{row.debit ? money(row.debit) : ""}</td>
@@ -139,7 +139,7 @@ export default function PartyLedgerView({ party, partyId, name, details, company
               <tbody>
                 {others.map((doc) => (
                   <tr key={doc.id} className="border-b border-border">
-                    <td className="py-2 pr-3 tabular-nums">{doc.date}</td>
+                    <td className="whitespace-nowrap py-2 pr-3 tabular-nums">{doc.date}</td>
                     <td className="py-2 pr-3"><Link href={`/app/${doc.kind}?open=${encodeURIComponent(doc.id)}`} className="text-primary hover:underline print:text-foreground">{doc.type}</Link></td>
                     <td className="py-2 pr-3">{doc.number}</td>
                     <td className="py-2 pr-3">{doc.status}</td>

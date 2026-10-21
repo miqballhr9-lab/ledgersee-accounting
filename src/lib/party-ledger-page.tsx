@@ -3,6 +3,7 @@ import "server-only";
 import { notFound } from "next/navigation";
 
 import { listAllBookkeepingRecords } from "@/app/actions";
+import AllPartiesLedgerView from "@/components/bookkeeping/AllPartiesLedgerView";
 import PartyLedgerView from "@/components/bookkeeping/PartyLedgerView";
 import { requireUser } from "@/lib/auth";
 import { buildLedger } from "@/lib/ledger";
@@ -55,6 +56,40 @@ export async function PartyLedgerPage({ party, id, from, to }: { party: "custome
       ledger={ledger}
       others={others}
       backHref={`/app/${kind}?open=${encodeURIComponent(id)}`}
+    />
+  );
+}
+
+/** Every customer's (or supplier's) ledger in one report: a summary, then each one's transactions. */
+export async function AllPartiesLedgerPage({ party, from, to, show }: { party: "customer" | "supplier"; from?: string; to?: string; show?: string }) {
+  await requireFeature("accounting");
+  const me = await requireUser();
+  const kind = party === "customer" ? "customers" : "vendors";
+  await assignMissingPartyNumbers(me.id, kind);
+  const records = await listAllBookkeepingRecords();
+  const settings = records.find((row) => row.kind === "settings")?.data ?? {};
+  const today = new Date().toISOString().slice(0, 10);
+  const isDate = (value: string | undefined) => /^\d{4}-\d{2}-\d{2}$/.test(value ?? "");
+  const end = isDate(to) ? to! : today;
+  const start = isDate(from) ? from! : "";
+  const ledger = buildLedger(records, "accrual");
+  const numberKey = party === "customer" ? "customerNumber" : "supplierNumber";
+  const parties = records
+    .filter((row) => row.kind === kind)
+    .map((row) => {
+      const names = [row.data.name, row.data.displayName, row.data.company].filter((value): value is string => Boolean(value?.trim()));
+      return { id: row.id, number: row.data[numberKey] ?? "", name: row.data.displayName || row.data.name || row.data.company || "—", ledger: partyLedger(ledger, party, names, start, end) };
+    })
+    .sort((a, b) => a.number.localeCompare(b.number, undefined, { numeric: true }) || a.name.localeCompare(b.name));
+  return (
+    <AllPartiesLedgerView
+      party={party}
+      company={settings.companyName || me.workspaceName}
+      currency={settings.currency || "USD"}
+      from={start}
+      to={end}
+      onlyWithActivity={show !== "all"}
+      parties={parties}
     />
   );
 }

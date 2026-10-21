@@ -4,7 +4,8 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import Image from "next/image";
-import { ArrowDownToLine, ArrowRightLeft, BadgeCheck, ChevronDown, CircleDollarSign, ClipboardList, FileCheck2, FileText, FolderOpen, ListChecks, Plus, Printer, Search, Share, SlidersHorizontal, Trash2, Undo2, WalletCards } from "lucide-react";
+import Link from "next/link";
+import { ArrowDownToLine, ArrowRightLeft, BadgeCheck, BookOpenText, ChevronDown, CircleDollarSign, ClipboardList, FileCheck2, FileText, FolderOpen, ListChecks, Plus, Printer, Search, Share, SlidersHorizontal, Trash2, Undo2, WalletCards } from "lucide-react";
 import { readableError } from "@/lib/action-error";
 
 import {
@@ -1022,6 +1023,7 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
           <p className="mt-1.5 text-sm text-muted-foreground">{module.description}</p>
         </div>
         <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:shrink-0 sm:justify-end">
+          {module.kind === "customers" ? <Button variant="outline" className="gap-2" nativeButton={false} render={<Link href="/app/customers/ledger" />}><BookOpenText size={15} />Ledger report</Button> : null}
           {canExport ? <Button variant="outline" className="gap-2" onClick={exportCsv}><ArrowDownToLine size={15} />Export CSV</Button> : null}
           {module.kind === "items" ? <ItemsBulkImport onImported={handleItemsImported} /> : null}
           <Button className="gap-2" onClick={openNewRecord}><Plus size={16} />{module.kind === "settings" ? "Edit company profile" : `New ${module.label.toLowerCase()}`}</Button>

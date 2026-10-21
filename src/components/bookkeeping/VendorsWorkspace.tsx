@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowDownToLine, BookOpenText, MoreHorizontal, Pencil, Plus, Search, Trash2 } from "lucide-react";
 import { readableError } from "@/lib/action-error";
@@ -213,6 +214,7 @@ export default function VendorsWorkspace({ records: initialRecords, bills, accou
           <p className="mt-1.5 text-sm text-muted-foreground">Keep supplier details and balances together in one place.</p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
+          <Button variant="outline" className="gap-2" nativeButton={false} render={<Link href="/app/vendors/ledger" />}><BookOpenText size={15} />Ledger report</Button>
           <Button variant="outline" className="gap-2" onClick={exportCsv}><ArrowDownToLine size={15} />Export CSV</Button>
           <Button className="gap-2" onClick={openNewVendor}><Plus size={16} />New supplier</Button>
         </div>
