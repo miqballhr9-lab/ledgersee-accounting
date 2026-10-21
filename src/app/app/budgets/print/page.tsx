@@ -4,6 +4,7 @@ import AutoPrint from "@/components/bookkeeping/AutoPrint";
 import InvoicePrintButton from "@/components/bookkeeping/InvoicePrintButton";
 import { BudgetPrintSheet, loadBudgetsForPrint } from "@/app/app/budgets/budget-print";
 import { requireUser } from "@/lib/auth";
+import { canReadKind } from "@/lib/permissions";
 
 interface BudgetsPrintPageProps {
   searchParams: Promise<{ ids?: string; autoprint?: string }>;
@@ -12,6 +13,7 @@ interface BudgetsPrintPageProps {
 /** Print preview for one or more budgets (?ids=a,b), each on its own page; ?autoprint=1 opens the print dialog. */
 export default async function BudgetsPrintPage({ searchParams }: BudgetsPrintPageProps) {
   const me = await requireUser();
+  if (!canReadKind(me.role, "budgets")) notFound();
   const { ids = "", autoprint } = await searchParams;
   const requested = [...new Set(ids.split(",").map((id) => id.trim()).filter(Boolean))].slice(0, 50);
   const { budgets, sources, settings } = await loadBudgetsForPrint(me.id, requested);

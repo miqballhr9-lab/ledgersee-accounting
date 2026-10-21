@@ -5,6 +5,7 @@ import { db } from "@/db";
 import { bookkeepingRecord } from "@/db/schema";
 import InvoicePrintButton from "@/components/bookkeeping/InvoicePrintButton";
 import { requireUser } from "@/lib/auth";
+import { canReadKind } from "@/lib/permissions";
 import { requireFeature } from "@/lib/plan-gate";
 
 interface PayrollSlipPageProps {
@@ -22,6 +23,7 @@ function formatAmount(value: string | undefined, currency: string) {
 export default async function PayrollSlipPage({ params }: PayrollSlipPageProps) {
   await requireFeature("hr");
   const me = await requireUser();
+  if (!canReadKind(me.role, "payroll")) notFound();
   const { id } = await params;
   const [records, settings] = await Promise.all([
     db

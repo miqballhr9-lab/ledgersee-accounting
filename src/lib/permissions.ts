@@ -73,8 +73,14 @@ const borrowedReads: Partial<Record<Area, string[]>> = {
   accounting: ["customers", "vendors", "employees", "payroll", "invoices", "bills", "expenses", "hr-loans", "hr-claims", "hr-settlements", "hr-vehicle-services"],
 };
 
+/** Salaries, ID numbers, loans and HR files: only people with payroll or HR access see these. */
+function isPeopleData(kind: string) {
+  return kind === "employees" || kind === "payroll" || kind.startsWith("hr-");
+}
+
 export function canReadKind(role: Role, kind: string) {
   const area = areaForKind(kind);
+  if (isPeopleData(kind) && !canAccess(role, "payroll", "read") && !canAccess(role, "hr", "read")) return false;
   if (area === "settings") return true;
   if (canAccess(role, area, "read")) return true;
   return Object.entries(borrowedReads).some(([from, kinds]) => kinds?.includes(kind) && canAccess(role, from as Area, "read"));

@@ -11,7 +11,7 @@ import { subscriptionFor, saveSubscription } from "@/lib/billing";
 import { sendEmail } from "@/lib/email";
 import { businessRecords, type BusinessBackup } from "@/lib/backup";
 import { emailConfigured } from "@/lib/email";
-import { ADMIN_LOG_KIND, ANNOUNCEMENT_KIND, BUSINESS_FLAGS_KIND, FEEDBACK_KIND, isPlatformAdmin } from "@/lib/platform";
+import { ADMIN_LOG_KIND, ANNOUNCEMENT_KIND, BUSINESS_FLAGS_KIND, FEEDBACK_KIND, isPlatformAdmin, isVerifiedPlatformAdmin } from "@/lib/platform";
 import { loadAdminData } from "@/lib/platform-data";
 import { recordAudit } from "@/lib/audit";
 import { revalidatePath } from "@/lib/revalidate";
@@ -20,7 +20,7 @@ import { signViewAs, VIEW_AS_COOKIE, VIEW_AS_SECONDS } from "@/lib/view-as";
 /** The signed-in platform admin, or throw: every action here is theirs alone. */
 async function requirePlatformAdmin() {
   const me = await getUser();
-  if (!me || !isPlatformAdmin(me.email)) throw new ActionError("Only the MIK LEDGER owner can do this.");
+  if (!me || !isVerifiedPlatformAdmin(me)) throw new ActionError("Only the MIK LEDGER owner can do this.");
   return me;
 }
 

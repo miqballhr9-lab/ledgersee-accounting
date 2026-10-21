@@ -26,10 +26,24 @@ const nextConfig: NextConfig = {
   // label, so `*.modal.host` alone does not cover the `.w.` in a preview host.
   allowedDevOrigins: ["*.modal.host", "*.w.modal.host"],
   async headers() {
+    // The live site is never framed, so there it gets the strict set: no other
+    // site may frame it (clickjacking), browsers keep to HTTPS, and pages can't
+    // use the camera or microphone. The preview keeps ALLOWALL for its pane.
+    if (process.env.VERCEL_ENV !== "production") {
+      return [{ source: "/(.*)", headers: [{ key: "X-Frame-Options", value: "ALLOWALL" }] }];
+    }
     return [
       {
         source: "/(.*)",
-        headers: [{ key: "X-Frame-Options", value: "ALLOWALL" }],
+        headers: [
+          { key: "X-Frame-Options", value: "DENY" },
+          { key: "Content-Security-Policy", value: "frame-ancestors 'none'; base-uri 'self'; object-src 'none'; form-action 'self' https://checkout.stripe.com https://billing.stripe.com" },
+          { key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains; preload" },
+          { key: "X-Content-Type-Options", value: "nosniff" },
+          { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+          { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=(self), payment=()" },
+          { key: "Cross-Origin-Opener-Policy", value: "same-origin-allow-popups" },
+        ],
       },
     ];
   },

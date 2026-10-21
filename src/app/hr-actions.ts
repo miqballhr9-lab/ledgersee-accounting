@@ -110,7 +110,7 @@ export async function getMyPortal(): Promise<MyPortal> {
   const empty: MyPortal = { employee: null, business: me.workspaceName, payslips: [], leaves: [], leaveTypes: [], attendance: [], loans: [], claims: [], documents: [], holidays: [], today: todayDate, timeZone, attendanceNow: { date: todayDate, open: false, since: "", sessions: [], hours: "" }, celebrations: [] };
   if (!employee) return empty;
   const all = await rows(me.id, ["payroll", "hr-leaves", "hr-leave-types", "hr-allocations", "hr-attendance", "hr-loans", "hr-claims", "hr-documents", "hr-holidays", "employees"]);
-  const mine = (kind: string) => all.filter((row) => row.kind === kind && (row.data.employeeId === employee.id || (kind === "payroll" && (row.data.employeeEmail?.toLowerCase() === me.email.toLowerCase() || row.data.employeeName === employee.data.name))));
+  const mine = (kind: string) => all.filter((row) => row.kind === kind && (row.data.employeeId === employee.id || (kind === "payroll" && !row.data.employeeId && (row.data.employeeEmail?.toLowerCase() === me.email.toLowerCase() || row.data.employeeName === employee.data.name))));
   const year = todayDate.slice(0, 4);
   const leaves = mine("hr-leaves");
   // Today's attendance, or last night's check in that hasn't been closed yet.

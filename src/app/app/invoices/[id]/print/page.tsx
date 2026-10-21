@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { db } from "@/db";
 import { bookkeepingRecord } from "@/db/schema";
 import { requireUser } from "@/lib/auth";
+import { canReadKind } from "@/lib/permissions";
 import InvoiceDocument from "@/components/bookkeeping/InvoiceDocument";
 import InvoicePrintButton from "@/components/bookkeeping/InvoicePrintButton";
 import { customerForDocument } from "@/lib/document-customer";
@@ -16,6 +17,7 @@ interface InvoicePrintPageProps {
 export default async function InvoicePrintPage({ params }: InvoicePrintPageProps) {
   await requireFeature("accounting");
   const me = await requireUser();
+  if (!canReadKind(me.role, "invoices")) notFound();
   const { id } = await params;
   const [invoice, settings] = await Promise.all([
     db

@@ -29,6 +29,15 @@ export function isPlatformAdmin(email: string | null | undefined) {
   return (process.env.PLATFORM_ADMIN_EMAILS ?? "").split(",").map((entry) => entry.trim().toLowerCase()).filter(Boolean).includes(wanted);
 }
 
+/**
+ * A platform admin whose address is confirmed. Listing an email isn't enough on
+ * its own: if nobody had signed up with it yet, anyone could register it and walk
+ * in, so the address must be proven (the confirmation link) before /admin opens.
+ */
+export function isVerifiedPlatformAdmin(user: { email?: string | null; emailVerified?: boolean | null } | null | undefined) {
+  return Boolean(user?.emailVerified) && isPlatformAdmin(user?.email);
+}
+
 export interface BusinessFlags {
   suspended: boolean;
   /** Shown to the business while it is paused. */

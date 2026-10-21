@@ -73,6 +73,37 @@ export async function exportMyAccountData(): Promise<BusinessBackup> {
   };
 }
 
+/**
+ * Fields only the app's own actions set: what was paid or credited (Receive
+ * payment, Pay bill, Apply credit), share links and send times, bank matching.
+ * A form can't type them in, so nobody can mark an invoice paid without a
+ * payment behind it. Payroll and employees keep their own rules.
+ */
+const serverOwnedKeys = ["paidAmount", "creditApplied", "shareToken", "sentAt", "reconciled", "reconciliationId", "depositId"];
+const keysOnlySetLater = new Set(["paidAmount", "creditApplied", "shareToken", "sentAt"]);
+
+function keepServerOwned(kind: string, data: Record<string, string>, current: Record<string, string> | undefined) {
+  if (kind === "payroll" || kind === "employees") return data;
+  const next = { ...data };
+  for (const key of serverOwnedKeys) {
+    if (current) {
+      if (current[key] !== undefined) next[key] = current[key];
+      else delete next[key];
+    } else if (keysOnlySetLater.has(key)) {
+      delete next[key];
+    }
+  }
+  if (kind === "settings") {
+    // Public form and jobs-page addresses are made here, never taken from the browser,
+    // so one business can't claim another's address and receive its leads.
+    for (const key of ["webFormToken", "careersToken"]) {
+      if (!next[key]) next[key] = "";
+      else if (next[key] !== current?.[key]) next[key] = randomBytes(16).toString("hex");
+    }
+  }
+  return next;
+}
+
 type StoredRow = typeof bookkeepingRecord.$inferSelect;
 
 function serializeRow(row: StoredRow): BookkeepingRecord {
@@ -86,6 +117,12 @@ function serializeRow(row: StoredRow): BookkeepingRecord {
     Number(data.amount || 0) - Number(data.paidAmount || 0) - Number(data.creditApplied || 0) > 0
   ) {
     data = { ...data, status: "Overdue" };
+  }
+  // An invite's link is the key to joining the business: it goes to the invitee
+  // by email and never to anyone browsing the team list.
+  if (row.kind === "team-members" && data.inviteToken) {
+    const { inviteToken: _inviteToken, ...rest } = data;
+    data = rest;
   }
   return {
     id: row.id,
@@ -372,6 +409,7 @@ async function saveRecord(
   // Nothing dated in a closed period can be added or changed.
   await assertBooksOpen(me.id, documentDate(kind, input), documentDate(kind, current?.data));
   let data = amountFromLineItems(sanitizePayload(input), kind);
+  data = keepServerOwned(kind, data, current?.data);
   if (kind === "purchase-orders" && !id) data = { ...data, status: "Draft" };
   if (kind === "mileage") {
     const distance = Number(data.distance);

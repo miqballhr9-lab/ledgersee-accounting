@@ -13,7 +13,7 @@
  */
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
-import { genericOAuth, magicLink, twoFactor } from "better-auth/plugins";
+import { genericOAuth, haveIBeenPwned, magicLink, twoFactor } from "better-auth/plugins";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { cookies, headers } from "next/headers";
 import { cache } from "react";
@@ -28,7 +28,7 @@ import { currentRoleOverride } from "@/lib/role-override";
 import { canAccess, canReadKind, canWriteKind, isRole, type Role } from "@/lib/permissions";
 import { billingAccess, type BillingAccess } from "@/lib/billing";
 import { featureLabels, featuresForKind, planFor } from "@/lib/plans";
-import { isPlatformAdmin } from "@/lib/platform";
+import { isVerifiedPlatformAdmin } from "@/lib/platform";
 import { readViewAs, VIEW_AS_COOKIE } from "@/lib/view-as";
 
 /** One row per sign-in, kept under the person's own id; the app's screens never list this kind. */
@@ -202,9 +202,31 @@ export const auth = betterAuth({
       trustedProviders: ["imagine"],
     },
   },
-  ...(framedCookieAttributes
-    ? { advanced: { defaultCookieAttributes: framedCookieAttributes } }
-    : {}),
+  advanced: {
+    ...(framedCookieAttributes ? { defaultCookieAttributes: framedCookieAttributes } : {}),
+    // Vercel sets these itself, so a visitor can't fake their address to dodge the limits below.
+    ipAddress: { ipAddressHeaders: ["x-vercel-forwarded-for", "x-real-ip", "x-forwarded-for"] },
+  },
+  /**
+   * Stops password and code guessing. Counted in the database, so the limit
+   * holds across every server instance (memory would reset on each one).
+   * Off in local development, as before.
+   */
+  rateLimit: {
+    enabled: process.env.NODE_ENV === "production",
+    storage: "database",
+    window: 60,
+    max: 100,
+    customRules: {
+      "/sign-in/email": { window: 300, max: 10 },
+      "/sign-up/email": { window: 3600, max: 10 },
+      "/two-factor/*": { window: 300, max: 10 },
+      "/request-password-reset": { window: 3600, max: 5 },
+      "/forget-password": { window: 3600, max: 5 },
+      "/sign-in/magic-link": { window: 3600, max: 5 },
+      "/send-verification-email": { window: 3600, max: 5 },
+    },
+  },
   baseURL:
     allowedHosts.length > 0
       ? {
@@ -279,6 +301,12 @@ export const auth = betterAuth({
     // app (or a one-time backup code). People who sign in only with Google have
     // no password, so they can turn it on without one.
     twoFactor({ issuer: "MIK LEDGER", allowPasswordless: true }),
+    // Refuses passwords already leaked in data breaches (checked privately: only
+    // the first 5 characters of the password's hash ever leave the server). Live
+    // site only, so local and preview runs don't depend on the outside service.
+    ...(process.env.VERCEL_ENV === "production"
+      ? [haveIBeenPwned({ customPasswordCompromisedMessage: "This password has appeared in a data breach elsewhere, so it isn't safe. Please choose a different one." })]
+      : []),
     magicLink({
       sendMagicLink: async ({ email, url }) => {
         // MUST throw: this link is the only way in. Reporting success without
@@ -379,8 +407,8 @@ const membershipFor = cache(async function membershipFor(userId: string) {
 });
 
 /** The business a Super Admin is looking at read-only, from their signed cookie. */
-const viewAsTarget = cache(async function viewAsTarget(adminId: string, email: string) {
-  if (!isPlatformAdmin(email)) return null;
+const viewAsTarget = cache(async function viewAsTarget(adminId: string, email: string, emailVerified: boolean) {
+  if (!isVerifiedPlatformAdmin({ email, emailVerified })) return null;
   const ownerId = readViewAs((await cookies()).get(VIEW_AS_COOKIE)?.value, adminId);
   if (!ownerId || ownerId === adminId) return null;
   const [owner] = await db.select().from(schema.user).where(eq(schema.user.id, ownerId)).limit(1);
@@ -390,7 +418,7 @@ const viewAsTarget = cache(async function viewAsTarget(adminId: string, email: s
 });
 
 async function asWorkspaceUser(signedIn: SignedInUser): Promise<WorkspaceUser> {
-  const viewing = await viewAsTarget(signedIn.id, signedIn.email);
+  const viewing = await viewAsTarget(signedIn.id, signedIn.email, Boolean(signedIn.emailVerified));
   if (viewing) {
     // Admin, so every screen shows what the owner sees; `viewingAs` stops every change.
     return { ...signedIn, id: viewing.owner.id, actorId: signedIn.id, ownerId: viewing.owner.id, role: "Admin", isOwner: false, workspaceName: viewing.name, access: await billingAccess(viewing.owner.id, viewing.owner.email), viewingAs: true };

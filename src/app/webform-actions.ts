@@ -41,6 +41,10 @@ export async function submitWebLead(token: string, input: WebLeadInput): Promise
   const message = String(input.message ?? "").trim().slice(0, 4000);
   const now = new Date().toISOString().slice(0, 16).replace("T", " ");
   if (existing) {
+    // A few repeats an hour are real people; more is someone filling the lead with notes.
+    const repeats = await db.select({ id: bookkeepingRecord.id }).from(bookkeepingRecord)
+      .where(and(eq(bookkeepingRecord.userId, userId), eq(bookkeepingRecord.kind, "crm-notes"), gt(bookkeepingRecord.createdAt, new Date(Date.now() - 60 * 60 * 1000)), sql`${bookkeepingRecord.data}->>'parentId' = ${existing.id}`));
+    if (repeats.length >= 3) return;
     await db.insert(bookkeepingRecord).values({ userId, kind: "crm-notes", data: { parentKind: "crm-leads", parentId: existing.id, title: "Web form sent again", content: message || "(no message)", author: "Web form", createdOn: now } });
     return;
   }

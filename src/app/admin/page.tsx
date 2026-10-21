@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 
+import AdminConfirmEmail from "@/components/admin/AdminConfirmEmail";
 import AdminConsole from "@/components/admin/AdminConsole";
 import { getUser } from "@/lib/auth";
 import { isPlatformAdmin } from "@/lib/platform";
@@ -15,6 +16,7 @@ export default async function AdminPage() {
   if (!me) redirect("/");
   // Anyone else gets a plain 404, so the panel's address gives nothing away.
   if (!isPlatformAdmin(me.email)) notFound();
+  if (!me.emailVerified) return <AdminConfirmEmail email={me.email} />;
   const data = await loadAdminData();
   return <AdminConsole adminEmail={me.email} {...data} />;
 }

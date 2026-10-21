@@ -20,13 +20,14 @@
 import { useEffect, useState } from "react";
 
 import { describeAuthError } from "@/lib/errors";
+import { safeAfterPath } from "@/lib/safe-path";
 
 export default function AuthComplete() {
   const [failure, setFailure] = useState<string | null>(null);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    const after = params.get("after") || "/";
+    const after = safeAfterPath(params.get("after"));
     // Better Auth reports the reason as `error`, with a longer note in
     // `error_description` when it has one (see dist/oauth2/errors.mjs).
     const error = params.get("error") || params.get("error_description");

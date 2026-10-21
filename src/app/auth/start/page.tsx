@@ -16,10 +16,11 @@
 import { useEffect } from "react";
 
 import { authClient } from "@/lib/auth-client";
+import { safeAfterPath } from "@/lib/safe-path";
 
 export default function AuthStart() {
   useEffect(() => {
-    const after = new URLSearchParams(window.location.search).get("after") || "/";
+    const after = safeAfterPath(new URLSearchParams(window.location.search).get("after"));
     // Default (redirect) mode: sets the state cookie first-party and navigates
     // this popup to Google. On return it lands on /auth/complete, which signals
     // the opener and closes.

@@ -53,7 +53,6 @@ export const ALLOWED_UPLOAD_TYPES = [
   "image/webp",
   "image/gif",
   "image/avif",
-  "image/svg+xml",
   "application/pdf",
   "text/plain",
   "text/csv",
