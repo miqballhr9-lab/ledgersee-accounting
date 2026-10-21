@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowRightLeft, BadgeCheck, Ban, Check, CircleDollarSign, Copy, Ellipsis, Link2, Mail, PackageCheck, Pencil, Play, Printer, Trash2, Undo2 } from "lucide-react";
+import { ArrowRightLeft, BadgeCheck, BookOpenText, Ban, Check, CircleDollarSign, Copy, Ellipsis, Link2, Mail, PackageCheck, Pencil, Play, Printer, Trash2, Undo2 } from "lucide-react";
 
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
@@ -13,7 +13,7 @@ import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
 import { formatCustomerAddress } from "@/lib/customer-utils";
 import { homeRate, lineSummary } from "@/lib/invoice-utils";
 
-export type RecordActionKind = "refund" | "remind" | "progress" | "statement" | "void" | "convert" | "convert-expense" | "payment" | "send" | "send-rfq" | "confirm-order" | "receive-order" | "cancel-order" | "mark-paid" | "match" | "apply-credit" | "generate" | "duplicate" | "share" | "print" | "undo-payment" | "credit-note";
+export type RecordActionKind = "refund" | "remind" | "progress" | "statement" | "void" | "convert" | "convert-expense" | "payment" | "send" | "send-rfq" | "confirm-order" | "receive-order" | "cancel-order" | "mark-paid" | "match" | "apply-credit" | "generate" | "duplicate" | "share" | "print" | "undo-payment" | "credit-note" | "ledger";
 
 interface RecordTableProps {
   module: ModuleDefinition;
@@ -222,6 +222,7 @@ export function recordActions(
   const openBalance = Number(record.data.amount || 0) - Number(record.data.paidAmount || 0) - Number(record.data.creditApplied || 0);
   if (module.kind === "invoices" && openBalance > 0.004 && !["Draft", "Void", "Cancelled", "Paid"].includes(record.data.status ?? "")) add("remind", "Send reminder", Mail);
   if (module.kind === "estimates" && !["Converted", "Declined"].includes(record.data.status ?? "")) add("progress", "Progress invoice (part)", ArrowRightLeft);
+  if (module.kind === "customers") add("ledger", "Ledger", BookOpenText, true);
   if (module.kind === "customers") add("statement", "Send statement", Mail);
   if (module.kind === "recurring-invoices") add("generate", "Generate invoice", Play, true);
   if (module.kind === "transactions") add("match", record.data.matched === "true" ? "Mark unmatched" : "Match transaction", Check, true);

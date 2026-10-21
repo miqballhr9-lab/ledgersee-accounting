@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowDownToLine, MoreHorizontal, Pencil, Plus, Search, Trash2 } from "lucide-react";
+import { ArrowDownToLine, BookOpenText, MoreHorizontal, Pencil, Plus, Search, Trash2 } from "lucide-react";
 import { readableError } from "@/lib/action-error";
 
 import { deleteBookkeepingRecord } from "@/app/actions";
@@ -284,6 +284,7 @@ export default function VendorsWorkspace({ records: initialRecords, bills, accou
                     <DropdownMenu>
                       <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" aria-label={`More actions for ${vendor.data.displayName || vendor.data.name || "supplier"}`}><MoreHorizontal size={15} /></Button>} />
                       <DropdownMenuContent align="end">
+                        <DropdownMenuItem onClick={() => router.push(`/app/vendors/${encodeURIComponent(vendor.id)}/ledger`)}><BookOpenText size={14} />Ledger</DropdownMenuItem>
                         <DropdownMenuItem onClick={() => openEditVendor(vendor)}><Pencil size={14} />Edit supplier</DropdownMenuItem>
                         <DropdownMenuSeparator />
                         <DropdownMenuItem variant="destructive" disabled={pendingDelete === vendor.id} onClick={() => void handleDelete(vendor)}><Trash2 size={14} />Delete supplier</DropdownMenuItem>
@@ -324,6 +325,7 @@ export default function VendorsWorkspace({ records: initialRecords, bills, accou
           currency={currency}
           stats={detail ? [["Open bills", String(detail.openBills.length)], ["Overdue bills", String(detail.overdueBills.length)], ["Balance", formatMoney(detail.currentBalance, currency)]] : undefined}
           actions={detail ? [
+            { key: "ledger", label: "Ledger", icon: BookOpenText, primary: true, run: () => router.push(`/app/vendors/${encodeURIComponent(detail.vendor.id)}/ledger`) },
             { key: "edit", label: "Edit", icon: Pencil, primary: true, run: () => { setDetailId(null); openEditVendor(detail.vendor); } },
             { key: "delete", label: "Delete", icon: Trash2, destructive: true, run: () => { setDetailId(null); void handleDelete(detail.vendor); } },
           ] : []}

@@ -786,6 +786,10 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
         return;
       }
     }
+    if (kind === "ledger") {
+      router.push(`/app/customers/${encodeURIComponent(record.id)}/ledger`);
+      return;
+    }
     if (kind === "credit-note") {
       router.push(`/app/credit-notes?new=1&fromInvoice=${encodeURIComponent(record.id)}`);
       return;
