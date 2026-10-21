@@ -54,30 +54,32 @@ export default function InvoiceDocument({ invoice, companyName, documentKind = "
 
   return (
     <article className="mx-auto w-full max-w-4xl border border-border bg-card p-6 text-card-foreground shadow-sm sm:p-10 print:max-w-none print:border-0 print:p-0 print:shadow-none">
-      <header className="flex flex-wrap items-start justify-between gap-6 border-b border-border pb-7">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.12em] text-primary">{isTaxInvoice ? (pack?.code === "PK" ? "Sales tax invoice" : "Tax invoice") : details.label}</p>
-          <h1 className="mt-2 text-3xl font-semibold tracking-tight">{invoice[details.numberKey] || details.label}</h1>
-          <div className="mt-2 flex items-start gap-3">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            {seller?.logo ? <img src={seller.logo} alt="" className="h-12 w-auto max-w-[140px] object-contain" /> : null}
-            <div className="text-sm text-muted-foreground">
-              <p>From <span className="font-medium text-foreground">{companyName || "Business"}</span></p>
-              {(seller?.customerAddressSame === "false" ? seller?.customerAddress : seller?.address) ? <p className="whitespace-pre-line text-xs leading-5">{seller?.customerAddressSame === "false" ? seller?.customerAddress : seller?.address}</p> : null}
-              {[seller?.customerEmail || seller?.companyEmail, seller?.phone, seller?.website].filter(Boolean).length ? <p className="text-xs">{[seller?.customerEmail || seller?.companyEmail, seller?.phone, seller?.website].filter(Boolean).join(" · ")}</p> : null}
-            </div>
+      <header className="grid gap-6 border-b border-border pb-7 sm:grid-cols-[minmax(0,1fr)_auto] print:grid-cols-[minmax(0,1fr)_auto]">
+        {/* The seller on the left: logo, name, then address and contact. */}
+        <div className="min-w-0">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          {seller?.logo ? <img src={seller.logo} alt="" className="h-14 w-auto max-w-[200px] object-contain" /> : null}
+          <p className={`${seller?.logo ? "mt-3" : ""} text-lg font-semibold`}>{companyName || "Business"}</p>
+          <div className="mt-1 space-y-0.5 text-sm text-muted-foreground">
+            {(seller?.customerAddressSame === "false" ? seller?.customerAddress : seller?.address) ? <p className="whitespace-pre-line leading-5">{seller?.customerAddressSame === "false" ? seller?.customerAddress : seller?.address}</p> : null}
+            {[seller?.customerEmail || seller?.companyEmail, seller?.phone, seller?.website].filter(Boolean).length ? <p>{[seller?.customerEmail || seller?.companyEmail, seller?.phone, seller?.website].filter(Boolean).join(" · ")}</p> : null}
+            {registrations.length ? <p>{registrations.join(" · ")}</p> : null}
           </div>
-          {registrations.length ? <p className="mt-1 text-xs text-muted-foreground">{registrations.join(" · ")}</p> : null}
         </div>
-        <dl className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm">
-          <div><dt className="text-xs text-muted-foreground">{details.dateLabel}</dt><dd className="mt-1 font-medium">{invoice[details.dateKey] || "—"}</dd></div>
-          {documentKind === "invoices" && !isReceipt ? <div><dt className="text-xs text-muted-foreground">Due date</dt><dd className="mt-1 font-medium">{invoice.dueDate || "—"}</dd></div> : null}
-          {documentKind === "estimates" ? <div><dt className="text-xs text-muted-foreground">Expiry date</dt><dd className="mt-1 font-medium">{invoice.expiryDate || "—"}</dd></div> : null}
-          {documentKind === "sales-orders" ? <div><dt className="text-xs text-muted-foreground">Delivery date</dt><dd className="mt-1 font-medium">{invoice.deliveryDate || "—"}</dd></div> : null}
-          {documentKind === "invoices" ? <div><dt className="text-xs text-muted-foreground">Payment terms</dt><dd className="mt-1 font-medium">{invoice.paymentTerms || "—"}</dd></div> : null}
-          <div><dt className="text-xs text-muted-foreground">Currency</dt><dd className="mt-1 font-medium">{currency}</dd></div>
-          {converted ? <div className="col-span-2"><dt className="text-xs text-muted-foreground">Exchange rate</dt><dd className="mt-1 font-medium tabular-nums">1 {currency} = {rate.toLocaleString(undefined, { maximumFractionDigits: 6 })} {localCurrency}</dd></div> : null}
-        </dl>
+        {/* The document on the right: its kind and number, then its dates. */}
+        <div className="sm:text-right print:text-right">
+          <p className="text-xs font-semibold uppercase tracking-[0.12em] text-primary">{isTaxInvoice ? (pack?.code === "PK" ? "Sales tax invoice" : "Tax invoice") : details.label}</p>
+          <h1 className="mt-1 text-3xl font-semibold tracking-tight">{invoice[details.numberKey] || details.label}</h1>
+          <dl className="mt-4 grid grid-cols-2 gap-x-6 gap-y-3 text-sm sm:text-left print:text-left">
+            <div><dt className="text-xs text-muted-foreground">{details.dateLabel}</dt><dd className="mt-1 font-medium">{invoice[details.dateKey] || "—"}</dd></div>
+            {documentKind === "invoices" && !isReceipt ? <div><dt className="text-xs text-muted-foreground">Due date</dt><dd className="mt-1 font-medium">{invoice.dueDate || "—"}</dd></div> : null}
+            {documentKind === "estimates" ? <div><dt className="text-xs text-muted-foreground">Expiry date</dt><dd className="mt-1 font-medium">{invoice.expiryDate || "—"}</dd></div> : null}
+            {documentKind === "sales-orders" ? <div><dt className="text-xs text-muted-foreground">Delivery date</dt><dd className="mt-1 font-medium">{invoice.deliveryDate || "—"}</dd></div> : null}
+            {documentKind === "invoices" ? <div><dt className="text-xs text-muted-foreground">Payment terms</dt><dd className="mt-1 font-medium">{invoice.paymentTerms || "—"}</dd></div> : null}
+            <div><dt className="text-xs text-muted-foreground">Currency</dt><dd className="mt-1 font-medium">{currency}</dd></div>
+            {converted ? <div className="col-span-2"><dt className="text-xs text-muted-foreground">Exchange rate</dt><dd className="mt-1 font-medium tabular-nums">1 {currency} = {rate.toLocaleString(undefined, { maximumFractionDigits: 6 })} {localCurrency}</dd></div> : null}
+          </dl>
+        </div>
       </header>
 
       <section className="grid gap-5 border-b border-border py-6 sm:grid-cols-2">
