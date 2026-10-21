@@ -49,15 +49,16 @@ export default function InvoiceDocument({ invoice, companyName, documentKind = "
   ] as Array<[string, string | undefined]>).map(([label, value]) => [label, value?.trim() ?? ""] as [string, string]).filter(([, value]) => value) : [];
   // The customer's details from their record, at the end of the document.
   const clientName = customer?.name?.trim() || invoice.customer || "";
-  const clientRows: Array<[string, string]> = customer ? ([
-    ["Customer", [clientName, customer.company?.trim() && customer.company.trim() !== clientName ? customer.company.trim() : ""].filter(Boolean).join(" · ")],
-    ["Customer no.", customer.customerNumber?.trim() ?? ""],
-    ["Address", [...new Set(formatCustomerAddress(customer).split("\n").map((line) => line.trim()).filter(Boolean))].join("\n")],
-    ["Phone", [...new Set([customer.phone, customer.mobile].map((value) => value?.trim()).filter(Boolean))].join(" · ")],
-    ["Email", customer.email?.trim() ?? ""],
-    ["Website", customer.website?.trim() ?? ""],
-    ["Tax ID", customer.taxId?.trim() ?? ""],
-  ] as Array<[string, string]>).filter(([, value]) => value) : [];
+  // Under the customer's name: number, address, phone, email, website and tax ID, from their record
+  // (or the address typed on the document when there is no record).
+  const customerLines: Array<[string, string]> = ([
+    ["Customer no.", customer?.customerNumber?.trim() ?? ""],
+    ["Address", customer ? [...new Set(formatCustomerAddress(customer).split("\n").map((line) => line.trim()).filter(Boolean))].join("\n") || invoice.billingAddress?.trim() || "" : invoice.billingAddress?.trim() ?? ""],
+    ["Phone", [...new Set([customer?.phone, customer?.mobile].map((value) => value?.trim()).filter(Boolean))].join(" · ")],
+    ["Email", customer?.email?.trim() ?? ""],
+    ["Website", customer?.website?.trim() ?? ""],
+    ["Tax ID", customer?.taxId?.trim() ?? ""],
+  ] as Array<[string, string]>).filter(([, value]) => value);
   const registrations = (pack?.registrations ?? []).filter((field) => seller?.[field.key]).map((field) => `${field.label}: ${seller?.[field.key]}`);
   // VAT and GST countries call a taxed invoice a "tax invoice".
   const isTaxInvoice = documentKind === "invoices" && Boolean(pack) && pack?.code !== "US" && Number(invoice.taxAmount) > 0;
@@ -82,17 +83,12 @@ export default function InvoiceDocument({ invoice, companyName, documentKind = "
   return (
     <article className="mx-auto w-full max-w-4xl border border-border bg-card p-6 text-card-foreground shadow-sm sm:p-10 print:max-w-none print:border-0 print:p-0 print:shadow-none">
       <header className="grid gap-6 border-b border-border pb-7 sm:grid-cols-[minmax(0,1fr)_auto] print:grid-cols-[minmax(0,1fr)_auto]">
-        {/* The seller on the left: logo, name, then address and contact. */}
+        {/* The customer on the left: who the document is for, and how to reach them. */}
         <div className="min-w-0">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          {seller?.logo ? <img src={seller.logo} alt="" className="h-14 w-auto max-w-[200px] object-contain" /> : null}
-          <p className={`${seller?.logo ? "mt-3" : ""} text-lg font-semibold`}>{companyName || "Business"}</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.1em] text-muted-foreground">{documentKind === "credit-notes" ? "Credit to" : "Bill to"}</p>
+          <p className="mt-1 text-lg font-semibold">{clientName || "Customer"}</p>
           <div className="mt-1 space-y-0.5 text-sm text-muted-foreground">
-            {sellerAddress ? <p className="whitespace-pre-line leading-5">{sellerAddress}</p> : null}
-            {seller?.phone?.trim() ? <p>{seller.phone.trim()}</p> : null}
-            {(seller?.customerEmail || seller?.companyEmail)?.trim() ? <p>{(seller?.customerEmail || seller?.companyEmail)?.trim()}</p> : null}
-            {seller?.website?.trim() ? <p>{seller.website.trim()}</p> : null}
-            {registrations.length ? <p>{registrations.join(" · ")}</p> : null}
+            {customerLines.map(([label, value]) => <p key={label} className="whitespace-pre-line leading-5">{label === "Address" ? value : `${label}: ${value}`}</p>)}
           </div>
         </div>
         {/* The document on the right: its kind and number, then its dates. */}
@@ -111,19 +107,12 @@ export default function InvoiceDocument({ invoice, companyName, documentKind = "
         </div>
       </header>
 
-      <section className="grid gap-5 border-b border-border py-6 sm:grid-cols-2">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.1em] text-muted-foreground">Bill to</p>
-          <p className="mt-2 text-base font-medium">{invoice.customer || "Customer"}</p>
-          {invoice.billingAddress ? <p className="mt-1 whitespace-pre-line text-sm leading-6 text-muted-foreground">{invoice.billingAddress}</p> : null}
-        </div>
-        {invoice.shippingAddress ? (
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.1em] text-muted-foreground">Ship to</p>
-            <p className="mt-2 whitespace-pre-line text-sm leading-6 text-muted-foreground">{invoice.shippingAddress}</p>
-          </div>
-        ) : null}
-      </section>
+      {invoice.shippingAddress ? (
+        <section className="border-b border-border py-4 text-sm">
+          <p className="text-xs font-semibold uppercase tracking-[0.1em] text-muted-foreground">Ship to</p>
+          <p className="mt-1 whitespace-pre-line leading-5 text-muted-foreground">{invoice.shippingAddress}</p>
+        </section>
+      ) : null}
 
       <div className="overflow-x-auto">
         <table className="w-full min-w-[560px] border-collapse text-left text-sm">
@@ -199,33 +188,33 @@ export default function InvoiceDocument({ invoice, companyName, documentKind = "
       </section>
 
       {documentKind === "invoices" && seller?.invoiceMessage && !invoice.notes ? <section className="mt-8 border-t border-border pt-5"><p className="whitespace-pre-wrap text-sm">{seller.invoiceMessage}</p></section> : null}
-      {clientRows.length || bankRows.length ? (
-        // Customer and bank details side by side in small type, so the invoice stays short.
-        <div className="mt-6 grid gap-x-8 gap-y-4 border-t border-border pt-4 text-xs leading-5 sm:grid-cols-2 print:grid-cols-2">
-          {clientRows.length ? (
-            <section aria-label="Customer details" className="min-w-0">
-              <h2 className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Customer details</h2>
-              <dl>
-                {clientRows.map(([label, value]) => (
-                  <div key={label} className="flex gap-1.5"><dt className="shrink-0 text-muted-foreground">{label}:</dt><dd className="min-w-0 whitespace-pre-line break-words">{label === "Address" ? value.replace(/\n/g, ", ") : value}</dd></div>
-                ))}
-              </dl>
-            </section>
-          ) : null}
-          {bankRows.length ? (
-            <section aria-label="Bank details" className="min-w-0">
-              <h2 className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Bank details</h2>
-              {seller?.bankNote?.trim() ? <p className="mb-0.5">{seller.bankNote.trim()}</p> : null}
-              <dl>
-                {bankRows.map(([label, value]) => (
-                  <div key={label} className="flex gap-1.5"><dt className="shrink-0 text-muted-foreground">{label}:</dt><dd className="min-w-0 break-words font-medium tabular-nums">{value}</dd></div>
-                ))}
-              </dl>
-            </section>
-          ) : null}
-        </div>
-      ) : null}
       {invoice.notes || invoice.reason ? <section className="mt-8 border-t border-border pt-5"><h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{invoice.reason ? "Reason" : "Message"}</h2><p className="mt-2 whitespace-pre-wrap text-sm">{invoice.reason || invoice.notes}</p></section> : null}
+      {/* The business and its bank details side by side in small type, at the foot of the document. */}
+      <div className="mt-6 grid gap-x-8 gap-y-4 border-t border-border pt-4 text-xs leading-5 sm:grid-cols-2 print:grid-cols-2">
+        <section aria-label="From" className="min-w-0">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          {seller?.logo ? <img src={seller.logo} alt="" className="mb-1.5 h-9 w-auto max-w-[140px] object-contain" /> : null}
+          <p className="text-sm font-semibold">{companyName || "Business"}</p>
+          <div className="text-muted-foreground">
+            {sellerAddress ? <p className="whitespace-pre-line">{sellerAddress}</p> : null}
+            {seller?.phone?.trim() ? <p>{seller.phone.trim()}</p> : null}
+            {(seller?.customerEmail || seller?.companyEmail)?.trim() ? <p>{(seller?.customerEmail || seller?.companyEmail)?.trim()}</p> : null}
+            {seller?.website?.trim() ? <p>{seller.website.trim()}</p> : null}
+            {registrations.length ? <p>{registrations.join(" · ")}</p> : null}
+          </div>
+        </section>
+        {bankRows.length ? (
+          <section aria-label="Bank details" className="min-w-0">
+            <h2 className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Bank details</h2>
+            {seller?.bankNote?.trim() ? <p className="mb-0.5">{seller.bankNote.trim()}</p> : null}
+            <dl>
+              {bankRows.map(([label, value]) => (
+                <div key={label} className="flex gap-1.5"><dt className="shrink-0 text-muted-foreground">{label}:</dt><dd className="min-w-0 break-words font-medium tabular-nums">{value}</dd></div>
+              ))}
+            </dl>
+          </section>
+        ) : null}
+      </div>
     </article>
   );
 }
