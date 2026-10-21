@@ -34,6 +34,15 @@ const documentDetails = {
 
 export default function InvoiceDocument({ invoice, companyName, documentKind = "invoices", seller, customer }: InvoiceDocumentProps) {
   const pack = packFor(seller?.taxCountry);
+  // Where to pay, from Settings > Bank details; invoices only, and not on a paid sales receipt.
+  const bankRows: Array<[string, string]> = documentKind === "invoices" && invoice.docType !== "Sales receipt" ? ([
+    ["A/C title", seller?.bankAccountTitle],
+    ["A/C no.", seller?.bankAccountNumber],
+    ["IBAN", seller?.bankIban],
+    ["Swift code", seller?.bankSwift],
+    ["Bank name", seller?.bankName],
+    ["Branch", seller?.bankBranch],
+  ] as Array<[string, string | undefined]>).map(([label, value]) => [label, value?.trim() ?? ""] as [string, string]).filter(([, value]) => value) : [];
   // The customer's details from their record, at the end of the document.
   const clientName = customer?.name?.trim() || invoice.customer || "";
   const clientRows: Array<[string, string]> = customer ? ([
@@ -190,6 +199,17 @@ export default function InvoiceDocument({ invoice, companyName, documentKind = "
           <dl className="mt-3 grid gap-x-8 gap-y-3 text-sm sm:grid-cols-2 print:grid-cols-2">
             {clientRows.map(([label, value]) => (
               <div key={label} className="min-w-0"><dt className="text-xs text-muted-foreground">{label}</dt><dd className="mt-0.5 whitespace-pre-line break-words">{value}</dd></div>
+            ))}
+          </dl>
+        </section>
+      ) : null}
+      {bankRows.length ? (
+        <section className="mt-8 border-t border-border pt-5" aria-label="Bank details">
+          <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Bank details</h2>
+          {seller?.bankNote?.trim() ? <p className="mt-2 text-sm">{seller.bankNote.trim()}</p> : null}
+          <dl className="mt-3 grid gap-x-8 gap-y-3 text-sm sm:grid-cols-2 print:grid-cols-2">
+            {bankRows.map(([label, value]) => (
+              <div key={label} className="min-w-0"><dt className="text-xs text-muted-foreground">{label}</dt><dd className="mt-0.5 break-words font-medium tabular-nums">{value}</dd></div>
             ))}
           </dl>
         </section>

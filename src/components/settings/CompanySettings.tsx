@@ -314,6 +314,26 @@ export default function CompanySettings({ settings, workspaceName }: CompanySett
                   {!checked("legalAddressSame") ? <Field label="Legal address" htmlFor="settings-legalAddress" wide><Textarea id="settings-legalAddress" rows={3} value={draft.legalAddress ?? ""} maxLength={600} onChange={(event) => set("legalAddress", event.target.value)} /></Field> : null}
                 </>,
               )}
+              {section("bank", "Bank details",
+                <>
+                  <Row label="Message" value={saved.bankNote} />
+                  <Row label="A/C title" value={saved.bankAccountTitle} />
+                  <Row label="A/C no." value={saved.bankAccountNumber} />
+                  <Row label="IBAN" value={saved.bankIban} />
+                  <Row label="Swift code" value={saved.bankSwift} />
+                  <Row label="Bank name" value={saved.bankName} />
+                  <Row label="Branch" value={saved.bankBranch} />
+                </>,
+                <>
+                  {text("bankNote", "Message", { placeholder: "Make payment in below mentioned Bank Account", wide: true, help: "Printed above your bank details at the end of every invoice." })}
+                  {text("bankAccountTitle", "A/C title", { placeholder: "Account holder's name" })}
+                  {text("bankAccountNumber", "A/C no.", { placeholder: "0000-0000000000" })}
+                  {text("bankIban", "IBAN", { placeholder: "PK00XXXX0000000000000000" })}
+                  {text("bankSwift", "Swift code", { placeholder: "XXXXPKKA" })}
+                  {text("bankName", "Bank name", { placeholder: "e.g. Meezan Bank Limited" })}
+                  {text("bankBranch", "Branch", { placeholder: "Optional" })}
+                </>,
+              )}
             </>
           ) : null}
 
