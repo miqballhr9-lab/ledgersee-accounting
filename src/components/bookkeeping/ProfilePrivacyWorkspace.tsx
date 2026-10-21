@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Download, LockKeyhole, LogOut, Save, UserRound } from "lucide-react";
+import { Download, FileJson, FileSpreadsheet, LockKeyhole, LogOut, Save, UserRound } from "lucide-react";
 import { readableError } from "@/lib/action-error";
 
 import { exportMyAccountData, updateProfileName } from "@/app/actions";
@@ -10,6 +10,7 @@ import { leaveBusiness } from "@/app/team-actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import SecurityPanel from "@/components/account/SecurityPanel";
 
 interface ProfilePrivacyWorkspaceProps {
   initialName: string;
@@ -45,21 +46,44 @@ export default function ProfilePrivacyWorkspace({ initialName, email, membership
     }
   }
 
-  async function downloadData() {
+  async function downloadData(format: "xlsx" | "json") {
     setNotice("");
     setIsExporting(true);
     try {
       const data = await exportMyAccountData();
-      const file = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
-      const downloadUrl = URL.createObjectURL(file);
-      const anchor = document.createElement("a");
-      anchor.href = downloadUrl;
-      anchor.download = `mikledger-account-data-${new Date().toISOString().slice(0, 10)}.json`;
-      anchor.click();
-      window.setTimeout(() => URL.revokeObjectURL(downloadUrl), 1000);
-      setNotice("Your account data download is ready.");
-    } catch {
-      setNotice("We couldn’t prepare your download. Try again.");
+      const stamp = new Date().toISOString().slice(0, 10);
+      if (format === "xlsx") {
+        // One sheet per kind of record (Customers, Invoices, …), one row per record.
+        const XLSX = await import("xlsx");
+        const workbook = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([
+          ["MIK LEDGER backup"], [], ["Business", data.business], ["Exported by", `${data.account.name} <${data.account.email}>`], ["Exported at", data.exportedAt], ["Records", data.records.length],
+          [], ["Each sheet holds one kind of record. Line items are kept as text in their own column."],
+        ]), "About");
+        const byKind = new Map<string, typeof data.records>();
+        for (const record of data.records) byKind.set(record.kind, [...(byKind.get(record.kind) ?? []), record]);
+        const used = new Set<string>(["About"]);
+        for (const [kind, records] of [...byKind.entries()].sort(([a], [b]) => a.localeCompare(b))) {
+          const keys = [...new Set(records.flatMap((record) => Object.keys(record.data)))];
+          const rows = records.map((record) => [record.id, record.createdAt, record.updatedAt, ...keys.map((key) => String(record.data[key] ?? "").slice(0, 32000))]);
+          let name = (kind.charAt(0).toUpperCase() + kind.slice(1).replace(/-/g, " ")).replace(/[\\/?*[\]:]/g, "").slice(0, 31);
+          for (let n = 2; used.has(name); n += 1) name = `${name.slice(0, 28)} ${n}`;
+          used.add(name);
+          XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([["Record id", "Created", "Updated", ...keys], ...rows]), name);
+        }
+        XLSX.writeFile(workbook, `mikledger-backup-${stamp}.xlsx`);
+      } else {
+        const file = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+        const downloadUrl = URL.createObjectURL(file);
+        const anchor = document.createElement("a");
+        anchor.href = downloadUrl;
+        anchor.download = `mikledger-backup-${stamp}.json`;
+        anchor.click();
+        window.setTimeout(() => URL.revokeObjectURL(downloadUrl), 1000);
+      }
+      setNotice(data.records.length ? `Your backup is ready: ${data.records.length} records.` : "Your download is ready. Only the business owner or an Admin gets the business's records.");
+    } catch (error) {
+      setNotice(error instanceof Error ? readableError(error) : "We couldn’t prepare your download. Try again.");
     } finally {
       setIsExporting(false);
     }
@@ -70,7 +94,7 @@ export default function ProfilePrivacyWorkspace({ initialName, email, membership
       <div className="border-b border-border pb-5">
         <p className="text-xs font-semibold uppercase tracking-[0.12em] text-primary">Account</p>
         <h1 className="mt-1 text-2xl font-semibold tracking-tight sm:text-3xl">Profile & privacy</h1>
-        <p className="mt-2 max-w-2xl text-sm text-muted-foreground">Manage the name shown in your workspace and keep a copy of your bookkeeping data.</p>
+        <p className="mt-2 max-w-2xl text-sm text-muted-foreground">Your name, sign-in security, the devices you’re signed in on, and a full backup of your data.</p>
       </div>
 
       <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
@@ -107,13 +131,20 @@ export default function ProfilePrivacyWorkspace({ initialName, email, membership
             </div>
           </div>
           <div className="mt-5 rounded-lg border border-border bg-background p-4">
-            <p className="text-sm leading-6 text-muted-foreground">Download a copy of your account name, sign-in email, and saved bookkeeping records. The file is prepared when you request it.</p>
+            <p className="text-sm leading-6 text-muted-foreground">Download a full backup of the business: customers, suppliers, products, every invoice, bill, payment and journal, CRM and HR records, and settings. The Excel file has one sheet per kind of record; the JSON file is the complete copy for restoring or moving.</p>
           </div>
-          <Button type="button" variant="outline" className="mt-5 gap-2" onClick={downloadData} disabled={isExporting}>
-            <Download size={15} />{isExporting ? "Preparing download…" : "Download my data"}
-          </Button>
+          <div className="mt-5 flex flex-wrap gap-2">
+            <Button type="button" className="gap-2" onClick={() => downloadData("xlsx")} disabled={isExporting}>
+              {isExporting ? <Download size={15} /> : <FileSpreadsheet size={15} />}{isExporting ? "Preparing…" : "Download everything (Excel)"}
+            </Button>
+            <Button type="button" variant="outline" className="gap-2" onClick={() => downloadData("json")} disabled={isExporting}>
+              <FileJson size={15} />JSON backup
+            </Button>
+          </div>
         </section>
       </div>
+
+      <SecurityPanel />
 
       {membership ? (
         <section className="rounded-xl border border-border bg-card p-5 sm:p-6" aria-labelledby="team-title">

@@ -15,12 +15,13 @@
 "use client";
 
 import { createAuthClient } from "better-auth/react";
-import { genericOAuthClient, magicLinkClient } from "better-auth/client/plugins";
+import { genericOAuthClient, magicLinkClient, twoFactorClient } from "better-auth/client/plugins";
 
 import { describeAuthError } from "@/lib/errors";
 
 export const authClient = createAuthClient({
-  plugins: [magicLinkClient(), genericOAuthClient()],
+  // No redirect on a two-step sign-in: the sign-in form asks for the code itself.
+  plugins: [magicLinkClient(), genericOAuthClient(), twoFactorClient()],
 });
 
 export const {
@@ -29,6 +30,8 @@ export const {
   signUp,
   useSession,
   getSession,
+  /** Two-step sign-in: enable, disable, verifyTotp, verifyBackupCode, generateBackupCodes. */
+  twoFactor,
   /**
    * Email another confirmation link to an address that has not been verified yet.
    *

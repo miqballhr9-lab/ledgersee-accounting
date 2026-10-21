@@ -6,7 +6,7 @@ import { db } from "@/db";
 import { bookkeepingRecord } from "@/db/schema";
 import { saveCrmRecord } from "@/app/crm-actions";
 import { ActionError } from "@/lib/action-error";
-import { assertCanWrite, requireUser } from "@/lib/auth";
+import { assertCanWrite, assertNotViewing, requireUser } from "@/lib/auth";
 import type { BookkeepingRecord, RecordKind } from "@/lib/bookkeeping-types";
 import { applyHrRules, attendanceSessions, leaveUsed, timeOffAllowance } from "@/lib/hr-rules";
 import { odooHrData } from "@/lib/hr-status";
@@ -73,6 +73,7 @@ export async function markAttendance(date: string, entries: AttendanceRow[]): Pr
 /** The employee record of the signed-in person, matched by email. */
 async function myEmployee(write = false) {
   const me = await requireUser();
+  if (write) assertNotViewing(me);
   if (write && !canAccess(me.role, "self", "write")) throw new ActionError("Your role can view this page but not send requests.");
   const employees = await rows(me.id, ["employees"]);
   const email = me.email.trim().toLowerCase();

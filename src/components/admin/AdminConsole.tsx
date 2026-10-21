@@ -4,9 +4,9 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Activity, ArrowLeft, Building2, CheckCircle2, Gift, Inbox, LayoutDashboard, Megaphone, MoreHorizontal, Pause, Play, Search, ServerCog, Timer, Trash2, UserPlus, Users, XCircle } from "lucide-react";
+import { Activity, ArrowLeft, Building2, CheckCircle2, Eye, Gift, LogOut, Inbox, LayoutDashboard, Megaphone, MoreHorizontal, Pause, Play, Search, ServerCog, Timer, Trash2, UserPlus, Users, XCircle } from "lucide-react";
 
-import { clearAnnouncement, deleteFeedback, extendTrial, saveAnnouncement, sendTestEmail, setBusinessFlags, setFeedbackStatus } from "@/app/admin-actions";
+import { clearAnnouncement, deleteFeedback, extendTrial, saveAnnouncement, sendTestEmail, setBusinessFlags, setFeedbackStatus, signOutEverywhere, startViewAs } from "@/app/admin-actions";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
@@ -121,6 +121,18 @@ export default function AdminConsole({ adminEmail, businesses, people, inbox, an
   const userNeedle = userSearch.trim().toLowerCase();
   const shownPeople = people.filter((person) => !userNeedle || [person.name, person.email, person.business].some((value) => value.toLowerCase().includes(userNeedle)));
   const shownFeedback = inbox.filter((item) => feedbackFilter === "all" || item.status === feedbackFilter);
+
+  async function viewAs(business: AdminBusiness) {
+    if (!window.confirm(`Open ${business.name} read-only for support? Their Audit Log will show that MIK LEDGER support looked. The view closes by itself after an hour.`)) return;
+    setBusy(`view-${business.ownerId}`);
+    try {
+      await startViewAs(business.ownerId);
+      window.location.assign("/app");
+    } catch (error) {
+      toast.error(error instanceof Error ? readableError(error) : "That didn't work. Please try again.");
+      setBusy("");
+    }
+  }
 
   function pause(business: AdminBusiness) {
     const note = window.prompt(`Pause ${business.name}? Its people can still sign in and look, but can't change anything.\n\nReason shown to them (optional):`, "");
@@ -249,6 +261,8 @@ export default function AdminConsole({ adminEmail, businesses, people, inbox, an
                         <DropdownMenu>
                           <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" aria-label={`Actions for ${business.name}`} disabled={busy.endsWith(business.ownerId)}><MoreHorizontal size={15} /></Button>} />
                           <DropdownMenuContent align="end" className="min-w-56">
+                            <DropdownMenuItem onClick={() => void viewAs(business)}><Eye size={14} />View as (read-only)</DropdownMenuItem>
+                            <DropdownMenuSeparator />
                             {business.freeAccess
                               ? <DropdownMenuItem onClick={() => void run(`flags-${business.ownerId}`, () => setBusinessFlags(business.ownerId, { freeAccess: false }), "Free access removed.")}><XCircle size={14} />Remove free access</DropdownMenuItem>
                               : <DropdownMenuItem onClick={() => void run(`flags-${business.ownerId}`, () => setBusinessFlags(business.ownerId, { freeAccess: true }), `${business.name} now has free access.`)}><Gift size={14} />Give free access</DropdownMenuItem>}
@@ -270,7 +284,7 @@ export default function AdminConsole({ adminEmail, businesses, people, inbox, an
                 </TableBody>
               </Table>
             </div>
-            <p className="border-t border-border px-4 py-2.5 text-xs text-muted-foreground">You see counts and activity only, never a business&apos;s own invoices or figures. A paused business can sign in and look, but can&apos;t change anything. Free access and trials apply once online payments are switched on; until then everything is free for everyone.</p>
+            <p className="border-t border-border px-4 py-2.5 text-xs text-muted-foreground">You see counts and activity here. “View as” opens a business read-only for support; it shows in that business&apos;s Audit Log. A paused business can sign in and look, but can&apos;t change anything. Free access and trials apply once online payments are switched on; until then everything is free for everyone.</p>
           </section>
         ) : null}
 
@@ -285,7 +299,7 @@ export default function AdminConsole({ adminEmail, businesses, people, inbox, an
             </div>
             <div className="overflow-x-auto">
               <Table>
-                <TableHeader><TableRow className="bg-muted/40 hover:bg-muted/40">{["Name", "Email", "Business", "Role", "Signed up", "Last signed in"].map((heading) => <TableHead key={heading} className="whitespace-nowrap text-xs">{heading}</TableHead>)}</TableRow></TableHeader>
+                <TableHeader><TableRow className="bg-muted/40 hover:bg-muted/40">{["Name", "Email", "Business", "Role", "2-step", "Signed up", "Last signed in", "Devices", ""].map((heading) => <TableHead key={heading} className="whitespace-nowrap text-xs">{heading}</TableHead>)}</TableRow></TableHeader>
                 <TableBody>
                   {shownPeople.map((person) => (
                     <TableRow key={person.id}>
@@ -293,11 +307,21 @@ export default function AdminConsole({ adminEmail, businesses, people, inbox, an
                       <TableCell className="text-sm"><a href={`mailto:${person.email}`} className="text-primary hover:underline">{person.email}</a></TableCell>
                       <TableCell className="max-w-[220px] truncate text-sm">{person.business}</TableCell>
                       <TableCell className="text-sm">{person.role}</TableCell>
+                      <TableCell>{person.twoStep ? <Pill tone="good">On</Pill> : <Pill tone="neutral">Off</Pill>}</TableCell>
                       <TableCell className="whitespace-nowrap text-sm">{date(person.signedUp)}</TableCell>
                       <TableCell className="whitespace-nowrap text-sm">{when(person.lastSeen)}</TableCell>
+                      <TableCell className="text-sm tabular-nums">{person.devices}</TableCell>
+                      <TableCell className="text-right">
+                        {person.devices ? (
+                          <Button variant="ghost" size="sm" className="gap-1.5 text-destructive hover:text-destructive" disabled={busy === `out-${person.id}`} onClick={() => {
+                            if (!window.confirm(`Sign ${person.name} out on every device? They can sign in again with their password.`)) return;
+                            void run(`out-${person.id}`, () => signOutEverywhere(person.id), `${person.name} was signed out everywhere.`);
+                          }}><LogOut size={14} />Sign out everywhere</Button>
+                        ) : null}
+                      </TableCell>
                     </TableRow>
                   ))}
-                  {!shownPeople.length ? <TableRow><TableCell colSpan={6} className="h-32 text-center text-sm text-muted-foreground">No users match.</TableCell></TableRow> : null}
+                  {!shownPeople.length ? <TableRow><TableCell colSpan={9} className="h-32 text-center text-sm text-muted-foreground">No users match.</TableCell></TableRow> : null}
                 </TableBody>
               </Table>
             </div>

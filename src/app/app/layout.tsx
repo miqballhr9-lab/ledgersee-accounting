@@ -7,13 +7,15 @@ import { listBookkeepingRecordGroups } from "@/app/actions";
 import { getWorkspaceUser } from "@/lib/auth";
 import { daysUntil } from "@/lib/plans";
 import AnnouncementBar from "@/components/bookkeeping/AnnouncementBar";
+import ViewAsBar from "@/components/admin/ViewAsBar";
 import { activeAnnouncement, isPlatformAdmin } from "@/lib/platform";
 
 export default async function BookkeepingLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   const user = await getWorkspaceUser();
   if (!user) redirect("/");
   // Automation mode: run any rules that are due. In Manual mode this returns at once.
-  await runDueAutomations().catch(() => undefined);
+  // Never while support is only looking: that view must not change anything.
+  if (!user.viewingAs) await runDueAutomations().catch(() => undefined);
 
   const { access } = user;
   const announcement = await activeAnnouncement();
@@ -29,8 +31,9 @@ export default async function BookkeepingLayout({ children }: Readonly<{ childre
 
   return (
     <AppFrame userName={user.name} userEmail={user.email} role={user.role} workspaceName={user.workspaceName} companyName={company.companyName?.trim() ?? ""} companyLogo={/^https?:\/\//.test(company.logo ?? "") ? company.logo : ""} isOwner={user.isOwner} features={access.locked ? undefined : access.features} platformAdmin={isPlatformAdmin(user.email)}>
+      {user.viewingAs ? <ViewAsBar business={user.workspaceName} /> : null}
       {announcement ? <AnnouncementBar id={announcement.id} message={announcement.message} tone={announcement.tone} /> : null}
-      {access.suspended ? (
+      {access.suspended && !user.viewingAs ? (
         <div className="mx-auto max-w-lg px-4 py-20 text-center" role="alert">
           <h1 className="text-xl font-semibold">This business is paused</h1>
           <p className="mt-2 text-sm text-muted-foreground">MIK LEDGER has paused {user.workspaceName}. Your records are safe, but nothing can be changed for now.</p>
@@ -44,7 +47,7 @@ export default async function BookkeepingLayout({ children }: Readonly<{ childre
           <Link href="/app/billing" className="font-medium underline underline-offset-4">{user.isOwner ? "Choose a plan" : "See billing"}</Link>
         </div>
       ) : null}
-      {access.suspended ? null : children}
+      {access.suspended && !user.viewingAs ? null : children}
     </AppFrame>
   );
 }

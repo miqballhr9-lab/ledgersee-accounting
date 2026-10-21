@@ -10,5 +10,5 @@ export default async function ProfilePage() {
   const user = await getWorkspaceUser();
   if (!user) redirect("/");
 
-  return <ProfilePrivacyWorkspace initialName={user.name} email={user.email} membership={user.isOwner ? null : { business: user.workspaceName, role: user.role }} />;
+  return <ProfilePrivacyWorkspace initialName={user.name} email={user.email} membership={user.isOwner || user.viewingAs ? null : { business: user.workspaceName, role: user.role }} />;
 }

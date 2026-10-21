@@ -10,7 +10,7 @@ import { blobConfigured } from "@/lib/storage";
 import { ANNOUNCEMENT_KIND, BUSINESS_FLAGS_KIND, FEEDBACK_KIND } from "@/lib/platform";
 
 /** Kinds that aren't a business's own work, left out of its record counts. */
-const notWork = ["audit-events", "settings", "subscription", "team-members", BUSINESS_FLAGS_KIND, FEEDBACK_KIND, ANNOUNCEMENT_KIND, "automation-log"];
+const notWork = ["audit-events", "sign-in-log", "settings", "subscription", "team-members", BUSINESS_FLAGS_KIND, FEEDBACK_KIND, ANNOUNCEMENT_KIND, "automation-log"];
 
 export interface AdminBusiness {
   ownerId: string;
@@ -38,6 +38,9 @@ export interface AdminUser {
   lastSeen: string;
   business: string;
   role: string;
+  twoStep: boolean;
+  /** Devices signed in right now. */
+  devices: number;
 }
 
 export interface AdminFeedback {
@@ -61,9 +64,11 @@ export interface StatusCheck {
 const iso = (value: Date | string | null | undefined) => (value ? new Date(value).toISOString() : "");
 
 export async function loadAdminData() {
-  const [users, sessions, stats, memberships, settings, subscriptions, flags, feedback, announcements] = await Promise.all([
-    db.select({ id: user.id, name: user.name, email: user.email, createdAt: user.createdAt }).from(user),
-    db.select({ userId: session.userId, last: sql<Date>`max(${session.updatedAt})` }).from(session).groupBy(session.userId),
+  const [users, sessions, signIns, stats, memberships, settings, subscriptions, flags, feedback, announcements] = await Promise.all([
+    db.select({ id: user.id, name: user.name, email: user.email, createdAt: user.createdAt, twoStep: user.twoFactorEnabled }).from(user),
+    db.select({ userId: session.userId, last: sql<Date>`max(${session.updatedAt})`, live: sql<number>`count(*) filter (where ${session.expiresAt} > now())` }).from(session).groupBy(session.userId),
+    // Sign-ins outlive the sessions they opened, so "last signed in" survives signing out.
+    db.select({ userId: bookkeepingRecord.userId, last: sql<Date>`max(${bookkeepingRecord.createdAt})` }).from(bookkeepingRecord).where(eq(bookkeepingRecord.kind, "sign-in-log")).groupBy(bookkeepingRecord.userId),
     db.select({
       userId: bookkeepingRecord.userId,
       records: sql<number>`count(*) filter (where ${bookkeepingRecord.kind} not in (${sql.join(notWork.map((kind) => sql`${kind}`), sql`, `)}))`,
@@ -79,6 +84,8 @@ export async function loadAdminData() {
   ]);
 
   const lastSession = new Map(sessions.map((row) => [row.userId, iso(row.last)]));
+  for (const row of signIns) if (iso(row.last) > (lastSession.get(row.userId) ?? "")) lastSession.set(row.userId, iso(row.last));
+  const liveSessions = new Map(sessions.map((row) => [row.userId, Number(row.live)]));
   const statsBy = new Map(stats.map((row) => [row.userId, row]));
   const active = memberships.filter((row) => row.data.status === "Active" && row.data.enabled !== "false" && row.data.memberUserId && row.data.memberUserId !== row.ownerId);
   // Someone invited into another business works there; everyone else owns their own.
@@ -122,6 +129,8 @@ export async function loadAdminData() {
       lastSeen: lastSession.get(row.id) ?? "",
       business: membership ? businessName.get(membership.ownerId) ?? userById.get(membership.ownerId)?.name ?? "" : businessName.get(row.id) ?? row.name,
       role: membership ? membership.data.role || "Viewer" : "Owner",
+      twoStep: Boolean(row.twoStep),
+      devices: liveSessions.get(row.id) ?? 0,
     };
   }).sort((a, b) => (b.lastSeen || b.signedUp).localeCompare(a.lastSeen || a.signedUp));
 

@@ -13,9 +13,9 @@
  */
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
-import { genericOAuth, magicLink } from "better-auth/plugins";
-import { and, eq, sql } from "drizzle-orm";
-import { headers } from "next/headers";
+import { genericOAuth, magicLink, twoFactor } from "better-auth/plugins";
+import { and, desc, eq, sql } from "drizzle-orm";
+import { cookies, headers } from "next/headers";
 import { cache } from "react";
 
 import { db } from "@/db";
@@ -28,6 +28,32 @@ import { currentRoleOverride } from "@/lib/role-override";
 import { canAccess, canReadKind, canWriteKind, isRole, type Role } from "@/lib/permissions";
 import { billingAccess, type BillingAccess } from "@/lib/billing";
 import { featureLabels, featuresForKind, planFor } from "@/lib/plans";
+import { isPlatformAdmin } from "@/lib/platform";
+import { readViewAs, VIEW_AS_COOKIE } from "@/lib/view-as";
+
+/** One row per sign-in, kept under the person's own id; the app's screens never list this kind. */
+export const SIGN_IN_LOG_KIND = "sign-in-log";
+const SIGN_INS_KEPT = 30;
+
+/**
+ * Notes a new sign-in (device, address, time) for "Recent sign-ins" on the
+ * profile page. Never blocks signing in: a failure here is only logged. Two-step
+ * sign-in briefly opens a session before the code is checked, so a repeat from
+ * the same device within two minutes is one sign-in, not two.
+ */
+async function recordSignIn(session: { userId: string; ipAddress?: string | null; userAgent?: string | null }) {
+  try {
+    const [last] = await db.select().from(schema.bookkeepingRecord)
+      .where(and(eq(schema.bookkeepingRecord.userId, session.userId), eq(schema.bookkeepingRecord.kind, SIGN_IN_LOG_KIND)))
+      .orderBy(desc(schema.bookkeepingRecord.createdAt)).limit(1);
+    const userAgent = (session.userAgent ?? "").slice(0, 300);
+    if (last && last.data.userAgent === userAgent && Date.now() - last.createdAt.getTime() < 2 * 60 * 1000) return;
+    await db.insert(schema.bookkeepingRecord).values({ userId: session.userId, kind: SIGN_IN_LOG_KIND, data: { at: new Date().toISOString(), ipAddress: session.ipAddress ?? "", userAgent } });
+    await db.execute(sql`delete from ${schema.bookkeepingRecord} where ${schema.bookkeepingRecord.userId} = ${session.userId} and ${schema.bookkeepingRecord.kind} = ${SIGN_IN_LOG_KIND} and ${schema.bookkeepingRecord.id} not in (select ${schema.bookkeepingRecord.id} from ${schema.bookkeepingRecord} where ${schema.bookkeepingRecord.userId} = ${session.userId} and ${schema.bookkeepingRecord.kind} = ${SIGN_IN_LOG_KIND} order by ${schema.bookkeepingRecord.createdAt} desc limit ${SIGN_INS_KEPT})`);
+  } catch (error) {
+    console.error("[auth] couldn't note the sign-in", error);
+  }
+}
 
 /**
  * Which origin this app answers on — resolved PER REQUEST, not pinned at build.
@@ -245,7 +271,14 @@ export const auth = betterAuth({
   // months ago. Gate features on `user.emailVerified` instead when you only need
   // to protect something specific.
   // emailAndPassword.requireEmailVerification — see Better Auth docs.
+  databaseHooks: {
+    session: { create: { after: async (session) => { await recordSignIn(session); } } },
+  },
   plugins: [
+    // Two-step sign-in: after the password, a 6-digit code from an authenticator
+    // app (or a one-time backup code). People who sign in only with Google have
+    // no password, so they can turn it on without one.
+    twoFactor({ issuer: "MIK LEDGER", allowPasswordless: true }),
     magicLink({
       sendMagicLink: async ({ email, url }) => {
         // MUST throw: this link is the only way in. Reporting success without
@@ -295,12 +328,16 @@ export const auth = betterAuth({
 });
 
 /** The signed-in user, or null. Safe in server components and server actions. */
-export const getUser = cache(async function getUser() {
-  const result = await auth.api.getSession({ headers: await headers() });
-  return result?.user ?? null;
+export const getAuthSession = cache(async function getAuthSession() {
+  return auth.api.getSession({ headers: await headers() });
 });
 
-export type SignedInUser = Omit<typeof schema.user.$inferSelect, "image"> & { image?: string | null };
+/** The signed-in user, or null. Safe in server components and server actions. */
+export const getUser = cache(async function getUser() {
+  return (await getAuthSession())?.user ?? null;
+});
+
+export type SignedInUser = Omit<typeof schema.user.$inferSelect, "image" | "twoFactorEnabled"> & { image?: string | null; twoFactorEnabled?: boolean | null };
 
 /**
  * The signed-in person as seen by the data layer.
@@ -320,6 +357,8 @@ export interface WorkspaceUser extends SignedInUser {
   workspaceName: string;
   /** What the workspace's plan allows right now. */
   access: BillingAccess;
+  /** Set while a Super Admin looks at this business read-only for support. */
+  viewingAs?: boolean;
 }
 
 /** The active membership of a signed-in person in someone else's workspace, if any. */
@@ -339,7 +378,23 @@ const membershipFor = cache(async function membershipFor(userId: string) {
   return { ownerId: membership.userId, role: isRole(membership.data.role) ? membership.data.role : "Viewer" as Role, ownerName: owner?.name ?? "Business", ownerEmail: owner?.email ?? "" };
 });
 
+/** The business a Super Admin is looking at read-only, from their signed cookie. */
+const viewAsTarget = cache(async function viewAsTarget(adminId: string, email: string) {
+  if (!isPlatformAdmin(email)) return null;
+  const ownerId = readViewAs((await cookies()).get(VIEW_AS_COOKIE)?.value, adminId);
+  if (!ownerId || ownerId === adminId) return null;
+  const [owner] = await db.select().from(schema.user).where(eq(schema.user.id, ownerId)).limit(1);
+  if (!owner) return null;
+  const [settings] = await db.select({ data: schema.bookkeepingRecord.data }).from(schema.bookkeepingRecord).where(and(eq(schema.bookkeepingRecord.userId, ownerId), eq(schema.bookkeepingRecord.kind, "settings"))).limit(1);
+  return { owner, name: settings?.data.companyName?.trim() || owner.name };
+});
+
 async function asWorkspaceUser(signedIn: SignedInUser): Promise<WorkspaceUser> {
+  const viewing = await viewAsTarget(signedIn.id, signedIn.email);
+  if (viewing) {
+    // Admin, so every screen shows what the owner sees; `viewingAs` stops every change.
+    return { ...signedIn, id: viewing.owner.id, actorId: signedIn.id, ownerId: viewing.owner.id, role: "Admin", isOwner: false, workspaceName: viewing.name, access: await billingAccess(viewing.owner.id, viewing.owner.email), viewingAs: true };
+  }
   const membership = await membershipFor(signedIn.id);
   if (!membership) return { ...signedIn, actorId: signedIn.id, ownerId: signedIn.id, role: "Admin", isOwner: true, workspaceName: signedIn.name, access: await billingAccess(signedIn.id, signedIn.email) };
   // The Free plan is for the owner alone; team members can still look, not change anything.
@@ -376,14 +431,21 @@ export async function requireUser(): Promise<WorkspaceUser> {
   return override ? { ...workspaceUser, role: override } : workspaceUser;
 }
 
+/** Throws while a Super Admin is only looking at someone else's business. */
+export function assertNotViewing(me: WorkspaceUser) {
+  if (me.viewingAs) throw new ActionError("You’re viewing this business read-only as Super Admin, so nothing can be changed. Exit the view to go back.");
+}
+
 /** Throws unless the signed-in person's role may change records of this kind. */
 export function assertCanWrite(me: WorkspaceUser, kind: string) {
+  assertNotViewing(me);
   if (!canWriteKind(me.role, kind)) throw new ActionError("Your role doesn’t allow changing this. Ask an Admin in your business.");
   assertPlanAllows(me, kind);
 }
 
 /** Throws when the plan has run out (records are read-only) or doesn't include this part of the product. */
 export function assertPlanAllows(me: WorkspaceUser, kind: string) {
+  assertNotViewing(me);
   if (me.access.suspended) throw new ActionError("This business has been paused by MIK LEDGER, so nothing can be changed. Contact support to turn it back on.");
   if (me.access.locked) throw new ActionError("Your business is on the Free plan, which is for the owner only. Ask the owner to upgrade so the team can make changes.");
   const needed = featuresForKind(kind, true);
@@ -397,5 +459,6 @@ export function assertCanRead(me: WorkspaceUser, kind: string) {
 
 /** Throws unless the signed-in person is an Admin of their workspace. */
 export function assertAdmin(me: WorkspaceUser) {
+  assertNotViewing(me);
   if (!canAccess(me.role, "admin", "write")) throw new ActionError("Only an Admin can do this.");
 }

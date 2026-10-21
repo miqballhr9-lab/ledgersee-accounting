@@ -1,15 +1,18 @@
 "use server";
 
 import { and, eq } from "drizzle-orm";
+import { cookies } from "next/headers";
 
 import { db } from "@/db";
-import { bookkeepingRecord, user } from "@/db/schema";
+import { bookkeepingRecord, session, user } from "@/db/schema";
 import { ActionError } from "@/lib/action-error";
 import { getUser, requireUser } from "@/lib/auth";
 import { subscriptionFor, saveSubscription } from "@/lib/billing";
 import { sendEmail } from "@/lib/email";
 import { ANNOUNCEMENT_KIND, BUSINESS_FLAGS_KIND, FEEDBACK_KIND, isPlatformAdmin } from "@/lib/platform";
+import { recordAudit } from "@/lib/audit";
 import { revalidatePath } from "@/lib/revalidate";
+import { signViewAs, VIEW_AS_COOKIE, VIEW_AS_SECONDS } from "@/lib/view-as";
 
 /** The signed-in platform admin, or throw: every action here is theirs alone. */
 async function requirePlatformAdmin() {
@@ -105,4 +108,29 @@ export async function submitFeedback(type: string, message: string, page: string
     kind: FEEDBACK_KIND,
     data: { type: kind, message: text, page: page.slice(0, 200), name: me.name, email: me.email, business: me.workspaceName, role: me.role, status: "New" },
   });
+}
+
+/**
+ * Opens a business read-only for support, for an hour. The business's Audit Log
+ * notes it, so its owner can see that support looked.
+ */
+export async function startViewAs(ownerId: string): Promise<void> {
+  const admin = await requirePlatformAdmin();
+  await ownerExists(ownerId);
+  if (ownerId === admin.id) throw new ActionError("That's your own business; open it normally.");
+  (await cookies()).set(VIEW_AS_COOKIE, signViewAs(admin.id, ownerId), { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax", path: "/", maxAge: VIEW_AS_SECONDS });
+  await recordAudit({ id: ownerId, name: "MIK LEDGER support", email: admin.email }, "Viewed for support (read-only)", "support-view", ownerId, { description: `By ${admin.email}` });
+}
+
+/** Back to the admin's own business. Open to anyone signed in: it only removes a cookie. */
+export async function stopViewAs(): Promise<void> {
+  (await cookies()).delete(VIEW_AS_COOKIE);
+}
+
+/** Signs a person out on every device, e.g. after they report a lost phone. */
+export async function signOutEverywhere(userId: string): Promise<number> {
+  await requirePlatformAdmin();
+  const removed = await db.delete(session).where(eq(session.userId, userId)).returning({ id: session.id });
+  revalidatePath("/admin");
+  return removed.length;
 }

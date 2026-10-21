@@ -3,14 +3,14 @@
 import { useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowRight, Eye, EyeOff, LockKeyhole } from "lucide-react";
+import { ArrowRight, Eye, EyeOff, LockKeyhole, ShieldCheck } from "lucide-react";
 
 import LedgerPreview from "@/components/account/LedgerPreview";
 import BrandWordmark from "@/components/brand/BrandWordmark";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { signIn, signUp } from "@/lib/auth-client";
+import { signIn, signUp, twoFactor } from "@/lib/auth-client";
 import { describeAuthError } from "@/lib/errors";
 
 export default function AccountAccess() {
@@ -22,6 +22,33 @@ export default function AccountAccess() {
   const [showPassword, setShowPassword] = useState(false);
   const [message, setMessage] = useState("");
   const [isPending, setIsPending] = useState(false);
+  // Second step for people who turned on two-step sign-in.
+  const [codeStep, setCodeStep] = useState(false);
+  const [useBackup, setUseBackup] = useState(false);
+  const [code, setCode] = useState("");
+  const [trustDevice, setTrustDevice] = useState(true);
+
+  async function verifyCode(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setMessage("");
+    setIsPending(true);
+    try {
+      const entered = code.trim();
+      const result = useBackup
+        ? await twoFactor.verifyBackupCode({ code: entered, trustDevice })
+        : await twoFactor.verifyTotp({ code: entered.replace(/\s/g, ""), trustDevice });
+      if (result.error) {
+        setMessage(result.error.status === 401 || /invalid/i.test(result.error.message ?? "") ? "That code didn’t work. Check the time on your phone and try the newest code." : describeAuthError(result.error).message);
+        return;
+      }
+      router.replace("/app");
+      router.refresh();
+    } catch (error) {
+      setMessage(describeAuthError(error).message);
+    } finally {
+      setIsPending(false);
+    }
+  }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -35,6 +62,12 @@ export default function AccountAccess() {
 
       if (result.error) {
         setMessage(describeAuthError(result.error).message);
+        return;
+      }
+      if (result.data && "twoFactorRedirect" in result.data && result.data.twoFactorRedirect) {
+        setCode("");
+        setUseBackup(false);
+        setCodeStep(true);
         return;
       }
       router.replace("/app");
@@ -83,6 +116,30 @@ export default function AccountAccess() {
             {mode === "sign-in" ? "Sign in to pick up where you left off." : "Start organizing your books in one place."}
           </p>
 
+          {codeStep ? (
+            <form className="mt-7 space-y-5" onSubmit={verifyCode}>
+              <div className="rounded-lg border border-border bg-muted/40 p-4">
+                <p className="flex items-center gap-2 text-sm font-semibold"><ShieldCheck size={16} className="text-primary" />Two-step sign-in</p>
+                <p className="mt-1 text-sm text-muted-foreground">{useBackup ? "Enter one of the backup codes you saved. Each code works once." : "Open your authenticator app and enter the 6-digit code for MIK LEDGER."}</p>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="two-step-code">{useBackup ? "Backup code" : "6-digit code"}</Label>
+                <Input id="two-step-code" autoFocus autoComplete="one-time-code" inputMode={useBackup ? "text" : "numeric"} maxLength={useBackup ? 20 : 7} value={code} onChange={(event) => setCode(event.target.value)} required className="h-11 text-center text-lg tracking-[0.3em]" />
+              </div>
+              <label className="flex items-center gap-2 text-sm text-muted-foreground">
+                <input type="checkbox" className="size-4 accent-primary" checked={trustDevice} onChange={(event) => setTrustDevice(event.target.checked)} />
+                Don’t ask again on this device for 30 days
+              </label>
+              {message ? <p role="alert" className="rounded-md border border-destructive/20 bg-destructive/5 px-3 py-2.5 text-sm text-destructive">{message}</p> : null}
+              <Button type="submit" className="h-10 w-full gap-2" disabled={isPending || code.trim().length < 6}>
+                {isPending ? "Checking…" : "Verify and sign in"}
+              </Button>
+              <div className="flex items-center justify-between gap-3 text-xs">
+                <button type="button" className="font-medium text-primary hover:underline" onClick={() => { setUseBackup((value) => !value); setCode(""); setMessage(""); }}>{useBackup ? "Use the authenticator app" : "Lost your phone? Use a backup code"}</button>
+                <button type="button" className="text-muted-foreground hover:text-foreground" onClick={() => { setCodeStep(false); setPassword(""); setMessage(""); }}>Back</button>
+              </div>
+            </form>
+          ) : (<>
           <LedgerPreview onCreateAccount={() => { setMode("sign-up"); setMessage(""); }} />
 
           <div className="mt-7 grid grid-cols-2 rounded-lg border border-border bg-muted/70 p-1">
@@ -151,6 +208,7 @@ export default function AccountAccess() {
               {!isPending ? <ArrowRight size={16} /> : null}
             </Button>
           </form>
+          </>)}
           <p className="mt-6 text-center text-xs leading-5 text-muted-foreground">
             Your records are saved to your account and are not shared with other sign-ins.
           </p>

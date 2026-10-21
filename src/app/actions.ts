@@ -9,7 +9,7 @@ import { revalidatePath } from "@/lib/revalidate";
 import { db } from "@/db";
 import { ActionError } from "@/lib/action-error";
 import { bookkeepingRecord, user } from "@/db/schema";
-import { assertCanRead, assertCanWrite, requireUser } from "@/lib/auth";
+import { assertCanRead, assertCanWrite, assertNotViewing, requireUser } from "@/lib/auth";
 import { canReadKind } from "@/lib/permissions";
 import { syncAttachmentRepayments } from "@/lib/hr-rules";
 import { sendEmailOrThrow } from "@/lib/email";
@@ -62,17 +62,25 @@ export async function updateProfileName(input: string): Promise<{ ok: true; name
 
 export async function exportMyAccountData() {
   const me = await requireUser();
+  assertNotViewing(me);
   const records = await db
     .select({ id: bookkeepingRecord.id, kind: bookkeepingRecord.kind, data: bookkeepingRecord.data, createdAt: bookkeepingRecord.createdAt, updatedAt: bookkeepingRecord.updatedAt })
     .from(bookkeepingRecord)
     .where(eq(bookkeepingRecord.userId, me.id))
     .orderBy(desc(bookkeepingRecord.updatedAt));
   // A team member exports only their own profile; the business's records are the owner's to export.
-  const exportable = me.role === "Admin" ? records : [];
+  // Billing, platform notes and sign-in history aren't the business's records, and no
+  // link token or secret leaves in a file that may be emailed around.
+  const hidden = (kind: string) => kind === "subscription" || kind === "sign-in-log" || kind.startsWith("platform-");
+  const exportable = me.role === "Admin" ? records.filter((record) => !hidden(record.kind)).map((record) => ({
+    ...record,
+    data: Object.fromEntries(Object.entries(record.data).filter(([key]) => !/token|secret|password/i.test(key))),
+  })) : [];
 
   return {
     exportedAt: new Date().toISOString(),
     account: { name: me.name, email: me.email },
+    business: me.workspaceName,
     records: exportable.map((record) => ({
       ...record,
       createdAt: record.createdAt.toISOString(),
@@ -1127,6 +1135,7 @@ function escapeBudgetHtml(value: string) {
 export async function sendBudgetSummary(id: string, recipient: string): Promise<void> {
   const me = await requireUser();
   assertCanRead(me, "budgets");
+  assertNotViewing(me);
   const email = recipient.trim().toLowerCase();
   if (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new ActionError("Enter a valid recipient email address.");
   const [budgetRow] = await db

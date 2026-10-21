@@ -6,7 +6,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { bookkeepingRecord, user } from "@/db/schema";
 import { ActionError } from "@/lib/action-error";
-import { assertAdmin, getUser, requireUser } from "@/lib/auth";
+import { assertAdmin, assertNotViewing, getUser, requireUser } from "@/lib/auth";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
 import { sendEmail } from "@/lib/email";
 import { isRole, type Role } from "@/lib/permissions";
@@ -218,6 +218,7 @@ export async function acceptInvite(token: string): Promise<void> {
 /** A member leaves the business they joined and goes back to their own workspace. */
 export async function leaveBusiness(): Promise<void> {
   const me = await requireUser();
+  assertNotViewing(me);
   if (me.isOwner) throw new ActionError("You’re the owner of this business, so there’s nothing to leave.");
   const rows = await db.select().from(bookkeepingRecord)
     .where(and(eq(bookkeepingRecord.userId, me.ownerId), eq(bookkeepingRecord.kind, "team-members"), sql`${bookkeepingRecord.data}->>'memberUserId' = ${me.actorId}`));
