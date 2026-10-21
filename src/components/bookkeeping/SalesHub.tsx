@@ -3,19 +3,24 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowDownToLine, CalendarDays, CircleDollarSign, MoreHorizontal, Plus, Printer, Search } from "lucide-react";
+import { toast } from "sonner";
+import { ArrowDownToLine, CalendarDays, ChevronDown, CircleDollarSign, MoreHorizontal, Plus, Printer, Search, Trash2 } from "lucide-react";
+
+import { deleteBookkeepingRecord } from "@/app/actions";
 
 import ReceivePaymentDialog, { invoiceBalance, isOpenInvoice } from "@/components/bookkeeping/ReceivePaymentDialog";
 import RecordEditor from "@/components/bookkeeping/RecordEditor";
 import { StatusBadge } from "@/components/crm/crm-shared";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { salesReceiptModule } from "@/lib/bookkeeping-config";
-import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
+import type { BookkeepingRecord, RecordKind } from "@/lib/bookkeeping-types";
 import { currencyAmount, homeRate } from "@/lib/invoice-utils";
+import { readableError } from "@/lib/action-error";
 
 interface SalesHubProps {
   invoices: BookkeepingRecord[];
@@ -34,6 +39,9 @@ type SaleType = "Invoice" | "Sales receipt" | "Payment" | "Estimate" | "Sales or
 
 interface SaleRow {
   key: string;
+  /** The record behind the row, for deleting it; payments are removed from their invoice instead. */
+  kind: RecordKind | "";
+  id: string;
   type: SaleType;
   date: string;
   number: string;
@@ -106,6 +114,9 @@ export default function SalesHub({ invoices, estimates, salesOrders, creditNotes
   const [datePreset, setDatePreset] = useState("365");
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [removed, setRemoved] = useState<Set<string>>(new Set());
+  const [working, setWorking] = useState(false);
   const [receiving, setReceiving] = useState<{ customer: string; invoiceId: string } | null>(null);
   const [receiptOpen, setReceiptOpen] = useState(false);
   const [receiptKey, setReceiptKey] = useState(0);
@@ -113,6 +124,7 @@ export default function SalesHub({ invoices, estimates, salesOrders, creditNotes
   const receiptModule = useMemo(() => salesReceiptModule(), []);
   const pageSize = 25;
 
+  const customerId = useMemo(() => new Map(customers.map((customer) => [(customer.data.name ?? "").trim().toLowerCase(), customer.id])), [customers]);
   const invoiceById = useMemo(() => new Map(invoices.map((invoice) => [invoice.id, invoice])), [invoices]);
 
   const rows = useMemo<SaleRow[]>(() => {
@@ -127,6 +139,8 @@ export default function SalesHub({ invoices, estimates, salesOrders, creditNotes
       const rate = homeRate(invoice.data, currency);
       result.push({
         key: `invoice-${invoice.id}`,
+        kind: "invoices",
+        id: invoice.id,
         type: receipt ? "Sales receipt" : "Invoice",
         date: invoice.data.issueDate || invoice.createdAt.slice(0, 10),
         number: invoice.data.invoiceNumber || "",
@@ -148,6 +162,8 @@ export default function SalesHub({ invoices, estimates, salesOrders, creditNotes
       if (!invoice || invoice.data.docType === "Sales receipt") continue;
       result.push({
         key: `payment-${payment.id}`,
+        kind: "",
+        id: payment.id,
         type: "Payment",
         date: payment.data.paymentDate || payment.createdAt.slice(0, 10),
         number: payment.data.referenceNumber || "",
@@ -162,7 +178,7 @@ export default function SalesHub({ invoices, estimates, salesOrders, creditNotes
         printHref: "",
       });
     }
-    const documents: Array<[BookkeepingRecord[], SaleType, string, string, string]> = [
+    const documents: Array<[BookkeepingRecord[], SaleType, string, string, RecordKind]> = [
       [estimates, "Estimate", "estimateNumber", "expiryDate", "estimates"],
       [salesOrders, "Sales order", "orderNumber", "deliveryDate", "sales-orders"],
       [creditNotes, "Credit note", "creditNumber", "", "credit-notes"],
@@ -173,6 +189,8 @@ export default function SalesHub({ invoices, estimates, salesOrders, creditNotes
         const amount = entered * homeRate(record.data, currency);
         result.push({
           key: `${slug}-${record.id}`,
+          kind: slug,
+          id: record.id,
           type,
           date: record.data.date || record.createdAt.slice(0, 10),
           number: record.data[numberKey] || "",
@@ -209,6 +227,7 @@ export default function SalesHub({ invoices, estimates, salesOrders, creditNotes
   const from = days ? shiftDate(asOfDate, days) : "";
   const needle = search.trim().toLowerCase();
   const filtered = rows.filter((row) => {
+    if (removed.has(row.key)) return false;
     if (!allowedTypes.includes(row.type)) return false;
     if (from && row.date < from) return false;
     if (statusFilter === "Open" && !(row.balance > 0.005 && row.status !== "Draft")) return false;
@@ -230,9 +249,37 @@ export default function SalesHub({ invoices, estimates, salesOrders, creditNotes
     setPage(1);
   }
 
-  function exportCsv() {
+  const chosen = filtered.filter((row) => selected.has(row.key));
+  const pageChecked = pageRows.length > 0 && pageRows.every((row) => selected.has(row.key));
+  const toggle = (key: string, on: boolean) => setSelected((current) => { const next = new Set(current); if (on) next.add(key); else next.delete(key); return next; });
+
+  async function deleteChosen() {
+    const deletable = chosen.filter((row) => row.kind);
+    const skipped = chosen.length - deletable.length;
+    if (!deletable.length) return toast.error("Payments can't be deleted here. Open the invoice and remove the payment there.");
+    if (!window.confirm(`Delete ${deletable.length} ${deletable.length === 1 ? "transaction" : "transactions"}? This can’t be undone.${skipped ? ` ${skipped} payment${skipped === 1 ? "" : "s"} will be left as they are.` : ""}`)) return;
+    setWorking(true);
+    const done: string[] = [];
+    const failed: string[] = [];
+    for (const row of deletable) {
+      try {
+        await deleteBookkeepingRecord(row.kind, row.id);
+        done.push(row.key);
+      } catch (error) {
+        failed.push(`${row.type} ${row.number || ""}: ${error instanceof Error ? readableError(error) : "it couldn’t be deleted."}`.trim());
+      }
+    }
+    setRemoved((current) => new Set([...current, ...done]));
+    setSelected(new Set());
+    setWorking(false);
+    if (done.length) toast.success(`${done.length} ${done.length === 1 ? "transaction" : "transactions"} deleted.`);
+    if (failed.length) toast.error(failed.slice(0, 3).join(" · "));
+    router.refresh();
+  }
+
+  function exportCsv(list: SaleRow[] = filtered) {
     const escape = (value: string) => `"${value.replaceAll('"', '""')}"`;
-    const csv = [["Date", "Type", "No.", "Customer", "Due date", "Balance", "Total", "Status"], ...filtered.map((row) => [row.date, row.type, row.number, row.customer, row.dueDate, row.balance.toFixed(2), row.total.toFixed(2), row.status])]
+    const csv = [["Date", "Type", "No.", "Customer", "Due date", "Balance", "Total", "Status"], ...list.map((row) => [row.date, row.type, row.number, row.customer, row.dueDate, row.balance.toFixed(2), row.total.toFixed(2), row.status])]
       .map((line) => line.map(escape).join(","))
       .join("\r\n");
     const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
@@ -264,7 +311,7 @@ export default function SalesHub({ invoices, estimates, salesOrders, creditNotes
           <p className="mt-1.5 text-sm text-muted-foreground">Invoices, sales receipts, payments, estimates and credit notes in one list.</p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          <Button variant="outline" className="gap-2" onClick={exportCsv}><ArrowDownToLine size={15} />Export</Button>
+          <Button variant="outline" className="gap-2" onClick={() => exportCsv()}><ArrowDownToLine size={15} />Export</Button>
           <DropdownMenu>
             <DropdownMenuTrigger render={<Button className="gap-2"><Plus size={16} />New transaction</Button>} />
             <DropdownMenuContent align="end" className="min-w-52">
@@ -297,6 +344,18 @@ export default function SalesHub({ invoices, estimates, salesOrders, creditNotes
             <p className="mt-0.5 text-xs text-muted-foreground">{filtered.length} {filtered.length === 1 ? "transaction" : "transactions"}</p>
           </div>
           <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
+            {chosen.length ? (
+              <DropdownMenu>
+                <DropdownMenuTrigger render={<Button variant="outline" className="gap-1.5" disabled={working}>Actions ({chosen.length})<ChevronDown size={14} /></Button>} />
+                <DropdownMenuContent align="end" className="min-w-52">
+                  <DropdownMenuItem onClick={() => exportCsv(chosen)}><ArrowDownToLine size={14} />Export to Excel (CSV)</DropdownMenuItem>
+                  {chosen.some((row) => row.printHref) ? <DropdownMenuItem onClick={() => { for (const row of chosen.filter((item) => item.printHref).slice(0, 10)) { const opened = window.open(row.printHref, "_blank"); if (opened) opened.opener = null; } }}><Printer size={14} />Print{chosen.filter((row) => row.printHref).length > 10 ? " (first 10)" : ""}</DropdownMenuItem> : null}
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem className="text-destructive" onClick={() => void deleteChosen()}><Trash2 size={14} />Delete</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setSelected(new Set())}>Clear selection</DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ) : null}
             <div className="relative min-w-0 basis-full sm:w-56 sm:flex-none sm:basis-auto">
               <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
               <Input value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); }} placeholder="Search by no. or customer" className="pl-9" aria-label="Search sales" />
@@ -320,6 +379,7 @@ export default function SalesHub({ invoices, estimates, salesOrders, creditNotes
           <Table>
             <TableHeader>
               <TableRow className="bg-muted/40 hover:bg-muted/40">
+                <TableHead className="w-10"><Checkbox checked={pageChecked} aria-label="Select all on this page" onCheckedChange={(on) => setSelected((current) => { const next = new Set(current); for (const row of pageRows) { if (on) next.add(row.key); else next.delete(row.key); } return next; })} /></TableHead>
                 {["Date", "Type", "No.", "Customer", "Due date", `Balance (${currency})`, "Total", `Total (${currency})`, "Status", "Action"].map((heading) => (
                   <TableHead key={heading} className={`whitespace-nowrap text-xs font-medium text-muted-foreground ${heading.startsWith("Balance") || heading.startsWith("Total") || heading === "Action" ? "text-right" : ""}`}>{heading}</TableHead>
                 ))}
@@ -327,11 +387,12 @@ export default function SalesHub({ invoices, estimates, salesOrders, creditNotes
             </TableHeader>
             <TableBody>
               {pageRows.map((row) => (
-                <TableRow key={row.key} className="cursor-pointer" onClick={(event) => { if (!(event.target as HTMLElement).closest("button, a, [role=menu]")) router.push(row.href); }}>
+                <TableRow key={row.key} data-state={selected.has(row.key) ? "selected" : undefined} className="cursor-pointer" onClick={(event) => { if (!(event.target as HTMLElement).closest("button, a, [role=menu], [role=checkbox]")) router.push(row.href); }}>
+                  <TableCell className="w-10" onClick={(event) => event.stopPropagation()}><Checkbox checked={selected.has(row.key)} aria-label={`Select ${row.type.toLowerCase()} ${row.number}`} onCheckedChange={(on) => toggle(row.key, Boolean(on))} /></TableCell>
                   <TableCell className="whitespace-nowrap text-[13px]">{formatDate(row.date)}</TableCell>
                   <TableCell className="whitespace-nowrap text-[13px]">{row.type}</TableCell>
                   <TableCell className="text-[13px] font-medium text-primary"><Link href={row.href}>{row.number || "—"}</Link></TableCell>
-                  <TableCell className="max-w-[200px] text-[13px]"><span className="block truncate" title={row.customer}>{row.customer || "—"}</span></TableCell>
+                  <TableCell className="max-w-[200px] text-[13px]">{customerId.has(row.customer.trim().toLowerCase()) ? <Link href={`/app/customers?open=${customerId.get(row.customer.trim().toLowerCase())}`} className="block truncate hover:text-primary hover:underline" title={row.customer}>{row.customer}</Link> : <span className="block truncate" title={row.customer}>{row.customer || "—"}</span>}</TableCell>
                   <TableCell className={`whitespace-nowrap text-[13px] ${row.status === "Overdue" ? "text-destructive" : ""}`}>{formatDate(row.dueDate)}</TableCell>
                   <TableCell className="text-right text-[13px] tabular-nums">{currencyAmount(row.balance, currency)}</TableCell>
                   <TableCell className="text-right text-[13px] tabular-nums">{currencyAmount(row.docTotal, row.docCurrency)}</TableCell>
@@ -363,7 +424,7 @@ export default function SalesHub({ invoices, estimates, salesOrders, creditNotes
               ))}
               {!pageRows.length ? (
                 <TableRow>
-                  <TableCell colSpan={10} className="h-40 whitespace-normal text-center">
+                  <TableCell colSpan={11} className="h-40 whitespace-normal text-center">
                     <p className="text-sm font-medium">{rows.length ? "No sales match these filters" : "No sales yet"}</p>
                     <p className="mt-1 text-sm text-muted-foreground">{rows.length ? "Change the type, status or dates to see more." : "Create an invoice or a sales receipt to get started."}</p>
                   </TableCell>

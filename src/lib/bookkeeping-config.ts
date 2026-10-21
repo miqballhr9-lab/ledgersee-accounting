@@ -634,6 +634,7 @@ export const navigationGroups: NavigationGroup[] = [
   {
     label: "Purchases",
     items: [
+      { slug: "purchases", label: "All purchases", icon: "ShoppingBag" },
       { slug: "vendors", label: "Suppliers", icon: "ContactRound" },
       { slug: "bills", label: "Bills", icon: "Receipt" },
       { slug: "expenses", label: "Expenses", icon: "WalletCards" },
