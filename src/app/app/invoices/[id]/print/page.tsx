@@ -6,6 +6,7 @@ import { bookkeepingRecord } from "@/db/schema";
 import { requireUser } from "@/lib/auth";
 import InvoiceDocument from "@/components/bookkeeping/InvoiceDocument";
 import InvoicePrintButton from "@/components/bookkeeping/InvoicePrintButton";
+import { customerForDocument } from "@/lib/document-customer";
 import { requireFeature } from "@/lib/plan-gate";
 
 interface InvoicePrintPageProps {
@@ -30,13 +31,14 @@ export default async function InvoicePrintPage({ params }: InvoicePrintPageProps
       .limit(1),
   ]);
   if (!invoice[0]) notFound();
+  const customer = await customerForDocument(me.id, invoice[0].data);
 
   return (
     <main className="min-h-dvh bg-background px-4 py-8 sm:px-8 print:bg-white print:p-0">
       <div className="mx-auto mb-4 flex max-w-4xl justify-end print:hidden">
         <InvoicePrintButton />
       </div>
-      <InvoiceDocument invoice={invoice[0].data} companyName={settings[0]?.data.companyName || me.name} seller={settings[0]?.data} />
+      <InvoiceDocument invoice={invoice[0].data} companyName={settings[0]?.data.companyName || me.name} seller={settings[0]?.data} customer={customer} />
     </main>
   );
 }

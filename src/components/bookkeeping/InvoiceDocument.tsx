@@ -1,5 +1,6 @@
 import { Fragment } from "react";
 
+import { formatCustomerAddress } from "@/lib/customer-utils";
 import { currencyAmount, parseInvoiceLines, type InvoiceLineData } from "@/lib/invoice-utils";
 import { packFor } from "@/lib/tax-packs";
 
@@ -9,6 +10,8 @@ interface InvoiceDocumentProps {
   documentKind?: "invoices" | "estimates" | "sales-orders" | "credit-notes";
   /** The seller's Settings, for tax registration numbers and the tax-invoice title. */
   seller?: Record<string, string>;
+  /** The customer's own record, printed as client details at the end. */
+  customer?: Record<string, string>;
 }
 
 /** Consecutive lines from the same bundle, kept together. */
@@ -29,8 +32,19 @@ const documentDetails = {
   "credit-notes": { label: "Credit note", numberKey: "creditNumber", dateKey: "date", dateLabel: "Date", totalLabel: "Credit amount" },
 } as const;
 
-export default function InvoiceDocument({ invoice, companyName, documentKind = "invoices", seller }: InvoiceDocumentProps) {
+export default function InvoiceDocument({ invoice, companyName, documentKind = "invoices", seller, customer }: InvoiceDocumentProps) {
   const pack = packFor(seller?.taxCountry);
+  // The client's details from their customer record, at the end of the document.
+  const clientName = customer?.name?.trim() || invoice.customer || "";
+  const clientRows: Array<[string, string]> = customer ? ([
+    ["Client", [clientName, customer.company?.trim() && customer.company.trim() !== clientName ? customer.company.trim() : ""].filter(Boolean).join(" · ")],
+    ["Customer no.", customer.customerNumber?.trim() ?? ""],
+    ["Address", formatCustomerAddress(customer)],
+    ["Email", customer.email?.trim() ?? ""],
+    ["Phone", [customer.phone, customer.mobile].map((value) => value?.trim()).filter(Boolean).join(" · ")],
+    ["Website", customer.website?.trim() ?? ""],
+    ["Tax ID", customer.taxId?.trim() ?? ""],
+  ] as Array<[string, string]>).filter(([, value]) => value) : [];
   const registrations = (pack?.registrations ?? []).filter((field) => seller?.[field.key]).map((field) => `${field.label}: ${seller?.[field.key]}`);
   // VAT and GST countries call a taxed invoice a "tax invoice".
   const isTaxInvoice = documentKind === "invoices" && Boolean(pack) && pack?.code !== "US" && Number(invoice.taxAmount) > 0;
@@ -170,6 +184,16 @@ export default function InvoiceDocument({ invoice, companyName, documentKind = "
       </section>
 
       {documentKind === "invoices" && seller?.invoiceMessage && !invoice.notes ? <section className="mt-8 border-t border-border pt-5"><p className="whitespace-pre-wrap text-sm">{seller.invoiceMessage}</p></section> : null}
+      {clientRows.length ? (
+        <section className="mt-8 border-t border-border pt-5" aria-label="Client details">
+          <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Client details</h2>
+          <dl className="mt-3 grid gap-x-8 gap-y-3 text-sm sm:grid-cols-2 print:grid-cols-2">
+            {clientRows.map(([label, value]) => (
+              <div key={label} className="min-w-0"><dt className="text-xs text-muted-foreground">{label}</dt><dd className="mt-0.5 whitespace-pre-line break-words">{value}</dd></div>
+            ))}
+          </dl>
+        </section>
+      ) : null}
       {invoice.notes || invoice.reason ? <section className="mt-8 border-t border-border pt-5"><h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{invoice.reason ? "Reason" : "Message"}</h2><p className="mt-2 whitespace-pre-wrap text-sm">{invoice.reason || invoice.notes}</p></section> : null}
     </article>
   );

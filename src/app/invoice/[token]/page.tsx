@@ -6,6 +6,7 @@ import { db } from "@/db";
 import { bookkeepingRecord } from "@/db/schema";
 import InvoiceDocument from "@/components/bookkeeping/InvoiceDocument";
 import InvoicePrintButton from "@/components/bookkeeping/InvoicePrintButton";
+import { customerForDocument } from "@/lib/document-customer";
 
 export const metadata: Metadata = {
   title: "Invoice",
@@ -35,6 +36,8 @@ export default async function SharedInvoicePage({ params }: SharedInvoicePagePro
     .orderBy(sql`${bookkeepingRecord.updatedAt} desc`)
     .limit(1);
 
+  const customer = await customerForDocument(invoice.userId, invoice.data);
+
   return (
     <main className="min-h-dvh bg-background px-4 py-8 sm:px-8 print:bg-white print:p-0">
       <div className="mx-auto mb-4 flex max-w-4xl justify-end print:hidden">
@@ -44,6 +47,7 @@ export default async function SharedInvoicePage({ params }: SharedInvoicePagePro
         invoice={invoice.data}
         companyName={settings?.data.companyName || "Business"}
         seller={settings?.data}
+        customer={customer}
         documentKind={invoice.kind as "invoices" | "estimates" | "sales-orders" | "credit-notes"}
       />
     </main>

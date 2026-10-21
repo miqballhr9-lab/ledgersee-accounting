@@ -10,6 +10,7 @@ import { requireUser } from "@/lib/auth";
 import { canReadKind } from "@/lib/permissions";
 import { requireFeature } from "@/lib/plan-gate";
 import { featuresForKind } from "@/lib/plans";
+import { customerForDocument } from "@/lib/document-customer";
 
 const printableKinds = ["estimates", "sales-orders", "credit-notes", "expenses"] as const;
 type PrintableKind = (typeof printableKinds)[number];
@@ -54,12 +55,14 @@ export default async function DocumentPrintPage({ params }: DocumentPrintPagePro
     );
   }
 
+  const customer = await customerForDocument(me.id, document[0].data);
+
   return (
     <main className="min-h-dvh bg-background px-4 py-8 sm:px-8 print:bg-white print:p-0">
       <div className="mx-auto mb-4 flex max-w-4xl justify-end print:hidden">
         <InvoicePrintButton />
       </div>
-      <InvoiceDocument invoice={document[0].data} companyName={settings[0]?.data.companyName || me.name} documentKind={documentKind as Exclude<PrintableKind, "expenses">} seller={settings[0]?.data} />
+      <InvoiceDocument invoice={document[0].data} companyName={settings[0]?.data.companyName || me.name} documentKind={documentKind as Exclude<PrintableKind, "expenses">} seller={settings[0]?.data} customer={customer} />
     </main>
   );
 }
