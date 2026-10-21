@@ -10,7 +10,7 @@ export const metadata: Metadata = { title: "Point of sale" };
 
 export default async function PosPage() {
   await requireFeature("accounting");
-  const groups = await listBookkeepingRecordGroups(["customers", "accounts", "settings", "taxes", "warehouses", "stock-transfers", ...inventoryKinds]);
+  const groups = await listBookkeepingRecordGroups(["customers", "crm-price-books", "accounts", "settings", "taxes", "warehouses", "stock-transfers", ...inventoryKinds]);
   const all = Object.values(groups).flat();
   const stock = buildInventory(all);
   const items = (groups.items ?? []).map((item) => (stock.has(item.id) ? { ...item, data: { ...item.data, qtyOnHand: String(stock.get(item.id)!.onHand) } } : item));
@@ -25,6 +25,7 @@ export default async function PosPage() {
     <PosWorkspace
       items={items}
       customers={groups.customers ?? []}
+      priceBooks={groups["crm-price-books"] ?? []}
       accounts={groups.accounts ?? []}
       taxes={groups.taxes ?? []}
       receipts={(groups.invoices ?? []).filter((invoice) => invoice.data.docType === "Sales receipt")}

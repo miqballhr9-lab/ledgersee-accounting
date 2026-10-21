@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Textarea } from "@/components/ui/textarea";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
+import { readPriceBookEntries } from "@/lib/price-books";
 import { crmModule, crmModuleByKind, dealStages, parseHistory, type CrmModule, type CrmModuleKey } from "@/lib/crm-config";
 import {
   activitiesFor,
@@ -277,9 +278,10 @@ export default function CrmRecordDetail({ record, context, onClose, onOpenRecord
                       const target = lookupHref ? store[lookupHref.kind]?.find((item) => item.id === lookupHref.id) : field.type === "related" && data.relatedId ? Object.values(store).flat().find((item) => item.id === data.relatedId) : undefined;
                       return (
                         <div key={field.key} className={`min-w-0 ${field.wide ? "sm:col-span-2" : ""}`}>
-                          <dt className="text-xs text-muted-foreground">{field.label}</dt>
+                          <dt className={field.type === "priceList" ? "sr-only" : "text-xs text-muted-foreground"}>{field.label}</dt>
                           <dd className="mt-0.5 whitespace-pre-wrap break-words text-sm">
-                            {target ? <button type="button" className="text-primary underline-offset-4 hover:underline" onClick={() => onOpenRecord(target)}>{value}</button>
+                            {field.type === "priceList" ? <PriceListTable data={data} currency={currency} customers={(store.customers ?? []).filter((customer) => customer.data.priceBook?.trim().toLowerCase() === data.priceBookName?.trim().toLowerCase())} onOpenRecord={onOpenRecord} />
+                              : target ? <button type="button" className="text-primary underline-offset-4 hover:underline" onClick={() => onOpenRecord(target)}>{value}</button>
                               : field.type === "select" && field.key === mod.statusKey ? <StatusBadge value={value} />
                               : field.type === "email" && value ? <a className="text-primary underline-offset-4 hover:underline" href={`mailto:${value}`}>{value}</a>
                               : field.type === "file" && data[field.key] ? <a className="text-primary underline-offset-4 hover:underline" href={data[field.key]} target="_blank" rel="noreferrer">{value}</a>
@@ -294,7 +296,7 @@ export default function CrmRecordDetail({ record, context, onClose, onOpenRecord
               )) : (
                 <Section title="Account information">
                   <dl className="grid gap-x-6 gap-y-2.5 sm:grid-cols-2">
-                    {([["Account name", data.name], ["Company", data.company], ["Email", data.email], ["Phone", data.phone], ["Mobile", data.mobile], ["Website", data.website], ["Payment terms", data.paymentTerms], ["Tax ID", data.taxId], ["Billing address", [data.address, data.city, data.state, data.postalCode, data.country].filter(Boolean).join(", ")]] as const).map(([label, value]) => (
+                    {([["Account name", data.name], ["Company", data.company], ["Email", data.email], ["Phone", data.phone], ["Mobile", data.mobile], ["Website", data.website], ["Payment terms", data.paymentTerms], ["Price book", data.priceBook], ["Tax ID", data.taxId], ["Billing address", [data.address, data.city, data.state, data.postalCode, data.country].filter(Boolean).join(", ")]] as const).map(([label, value]) => (
                       <div key={label} className="min-w-0"><dt className="text-xs text-muted-foreground">{label}</dt><dd className="mt-0.5 break-words text-sm">{value || <span className="text-muted-foreground">—</span>}</dd></div>
                     ))}
                   </dl>
@@ -430,5 +432,36 @@ export default function CrmRecordDetail({ record, context, onClose, onOpenRecord
         </DialogContent>
       </Dialog>
     </Sheet>
+  );
+}
+
+/** A price book's prices beside each item's standard price, and the customers who get them. */
+function PriceListTable({ data, currency, customers, onOpenRecord }: { data: Record<string, string>; currency: string; customers: BookkeepingRecord[]; onOpenRecord: (record: BookkeepingRecord) => void }) {
+  const rows = readPriceBookEntries(data.entries);
+  const differential = data.pricingModel === "Differential";
+  return (
+    <div className="space-y-3 whitespace-normal">
+      {rows.length ? (
+        <div className="overflow-x-auto rounded-md border border-border">
+          <table className="w-full text-sm">
+            <thead className="bg-muted/50 text-left text-xs text-muted-foreground">
+              <tr><th className="px-3 py-2 font-medium">Item</th>{differential ? <th className="px-3 py-2 font-medium">Quantity</th> : null}<th className="px-3 py-2 text-right font-medium">List price</th></tr>
+            </thead>
+            <tbody>
+              {rows.map((row, index) => (
+                <tr key={index} className="border-t border-border">
+                  <td className="px-3 py-2">{row.item}</td>
+                  {differential ? <td className="px-3 py-2 tabular-nums">{row.toQuantity ? (row.fromQuantity ? `${row.fromQuantity} – ${row.toQuantity}` : `Up to ${row.toQuantity}`) : row.fromQuantity ? `${row.fromQuantity} or more` : "Any quantity"}</td> : null}
+                  <td className="px-3 py-2 text-right tabular-nums">{formatMoney(row.listPrice, currency)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : <p className="text-muted-foreground">No items yet. Edit the price book to add them.</p>}
+      <p className="text-xs text-muted-foreground">
+        {customers.length ? <>Customers on this price book: {customers.map((customer, index) => <span key={customer.id}>{index ? ", " : ""}<button type="button" className="text-primary underline-offset-4 hover:underline" onClick={() => onOpenRecord(customer)}>{customer.data.name}</button></span>)}</> : "No customers use this price book yet. Pick it in a customer's Price book field."}
+      </p>
+    </div>
   );
 }

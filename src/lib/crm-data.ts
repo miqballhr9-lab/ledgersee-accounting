@@ -22,6 +22,8 @@ export async function loadCrmData() {
     me: me.name,
     owners: [...new Set([me.workspaceName, me.name, ...teamNames])],
     currency: groups.settings?.[0]?.data.currency || "USD",
+    timeZone: groups.settings?.[0]?.data.timeZone || "",
+    dealApprovers: groups.settings?.[0]?.data.dealApprovers || "",
     /** Invoices need the Accounting app; the CRM app alone makes quotes. */
     accounting: me.access.locked || me.access.features.includes("accounting"),
   };

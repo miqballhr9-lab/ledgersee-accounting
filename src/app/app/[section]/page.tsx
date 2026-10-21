@@ -16,7 +16,8 @@ import ModuleWorkspace from "@/components/bookkeeping/ModuleWorkspace";
 import PayrollWorkspace from "@/components/bookkeeping/PayrollWorkspace";
 import EmployeesWorkspace from "@/components/hr/EmployeesWorkspace";
 import { odooHrData } from "@/lib/hr-status";
-import { moduleBySlug, withCustomFields, withWarehouses } from "@/lib/bookkeeping-config";
+import { moduleBySlug, withCustomFields, withPriceBooks, withWarehouses } from "@/lib/bookkeeping-config";
+import { activePriceBookNames } from "@/lib/price-books";
 import { weekendDays } from "@/lib/weekend";
 import { packFor } from "@/lib/tax-packs";
 import type { BookkeepingRecord, RecordKind } from "@/lib/bookkeeping-types";
@@ -186,6 +187,7 @@ export default async function SectionPage({ params, searchParams }: SectionPageP
   // A customer's or supplier's page lists their transactions, as QuickBooks' customer centre does.
   const partyDocuments: RecordKind[] = module.kind === "customers" ? ["invoices", "credit-notes", "estimates", "payments"] : module.kind === "vendors" ? ["bills", "expenses", "supplier-credits", "payments"] : [];
   for (const kind of partyDocuments) kinds.add(kind);
+  if (module.kind === "customers") kinds.add("crm-price-books");
   // Quantity on hand comes from the documents that move stock.
   if (module.kind === "items" || module.kind === "stock-transfers" || kinds.has("items")) for (const kind of inventoryKinds) kinds.add(kind);
   if (module.kind === "customers") await assignMissingPartyNumbers((await requireUser()).id, "customers");
@@ -200,6 +202,7 @@ export default async function SectionPage({ params, searchParams }: SectionPageP
   const items = groups.items ?? [];
   const settings = groups.settings ?? [];
   module = withCustomFields(module, settings[0]?.data);
+  module = withPriceBooks(module, activePriceBookNames(groups["crm-price-books"]));
   module = withWarehouses(module, warehouseNames(groups.warehouses), module.kind === "stock-transfers" ? (groups.items ?? []).filter(isInventoryItem).map((item) => item.data.name?.trim() ?? "").filter(Boolean) : []);
   // Only employee names leave the server here; payroll amounts stay out of this page.
   const employeeNames = module.kind === "journals"

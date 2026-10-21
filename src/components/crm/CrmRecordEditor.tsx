@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { getAttachmentUploadTarget } from "@/app/actions";
@@ -14,6 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
 import { paymentAccountLabel, paymentAccountType } from "@/lib/payment-accounts";
+import { customerPriceBook, priceBookPrice, readPriceBookEntries, type PriceBookEntry } from "@/lib/price-books";
 import { relatedKind, relatedTypes, stageProbability, type CrmField, type CrmModule, type RelatedType } from "@/lib/crm-config";
 import { errorText, formatMoney, recordTitle, today, type CrmContextValue } from "@/components/crm/crm-shared";
 
@@ -85,6 +87,7 @@ function startValues(module: CrmModule, record: BookkeepingRecord | null, preset
     values.caseOrigin = "Phone";
   }
   if (module.kind === "crm-solutions") values.status = "Draft";
+  if (module.kind === "crm-price-books") Object.assign(values, { status: "Active", pricingModel: "Flat", entries: "[]" });
   if (module.kind === "hr-attendance") Object.assign(values, { date: today(), status: "Present", checkIn: "09:00" });
   if (module.kind === "hr-leaves") Object.assign(values, { fromDate: today(), toDate: today(), status: "To Approve" });
   if (module.kind === "hr-allocations") Object.assign(values, { validFrom: `${new Date().getFullYear()}-01-01`, validTo: `${new Date().getFullYear()}-12-31`, status: "To Approve" });
@@ -156,7 +159,9 @@ export default function CrmRecordEditor({ module, record, preset, open, onOpenCh
     }
   }
 
-  const sections = [...new Set(module.fields.map((field) => field.section))];
+  // Counts worked out on save (a price book's number of items) aren't part of the form.
+  const formFields = module.fields.filter((field) => field.key !== "itemCount");
+  const sections = [...new Set(formFields.map((field) => field.section))];
   const expected = module.kind === "crm-deals" ? (Number(values.amount || 0) * Number(values.probability || 0)) / 100 : 0;
 
   function optionsFor(kind: string) {
@@ -185,6 +190,9 @@ export default function CrmRecordEditor({ module, record, preset, open, onOpenCh
           {uploading === field.key ? <p className="text-xs text-muted-foreground">Uploading…</p> : value ? <p className="flex items-center gap-2 text-xs"><a className="text-primary underline-offset-4 hover:underline" href={value} target="_blank" rel="noreferrer">{values[`${field.key}Name`] || "Uploaded file"}</a><button type="button" className="text-muted-foreground hover:text-destructive" onClick={() => set({ [field.key]: "", [`${field.key}Name`]: "" })}>Remove</button></p> : null}
         </div>
       );
+    }
+    if (field.type === "priceList") {
+      return <PriceListField id={id} value={value} differential={values.pricingModel === "Differential"} items={context.store.items ?? []} currency={context.currency} onChange={(next) => set({ [field.key]: next })} />;
     }
     if (field.type === "textarea") return <Textarea id={id} rows={3} value={value} onChange={(event) => set({ [field.key]: event.target.value })} placeholder={field.placeholder} />;
     if (field.type === "checkbox") {
@@ -215,7 +223,11 @@ export default function CrmRecordEditor({ module, record, preset, open, onOpenCh
           // Picking an item fills its name, price and tax on a deal product.
           if (field.type === "item" && chosen) {
             const item = context.store.items?.find((entry) => entry.id === chosen.id);
-            if (item) Object.assign(changes, { product: item.data.name ?? "", price: item.data.rate ?? "", ...(item.data.taxRate ? { taxRate: item.data.taxRate } : {}) });
+            // The deal's account may have a price book with its own price for this item.
+            const deal = context.store["crm-deals"]?.find((entry) => entry.id === values.dealId);
+            const customer = deal?.data.accountId ? context.store.customers?.find((entry) => entry.id === deal.data.accountId) : undefined;
+            const special = item ? priceBookPrice(customerPriceBook(customer, context.store["crm-price-books"] ?? []), item.id, Number(values.quantity) || 1) : undefined;
+            if (item) Object.assign(changes, { product: item.data.name ?? "", price: special !== undefined ? special.toFixed(2) : item.data.rate ?? "", ...(item.data.taxRate ? { taxRate: item.data.taxRate } : {}) });
           }
           // Picking a contact fills in their account, as Zoho does.
           if (field.type === "contact" && chosen && module.fields.some((item) => item.type === "account") && !values.accountId) {
@@ -383,9 +395,9 @@ export default function CrmRecordEditor({ module, record, preset, open, onOpenCh
             <fieldset key={section} className="min-w-0">
               <legend className="mb-3 text-sm font-semibold">{section}</legend>
               <div className="grid gap-x-5 gap-y-3.5 sm:grid-cols-2">
-                {module.fields.filter((field) => field.section === section).map((field) => (
+                {formFields.filter((field) => field.section === section).map((field) => (
                   <div key={field.key} className={`min-w-0 space-y-1.5 ${field.wide ? "sm:col-span-2" : ""}`}>
-                    {field.type !== "checkbox" ? (
+                    {field.type !== "checkbox" && field.type !== "priceList" ? (
                       <Label htmlFor={`crm-${module.key}-${field.key}`}>{field.label}{field.required ? <span className="text-destructive"> *</span> : null}</Label>
                     ) : null}
                     {renderField(field)}
@@ -402,5 +414,66 @@ export default function CrmRecordEditor({ module, record, preset, open, onOpenCh
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/** A price book's rows: an item, its special price and, on a differential book, the quantity range it applies to. */
+function PriceListField({ id, value, differential, items, currency, onChange }: { id: string; value: string; differential: boolean; items: BookkeepingRecord[]; currency: string; onChange: (value: string) => void }) {
+  const rows = readPriceBookEntries(value);
+  const choices = items.filter((item) => item.data.name?.trim() && item.data.itemType !== "Bundle").sort((a, b) => (a.data.name ?? "").localeCompare(b.data.name ?? ""));
+  const write = (next: PriceBookEntry[]) => onChange(JSON.stringify(next));
+  const update = (index: number, patch: Partial<PriceBookEntry>) => write(rows.map((row, at) => (at === index ? { ...row, ...patch } : row)));
+  const blank: PriceBookEntry = { itemId: "", item: "", fromQuantity: "", toQuantity: "", listPrice: "" };
+  return (
+    <div id={id} className="space-y-2">
+      <div className="overflow-x-auto rounded-md border border-border">
+        <table className="w-full min-w-[560px] text-sm">
+          <thead className="bg-muted/50 text-left text-xs text-muted-foreground">
+            <tr>
+              <th className="px-2 py-2 font-medium">Item</th>
+              <th className="w-28 px-2 py-2 text-right font-medium">Standard price</th>
+              {differential ? <th className="w-24 px-2 py-2 font-medium">From qty</th> : null}
+              {differential ? <th className="w-24 px-2 py-2 font-medium">To qty</th> : null}
+              <th className="w-32 px-2 py-2 font-medium">List price</th>
+              <th className="w-10 px-2 py-2"><span className="sr-only">Remove</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.length ? rows.map((row, index) => {
+              const item = choices.find((option) => option.id === row.itemId);
+              return (
+                <tr key={index} className="border-t border-border">
+                  <td className="px-2 py-1.5">
+                    <Select value={row.itemId || null} onValueChange={(next) => {
+                      const chosen = choices.find((option) => option.id === next);
+                      update(index, { itemId: chosen?.id ?? "", item: chosen?.data.name?.trim() ?? "", listPrice: row.listPrice || chosen?.data.rate || "" });
+                    }}>
+                      <SelectTrigger className="w-full" aria-label={`Item on row ${index + 1}`}><SelectValue placeholder={choices.length ? "Choose an item" : "No items yet"}>{row.item || undefined}</SelectValue></SelectTrigger>
+                      <SelectContent>{choices.map((option) => <SelectItem key={option.id} value={option.id}>{option.data.name}</SelectItem>)}</SelectContent>
+                    </Select>
+                  </td>
+                  <td className="px-2 py-1.5 text-right tabular-nums text-muted-foreground">{item ? formatMoney(item.data.rate, currency) : "—"}</td>
+                  {differential ? <td className="px-2 py-1.5"><Input type="number" min={0} step="any" value={row.fromQuantity} placeholder="1" aria-label={`From quantity on row ${index + 1}`} onChange={(event) => update(index, { fromQuantity: event.target.value })} /></td> : null}
+                  {differential ? <td className="px-2 py-1.5"><Input type="number" min={0} step="any" value={row.toQuantity} placeholder="No limit" aria-label={`To quantity on row ${index + 1}`} onChange={(event) => update(index, { toQuantity: event.target.value })} /></td> : null}
+                  <td className="px-2 py-1.5"><Input type="number" min={0} step="0.01" value={row.listPrice} aria-label={`List price on row ${index + 1}`} onChange={(event) => update(index, { listPrice: event.target.value })} /></td>
+                  <td className="px-2 py-1.5 text-center">
+                    <button type="button" className="text-muted-foreground hover:text-destructive" aria-label={`Remove row ${index + 1}`} onClick={() => write(rows.filter((_, at) => at !== index))}><Trash2 size={15} /></button>
+                  </td>
+                </tr>
+              );
+            }) : (
+              <tr><td colSpan={differential ? 6 : 4} className="px-2 py-4 text-center text-muted-foreground">No items yet. Add the items this price book changes.</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <Button type="button" size="sm" variant="outline" className="gap-1" onClick={() => write([...rows, blank])}><Plus size={14} />Add item</Button>
+        {differential && rows.length ? (
+          <Button type="button" size="sm" variant="ghost" onClick={() => { const last = rows[rows.length - 1]; write([...rows, { ...blank, itemId: last.itemId, item: last.item, fromQuantity: last.toQuantity ? String(Number(last.toQuantity) + 1) : "" }]); }}>Add a range for the last item</Button>
+        ) : null}
+      </div>
+      <p className="text-xs text-muted-foreground">Items left out keep their standard price.{differential ? " Leave To qty empty for “and more”." : ""}</p>
+    </div>
   );
 }

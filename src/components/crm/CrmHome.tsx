@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { CalendarClock, CircleDollarSign, Handshake, ListTodo, Plus, Target, TrendingUp, UserPlus } from "lucide-react";
+import { CalendarClock, CircleDollarSign, Handshake, ListChecks, ListTodo, Plus, Target, TrendingUp, UserPlus } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
@@ -78,6 +78,7 @@ export default function CrmHome({ store, currency, me, asOfDate }: CrmHomeProps)
           <p className="mt-1.5 max-w-2xl text-sm text-muted-foreground">Your sales at a glance: pipeline, today&apos;s work and where your leads come from. Won deals turn into quotes and invoices in Sales.</p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <Button variant="outline" className="gap-2" nativeButton={false} render={<Link href="/app/crm/workqueue" />}><ListChecks size={15} />My workqueue</Button>
           <Button variant="outline" className="gap-2" nativeButton={false} render={<Link href="/app/crm/activities?new=1" />}><Plus size={15} />Task</Button>
           <Button variant="outline" className="gap-2" nativeButton={false} render={<Link href="/app/crm/deals?new=1" />}><Plus size={15} />Deal</Button>
           <Button className="gap-2" nativeButton={false} render={<Link href="/app/crm/leads?new=1" />}><UserPlus size={15} />Create lead</Button>

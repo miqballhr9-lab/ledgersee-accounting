@@ -37,6 +37,7 @@ import { categoryLines, lastPurchase, possibleDuplicates, supplierNamed, supplie
 import { creditFromInvoice, currencyAmount, dueDateForTerms, invoiceSubtotal, invoiceTax, parseInvoiceLines } from "@/lib/invoice-utils";
 import { accountCategoryForType } from "@/lib/account-types";
 import { paymentAccountLabel, paymentAccountType, receivingAccountType } from "@/lib/payment-accounts";
+import { customerPriceBook, priceBookPrice } from "@/lib/price-books";
 
 interface RecordEditorProps {
   module: ModuleDefinition;
@@ -282,6 +283,15 @@ export default function RecordEditor({ module, record, customers, vendors, items
       .catch(() => undefined);
     return () => { cancelled = true; };
   }, [open, hasTaxField, record, taxSide]);
+  // Price books (CRM) give some customers their own prices; a role without CRM simply has none.
+  const salesPricing = ["invoices", "estimates", "sales-orders", "credit-notes", "recurring-invoices"].includes(module.kind);
+  const [priceBooks, setPriceBooks] = useState<BookkeepingRecord[]>([]);
+  useEffect(() => {
+    if (!open || !salesPricing) return;
+    let cancelled = false;
+    listBookkeepingRecords("crm-price-books").then((rows) => { if (!cancelled) setPriceBooks(rows); }).catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [open, salesPricing]);
   const taxOptions = taxes.filter((tax) => tax.data.type !== "Withholding" && (tax.data.appliesTo || "Both") !== (taxSide === "Sales" ? "Purchases" : "Sales"));
   const [customTax, setCustomTax] = useState(false);
   const [recurringPayload, setRecurringPayload] = useState<Record<string, string> | null>(null);
@@ -975,13 +985,23 @@ export default function RecordEditor({ module, record, customers, vendors, items
     );
   }
 
-  // QuickBooks price rules: a customer's price rule raises or lowers each sales price picked for them.
-  function priceFor(rate: string | undefined) {
+  // A customer's price book sets its own price for the items it lists; QuickBooks price rules raise or lower the rest.
+  function priceFor(rate: string | undefined, itemId = "", quantity = 1) {
     const base = Number(rate) || 0;
-    if (!["invoices", "estimates", "sales-orders", "credit-notes", "recurring-invoices"].includes(module.kind)) return rate ?? "0";
+    if (!salesPricing) return rate ?? "0";
     const customer = customers.find((option) => option.id === values.customerId) ?? customers.find((option) => (option.data.name ?? "").trim().toLowerCase() === (values.customer ?? "").trim().toLowerCase());
+    const special = priceBookPrice(customerPriceBook(customer, priceBooks), itemId, quantity);
+    if (special !== undefined) return special.toFixed(2);
     const adjustment = Number(customer?.data.priceAdjustment) || 0;
     return adjustment ? (Math.round(base * (1 + adjustment / 100) * 100) / 100).toFixed(2) : rate ?? "0";
+  }
+
+  /** On a differential price book the price follows the quantity, unless someone typed their own price. */
+  function changeLineQuantity(line: InvoiceLine, quantity: string) {
+    const item = line.itemId ? availableItems.find((option) => option.id === line.itemId) : undefined;
+    const before = item ? priceFor(item.data.rate, item.id, Number(line.quantity) || 1) : "";
+    const after = item ? priceFor(item.data.rate, item.id, Number(quantity) || 1) : "";
+    updateInvoiceLine(line.id, item && Number(line.rate) === Number(before) && before !== after ? { quantity, rate: after } : { quantity });
   }
 
   function chooseLineItem(lineId: string, itemId: string) {
@@ -991,13 +1011,13 @@ export default function RecordEditor({ module, record, customers, vendors, items
       // Like QuickBooks, a bundle brings in its products and services as lines of their own.
       const parts = readBundleParts(item.data.bundleItems ?? "").flatMap((part, partIndex) => {
         const component = availableItems.find((option) => option.id === part.itemId);
-        return component ? [{ id: `${lineId}-b${Date.now()}-${partIndex}`, itemId: component.id, name: component.data.name?.trim() ?? "", description: component.data.description?.trim() || "", quantity: part.quantity || "1", rate: priceFor(component.data.rate), bundleId: item.id, bundleName: item.data.name?.trim() ?? "Bundle", bundleShow: item.data.showComponents === "false" ? "false" : "true" }] : [];
+        return component ? [{ id: `${lineId}-b${Date.now()}-${partIndex}`, itemId: component.id, name: component.data.name?.trim() ?? "", description: component.data.description?.trim() || "", quantity: part.quantity || "1", rate: priceFor(component.data.rate, component.id, Number(part.quantity) || 1), bundleId: item.id, bundleName: item.data.name?.trim() ?? "Bundle", bundleShow: item.data.showComponents === "false" ? "false" : "true" }] : [];
       });
       if (parts.length) setInvoiceLines((current) => current.flatMap((currentLine) => (currentLine.id === lineId ? parts : [currentLine])));
       return;
     }
     setInvoiceLines((current) => current.map((currentLine) => currentLine.id === lineId
-      ? { ...currentLine, itemId: item.id, name: item.data.name?.trim() ?? "", description: currentLine.description || item.data.description?.trim() || "", quantity: currentLine.quantity || "1", rate: priceFor(item.data.rate) }
+      ? { ...currentLine, itemId: item.id, name: item.data.name?.trim() ?? "", description: currentLine.description || item.data.description?.trim() || "", quantity: currentLine.quantity || "1", rate: priceFor(item.data.rate, item.id, Number(currentLine.quantity) || 1) }
       : currentLine));
   }
 
@@ -1111,7 +1131,7 @@ export default function RecordEditor({ module, record, customers, vendors, items
                       <Input id={`invoice-description-${line.id}`} aria-label={`Description for line ${index + 1}`} value={line.description} onChange={(event) => updateInvoiceLine(line.id, { description: event.target.value })} className={cellInput} />
                     </td>
                     <td className={`p-0 ${cellBorder}`}>
-                      <Input id={`invoice-quantity-${line.id}`} aria-label={`Quantity for line ${index + 1}`} type="number" min="0.01" step="any" inputMode="decimal" value={line.quantity} onChange={(event) => updateInvoiceLine(line.id, { quantity: event.target.value })} className={`${cellInput} text-right tabular-nums`} />
+                      <Input id={`invoice-quantity-${line.id}`} aria-label={`Quantity for line ${index + 1}`} type="number" min="0.01" step="any" inputMode="decimal" value={line.quantity} onChange={(event) => changeLineQuantity(line, event.target.value)} className={`${cellInput} text-right tabular-nums`} />
                     </td>
                     <td className={`p-0 ${cellBorder}`}>
                       <Input id={`invoice-rate-${line.id}`} aria-label={`Rate for line ${index + 1}`} type="number" min="0" step="any" inputMode="decimal" value={line.rate} onChange={(event) => updateInvoiceLine(line.id, { rate: event.target.value })} className={`${cellInput} text-right tabular-nums`} />

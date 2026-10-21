@@ -10,6 +10,7 @@ import { ActionError } from "@/lib/action-error";
 import { assertCanWrite, requireUser } from "@/lib/auth";
 import type { BookkeepingRecord, RecordKind } from "@/lib/bookkeeping-types";
 import { paymentAccountLabel, paymentAccountType } from "@/lib/payment-accounts";
+import { customerPriceBook, priceBookPrice, readPriceBookEntries, type PriceBookEntry } from "@/lib/price-books";
 import { recordAudit } from "@/lib/audit";
 import { sendEmail, sendEmailOrThrow } from "@/lib/email";
 import { withRecruitmentStages } from "@/lib/hr-config";
@@ -67,7 +68,7 @@ async function lookupContext(userId: string) {
     .from(bookkeepingRecord)
     .where(and(eq(bookkeepingRecord.userId, userId), inArray(bookkeepingRecord.kind, [
       "customers", "crm-leads", "crm-contacts", "crm-deals", "crm-campaigns", "crm-cases",
-      "employees", "hr-departments", "hr-leave-types", "hr-jobs", "hr-leaves", "hr-allocations", "hr-holidays", "hr-loans", "hr-attendance", "hr-contracts", "hr-shifts", "accounts", "settings", "items",
+      "employees", "hr-departments", "hr-leave-types", "hr-jobs", "hr-leaves", "hr-allocations", "hr-holidays", "hr-loans", "hr-attendance", "hr-contracts", "hr-shifts", "accounts", "settings", "items", "crm-price-books",
     ])));
   const byKind = (kind: string) => rows.filter((row) => row.kind === kind);
   return { rows, byKind };
@@ -147,6 +148,42 @@ function cleanValue(field: CrmField, raw: string | undefined) {
   }
 }
 
+/** A price book's rows: each needs an item from Items & services and a price; differential rows need a quantity range that doesn't overlap. */
+function cleanPriceList(raw: string | undefined, context: LookupContext, pricingModel: string | undefined) {
+  const differential = pricingModel === "Differential";
+  const items = context.byKind("items");
+  const rows: PriceBookEntry[] = [];
+  for (const entry of readPriceBookEntries(raw)) {
+    if (!entry.itemId && !entry.listPrice.trim()) continue;
+    const item = items.find((row) => row.id === entry.itemId);
+    if (!item) throw new ActionError("Choose an item from Items & services on each price book row.");
+    const name = item.data.name?.trim() || "Item";
+    const price = Number(entry.listPrice.replace(/,/g, ""));
+    if (entry.listPrice.trim() === "" || !Number.isFinite(price) || price < 0) throw new ActionError(`Enter a price of zero or more for ${name}.`);
+    const quantity = (value: string, label: string) => {
+      if (!differential || !value.trim()) return "";
+      const number = Number(value);
+      if (!Number.isFinite(number) || number < 0) throw new ActionError(`${label} for ${name} must be a number of zero or more.`);
+      return String(number);
+    };
+    const fromQuantity = quantity(entry.fromQuantity, "From quantity");
+    const toQuantity = quantity(entry.toQuantity, "To quantity");
+    if (fromQuantity && toQuantity && Number(toQuantity) < Number(fromQuantity)) throw new ActionError(`For ${name}, the to quantity can't be less than the from quantity.`);
+    rows.push({ itemId: item.id, item: name, fromQuantity, toQuantity, listPrice: price.toFixed(2) });
+  }
+  const seen = new Map<string, PriceBookEntry[]>();
+  for (const row of rows) {
+    const earlier = seen.get(row.itemId) ?? [];
+    const low = (entry: PriceBookEntry) => (entry.fromQuantity ? Number(entry.fromQuantity) : 0);
+    const high = (entry: PriceBookEntry) => (entry.toQuantity ? Number(entry.toQuantity) : Infinity);
+    if (earlier.length && !differential) throw new ActionError(`${row.item} is in the price book twice. A flat price book has one price per item.`);
+    if (earlier.some((entry) => low(row) <= high(entry) && low(entry) <= high(row))) throw new ActionError(`The quantity ranges for ${row.item} overlap.`);
+    seen.set(row.itemId, [...earlier, row]);
+  }
+  if (rows.length > 500) throw new ActionError("A price book can hold up to 500 rows.");
+  return JSON.stringify(rows);
+}
+
 /** Checks and tidies a CRM record before it is stored. */
 function buildData(mod: CrmModule, input: Record<string, string>, context: LookupContext, existing: Record<string, string> | undefined, ownerName: string, id?: string) {
   const data: Record<string, string> = { ...(existing ?? {}) };
@@ -165,6 +202,11 @@ function buildData(mod: CrmModule, input: Record<string, string>, context: Looku
       data.relatedType = resolved.id ? type : "";
       data.relatedId = resolved.id;
       data.related = resolved.id ? resolved.name : "";
+      continue;
+    }
+    if (field.type === "priceList") {
+      if (!(field.key in input) && existing) continue;
+      data[field.key] = cleanPriceList(input[field.key], context, input.pricingModel ?? existing?.pricingModel);
       continue;
     }
     const lookupKind = field.type ? lookupKinds[field.type] : undefined;
@@ -201,7 +243,14 @@ function buildData(mod: CrmModule, input: Record<string, string>, context: Looku
     const item = data.itemId ? context.byKind("items").find((row) => row.id === data.itemId) : undefined;
     if (item) {
       if (!data.product?.trim() || (existing?.itemId && existing.itemId !== data.itemId)) data.product = item.data.name?.trim() ?? "";
-      if (!data.price || (existing?.itemId && existing.itemId !== data.itemId)) data.price = money(item.data.rate).toFixed(2);
+      if (!data.price || (existing?.itemId && existing.itemId !== data.itemId)) {
+        // The deal's account may have a price book with its own price for this item.
+        const deal = context.byKind("crm-deals").find((row) => row.id === data.dealId);
+        const customer = deal?.data.accountId ? context.byKind("customers").find((row) => row.id === deal.data.accountId) : undefined;
+        const book = customerPriceBook(customer && toRecord(customer), context.byKind("crm-price-books").map(toRecord));
+        const special = priceBookPrice(book, item.id, data.quantity ? money(data.quantity) : 1);
+        data.price = (special ?? money(item.data.rate)).toFixed(2);
+      }
       if (!data.taxRate && item.data.taxRate) data.taxRate = String(money(item.data.taxRate));
     }
     if (!data.product?.trim()) throw new ActionError("Choose an item or enter the product or service.");
@@ -210,6 +259,13 @@ function buildData(mod: CrmModule, input: Record<string, string>, context: Looku
     if (!(quantity > 0)) throw new ActionError("Enter a quantity greater than zero.");
     data.quantity = String(quantity);
     data.total = (quantity * money(data.price) * (1 - money(data.discount) / 100)).toFixed(2);
+  }
+  if (mod.kind === "crm-price-books") {
+    if (!data.status) data.status = "Active";
+    if (!data.pricingModel) data.pricingModel = "Flat";
+    data.itemCount = String(new Set(readPriceBookEntries(data.entries).map((entry) => entry.itemId)).size);
+    const name = data.priceBookName?.trim().toLowerCase();
+    if (context.byKind("crm-price-books").some((row) => row.id !== id && row.data.priceBookName?.trim().toLowerCase() === name)) throw new ActionError(`There's already a price book called ${data.priceBookName}.`);
   }
   if (mod.kind === "crm-targets" && !/^\d{4}-(0[1-9]|1[0-2]|Q[1-4])$/.test(data.period ?? "")) throw new ActionError("Enter the period as a month (2026-10) or a quarter (2026-Q4).");
   if (mod.kind === "crm-leads") data.leadScore = String(leadScore(data));
@@ -413,6 +469,12 @@ export async function saveCrmRecord(kind: string, input: Record<string, string>,
       .where(and(eq(bookkeepingRecord.id, existing.id), eq(bookkeepingRecord.userId, me.id))).returning();
     if (mod.section === "hr") await afterHrSave(me.id, kind, existing.data, saved);
     if (kind === "crm-deal-products") await syncDealAmount(me.id, [existing.data.dealId, saved.data.dealId]);
+    // Customers pick a price book by name, so a renamed book stays on them.
+    if (kind === "crm-price-books" && existing.data.priceBookName?.trim() && existing.data.priceBookName.trim() !== saved.data.priceBookName?.trim()) {
+      await db.update(bookkeepingRecord)
+        .set({ data: sql`jsonb_set(${bookkeepingRecord.data}, '{priceBook}', to_jsonb(${saved.data.priceBookName.trim()}::text))`, updatedAt: new Date() })
+        .where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "customers"), sql`lower(${bookkeepingRecord.data}->>'priceBook') = lower(${existing.data.priceBookName.trim()})`));
+    }
     await recordAudit(me, "Edited", kind, saved.id, saved.data);
     await runWorkflows(me, kind, existing.data, saved);
     revalidatePath("/app", "layout");

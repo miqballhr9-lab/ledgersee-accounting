@@ -23,7 +23,9 @@ export type CrmFieldType =
   /** An uploaded file: the link in `<key>`, the file name in `<key>Name`. */
   | "file"
   /** "Related to": a lead, contact, account, deal, campaign or case, stored as relatedType / relatedId / related. */
-  | "related";
+  | "related"
+  /** A price book's items and prices, stored as JSON (see lib/price-books). */
+  | "priceList";
 
 export interface CrmField {
   key: string;
@@ -358,6 +360,21 @@ export const crmModules: readonly CrmModule[] = [
     ],
   },
   {
+    key: "price-books", kind: "crm-price-books", label: "Price book", plural: "Price books",
+    description: "Special prices for chosen customers, e.g. wholesale or a distributor's rates. Give a customer a price book and its prices fill in on their quotes, orders, invoices and deal products.",
+    titleKey: "priceBookName", statusKey: "status",
+    columns: ["priceBookName", "pricingModel", "itemCount", "status", "owner"],
+    fields: [
+      { key: "priceBookName", label: "Price book name", section: "Price book information", required: true, placeholder: "e.g. Wholesale" },
+      { key: "owner", label: "Price book owner", type: "owner", section: "Price book information" },
+      { key: "status", label: "Status", type: "select", options: ["Active", "Inactive"], section: "Price book information" },
+      { key: "pricingModel", label: "Pricing model", type: "select", options: ["Flat", "Differential"], section: "Price book information", help: "Flat: one price per item. Differential: a price for each quantity range, e.g. 1–9 and 10 or more." },
+      { key: "itemCount", label: "Items", type: "number", section: "Price book information", readOnly: true },
+      { key: "entries", label: "Items and prices", type: "priceList", section: "Items and prices", wide: true },
+      { key: "description", label: "Description", type: "textarea", section: "Description information", wide: true },
+    ],
+  },
+  {
     key: "targets", kind: "crm-targets", label: "Sales target", plural: "Sales targets",
     description: "Quotas for each salesperson by month or quarter. The Quota vs forecast report compares them with won and open deals.",
     titleKey: "owner",
@@ -408,7 +425,7 @@ export function crmModuleByKind(kind: string): CrmModule | undefined {
 }
 
 /** Pages under /app/crm. Activities shows tasks, meetings and calls together. */
-export const crmPages = ["leads", "contacts", "accounts", "deals", "deal-products", "targets", "activities", "campaigns", "cases", "solutions", "workflows"] as const;
+export const crmPages = ["leads", "contacts", "accounts", "deals", "deal-products", "price-books", "targets", "activities", "campaigns", "cases", "solutions", "workflows"] as const;
 export type CrmPage = (typeof crmPages)[number];
 
 export function fullName(data: Record<string, string>) {

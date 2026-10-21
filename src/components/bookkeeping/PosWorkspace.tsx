@@ -19,10 +19,13 @@ import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
 import { isInventoryItem } from "@/lib/inventory";
 import { currencyAmount, invoiceTax } from "@/lib/invoice-utils";
 import { receivingAccountType } from "@/lib/payment-accounts";
+import { customerPriceBook, priceBookPrice } from "@/lib/price-books";
 
 interface PosWorkspaceProps {
   items: BookkeepingRecord[];
   customers: BookkeepingRecord[];
+  /** CRM price books, for customers who have one. */
+  priceBooks?: BookkeepingRecord[];
   accounts: BookkeepingRecord[];
   taxes: BookkeepingRecord[];
   /** Sales receipts, for today's takings and the next receipt number. */
@@ -78,7 +81,7 @@ const escapeHtml = (value: string) => value.replace(/[&<>"']/g, (char) => ({ "&"
  */
 const bySerial = (item: BookkeepingRecord) => item.data.tracking === "Serial number";
 
-export default function PosWorkspace({ items, customers, accounts, taxes, receipts, returns = [], warehouses = [], stockAt = {}, serials = [], settings, currency, today }: PosWorkspaceProps) {
+export default function PosWorkspace({ items, customers, priceBooks = [], accounts, taxes, receipts, returns = [], warehouses = [], stockAt = {}, serials = [], settings, currency, today }: PosWorkspaceProps) {
   const router = useRouter();
   const searchRef = useRef<HTMLInputElement>(null);
   const products = useMemo(() => items.filter((item) => item.data.name?.trim() && item.data.itemType !== "Bundle" && item.data.active !== "false"), [items]);
@@ -89,7 +92,7 @@ export default function PosWorkspace({ items, customers, accounts, taxes, receip
 
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("All");
-  const [cart, setCart] = useState<CartLine[]>([]);
+  const [basket, setCart] = useState<CartLine[]>([]);
   const [customer, setCustomer] = useState(WALK_IN);
   const [discount, setDiscount] = useState("");
   const [taxId, setTaxId] = useState(defaultTax?.id ?? "none");
@@ -105,10 +108,10 @@ export default function PosWorkspace({ items, customers, accounts, taxes, receip
   const money = (value: number) => currencyAmount(value, currency);
   // With warehouses, only what the chosen one holds can be sold.
   const stockOf = (item: BookkeepingRecord) => (warehouses.length ? stockAt[item.id]?.[warehouse] ?? 0 : num(item.data.qtyOnHand ?? item.data.openingQty));
-  const inCart = (itemId: string) => cart.find((line) => line.itemId === itemId)?.quantity ?? 0;
+  const inCart = (itemId: string) => basket.find((line) => line.itemId === itemId)?.quantity ?? 0;
   /** Serial numbers of the item in stock here and not already in the sale. */
   const freeSerials = (itemId: string) => {
-    const taken = new Set(cart.find((line) => line.itemId === itemId)?.serials ?? []);
+    const taken = new Set(basket.find((line) => line.itemId === itemId)?.serials ?? []);
     return serials.filter((entry) => entry.itemId === itemId && (!warehouses.length || entry.warehouse.toLowerCase() === warehouse.toLowerCase()) && !taken.has(entry.number)).map((entry) => entry.number);
   };
 
@@ -118,6 +121,12 @@ export default function PosWorkspace({ items, customers, accounts, taxes, receip
     return !needle || [item.data.name, item.data.sku, item.data.barcode, item.data.category].some((value) => value?.toLowerCase().includes(needle));
   });
 
+  // The chosen customer's price book (CRM) sets the price of the items it lists.
+  const book = customerPriceBook(customers.find((entry) => entry.id === customer), priceBooks);
+  const cart = basket.map((line) => {
+    const special = priceBookPrice(book, line.itemId, line.quantity);
+    return special === undefined ? line : { ...line, price: special };
+  });
   const tax = salesTaxes.find((entry) => entry.id === taxId);
   const taxRate = tax ? num(tax.data.rate) : 0;
   const subtotal = cart.reduce((sum, line) => sum + line.price * line.quantity, 0);

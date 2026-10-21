@@ -1,6 +1,7 @@
 import { readableError } from "@/lib/action-error";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
 import { crmModuleByKind, crmTitle, statusTone, type CrmField, type CrmModule } from "@/lib/crm-config";
+import { readPriceBookEntries } from "@/lib/price-books";
 
 /** Every record the CRM screens work with, grouped by kind. */
 export type CrmStore = Record<string, BookkeepingRecord[]>;
@@ -54,6 +55,10 @@ export function displayValue(field: CrmField | undefined, data: Record<string, s
   if (field.type === "datetime") return formatDateTime(value);
   if (field.type === "related") return data.related ? `${data.relatedType}: ${data.related}` : "";
   if (field.type === "file") return data[`${key}Name`] || "File";
+  if (field.type === "priceList") {
+    const count = readPriceBookEntries(value).length;
+    return count ? `${count} ${count === 1 ? "price" : "prices"}` : "";
+  }
   return value;
 }
 

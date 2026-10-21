@@ -73,6 +73,7 @@ export const modules: readonly ModuleDefinition[] = [
       { key: "taxId", label: "Tax ID", section: "Tax and payment" },
       { key: "paymentTerms", label: "Payment terms", type: "select", options: ["Due on receipt", "15 days", "30 days", "60 days"] },
       { key: "priceAdjustment", label: "Price rule (%)", type: "number", help: "Changes every product and service price for this customer, e.g. -10 for 10% off (wholesale) or 5 for 5% more." },
+      { key: "priceBook", label: "Price book", type: "select", options: [], help: "Special prices from CRM > Price books. Items in the book use its price; the rest use the price rule." },
       { key: "openingBalance", label: "Opening balance", type: "number", section: "Opening balance", placeholder: "0.00" },
       { key: "openingBalanceDate", label: "As of", type: "date" },
       { key: "notes", label: "Notes", type: "textarea", section: "Notes and attachments" },
@@ -596,11 +597,13 @@ export const navigationGroups: NavigationGroup[] = [
     label: "CRM",
     items: [
       { slug: "crm", label: "CRM home", icon: "Gauge" },
+      { slug: "crm/workqueue", label: "Workqueue", icon: "ListChecks" },
       { slug: "crm/leads", label: "Leads", icon: "UserPlus" },
       { slug: "crm/contacts", label: "Contacts", icon: "Contact" },
       { slug: "crm/accounts", label: "Accounts", icon: "Building2" },
       { slug: "crm/deals", label: "Deals", icon: "Handshake" },
       { slug: "crm/deal-products", label: "Deal products", icon: "Package" },
+      { slug: "crm/price-books", label: "Price books", icon: "BookMarked" },
       { slug: "crm/targets", label: "Sales targets", icon: "Target" },
       { slug: "crm/activities", label: "Activities", icon: "CalendarCheck" },
       { slug: "crm/campaigns", label: "Campaigns", icon: "Megaphone" },
@@ -758,6 +761,17 @@ export function withCustomFields(module: ModuleDefinition, settings: Record<stri
   const extra: FormField[] = names.map((label) => ({ key: `cf${label.replace(/[^a-zA-Z0-9]+/g, " ").trim().split(/\s+/).map((word) => word[0].toUpperCase() + word.slice(1)).join("").slice(0, 40) || "Field"}`, label, help: "Custom field" }));
   const known = new Set(module.fields.map((field) => field.key));
   return { ...module, fields: [...module.fields, ...extra.filter((field) => !known.has(field.key))] };
+}
+
+/** The customer's Price book field offers the active price books; without any it is left off. */
+export function withPriceBooks(module: ModuleDefinition, names: string[]): ModuleDefinition {
+  if (module.kind !== "customers") return module;
+  return {
+    ...module,
+    fields: module.fields
+      .filter((field) => field.key !== "priceBook" || names.length > 0)
+      .map((field) => (field.key === "priceBook" ? { ...field, options: names } : field)),
+  };
 }
 
 /** Fields that pick a warehouse or a stock item, filled with this business's own; without warehouses the warehouse field is left off. */
