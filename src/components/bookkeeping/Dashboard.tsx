@@ -38,7 +38,10 @@ function dateFor(record: BookkeepingRecord) {
 }
 
 export default function Dashboard({ records, setup, asOfDate }: DashboardProps) {
-  const currency = records.find((record) => record.kind === "settings")?.data.currency || "USD";
+  const company = records.find((record) => record.kind === "settings")?.data ?? {};
+  const currency = company.currency || "USD";
+  const companyName = company.companyName?.trim() ?? "";
+  const companyLogo = /^https?:\/\//.test(company.logo ?? "") ? company.logo : "";
   const amount = (record: BookkeepingRecord, key = "amount") => homeAmount(record, key, currency);
   const invoices = records.filter((record) => record.kind === "invoices" && !["Draft", "Cancelled"].includes(record.data.status ?? ""));
   const expenses = records.filter((record) => record.kind === "expenses");
@@ -100,10 +103,14 @@ export default function Dashboard({ records, setup, asOfDate }: DashboardProps) 
   return (
     <div className="mx-auto w-full max-w-[1440px] px-4 py-6 sm:px-7 sm:py-8">
       <section className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <p className="text-xs font-medium uppercase tracking-[0.12em] text-primary">Business overview</p>
-          <h1 className="mt-1 text-[26px] font-semibold tracking-tight sm:text-3xl">Financial overview</h1>
-          <p className="mt-1.5 text-sm text-muted-foreground">Here’s how your books are looking.</p>
+        <div className="flex min-w-0 items-center gap-4">
+          {/* eslint-disable-next-line @next/next/no-img-element -- the business's own uploaded logo */}
+          {companyLogo ? <img src={companyLogo} alt={`${companyName} logo`} className="h-16 w-auto max-w-[140px] shrink-0 rounded-lg border border-border bg-white object-contain p-1.5" /> : null}
+          <div className="min-w-0">
+            <p className="truncate text-xs font-medium uppercase tracking-[0.12em] text-primary">{companyName || "Business overview"}</p>
+            <h1 className="mt-1 text-[26px] font-semibold tracking-tight sm:text-3xl">Financial overview</h1>
+            <p className="mt-1.5 text-sm text-muted-foreground">Here’s how your books are looking.{companyLogo ? null : <> <Link href="/app/settings" className="text-primary underline-offset-4 hover:underline">{companyName ? "Add your logo" : "Add your company details"}</Link></>}</p>
+          </div>
         </div>
         <div className="flex items-center gap-2">
           <Button variant="outline" nativeButton={false} render={<Link href="/app/expenses?new=1" />} className="gap-2"><ReceiptText size={15} />Add expense</Button>

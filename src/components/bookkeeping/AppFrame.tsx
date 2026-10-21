@@ -111,6 +111,9 @@ interface AppFrameProps {
   isOwner: boolean;
   /** The apps the business has; the menu shows only these. All when not given. */
   features?: Feature[];
+  /** The business's name and logo from Company settings, shown in the workspace card. */
+  companyName?: string;
+  companyLogo?: string;
   /** The MIK LEDGER owner, who also sees the Super Admin panel. */
   platformAdmin?: boolean;
   children: React.ReactNode;
@@ -237,7 +240,7 @@ function initials(name: string) {
   return name.trim().split(/\s+/).slice(0, 2).map((part) => part[0]?.toUpperCase() ?? "").join("") || "LL";
 }
 
-export default function AppFrame({ userName, userEmail, role, workspaceName, isOwner, features, platformAdmin = false, children }: AppFrameProps) {
+export default function AppFrame({ userName, userEmail, role, workspaceName, companyName = "", companyLogo = "", isOwner, features, platformAdmin = false, children }: AppFrameProps) {
   const pathname = usePathname();
   const router = useRouter();
   const allowed = (href: string) => {
@@ -312,7 +315,11 @@ export default function AppFrame({ userName, userEmail, role, workspaceName, isO
         <div className="mx-3 mt-4 rounded-lg border border-sidebar-border bg-sidebar-accent/40 px-3 py-2.5">
           <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-sidebar-foreground/50">Business workspace</p>
           <div className="mt-1 flex items-center justify-between gap-2">
-            <span className="truncate text-sm font-medium">{workspaceName || userName || "My business"}</span>
+            <span className="flex min-w-0 items-center gap-2">
+              {/* eslint-disable-next-line @next/next/no-img-element -- the business's own uploaded logo */}
+              {companyLogo ? <img src={companyLogo} alt="" className="size-7 shrink-0 rounded bg-white object-contain p-0.5" /> : null}
+              <span className="truncate text-sm font-medium" title={companyName || workspaceName}>{companyName || workspaceName || userName || "My business"}</span>
+            </span>
             <ChevronDown size={14} className="shrink-0 text-sidebar-foreground/50" />
           </div>
         </div>

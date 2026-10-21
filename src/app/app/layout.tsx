@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 
 import AppFrame from "@/components/bookkeeping/AppFrame";
 import { runDueAutomations } from "@/app/automation-actions";
+import { listBookkeepingRecordGroups } from "@/app/actions";
 import { getWorkspaceUser } from "@/lib/auth";
 import { daysUntil } from "@/lib/plans";
 import AnnouncementBar from "@/components/bookkeeping/AnnouncementBar";
@@ -16,6 +17,7 @@ export default async function BookkeepingLayout({ children }: Readonly<{ childre
 
   const { access } = user;
   const announcement = await activeAnnouncement();
+  const company = (await listBookkeepingRecordGroups(["settings"])).settings?.[0]?.data ?? {};
   const daysLeft = daysUntil(access.trialEndsAt);
   // A strip above every page while on trial, behind on payment, or read-only after the plan ran out.
   const billingNotice = !access.enabled ? null
@@ -26,7 +28,7 @@ export default async function BookkeepingLayout({ children }: Readonly<{ childre
     : null;
 
   return (
-    <AppFrame userName={user.name} userEmail={user.email} role={user.role} workspaceName={user.workspaceName} isOwner={user.isOwner} features={access.locked ? undefined : access.features} platformAdmin={isPlatformAdmin(user.email)}>
+    <AppFrame userName={user.name} userEmail={user.email} role={user.role} workspaceName={user.workspaceName} companyName={company.companyName?.trim() ?? ""} companyLogo={/^https?:\/\//.test(company.logo ?? "") ? company.logo : ""} isOwner={user.isOwner} features={access.locked ? undefined : access.features} platformAdmin={isPlatformAdmin(user.email)}>
       {announcement ? <AnnouncementBar id={announcement.id} message={announcement.message} tone={announcement.tone} /> : null}
       {access.suspended ? (
         <div className="mx-auto max-w-lg px-4 py-20 text-center" role="alert">
