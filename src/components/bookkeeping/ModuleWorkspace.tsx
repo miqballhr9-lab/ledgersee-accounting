@@ -628,6 +628,16 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
               // Every other list can still select records, to delete several at once.
               : module.kind === "settings" ? null : { label: "Actions", items: [] };
   const supportsBulkActions = Boolean(bulkMenu);
+
+  /** A document's customer or supplier name opens their page, as QuickBooks links names in lists. */
+  function partyHref(record: BookkeepingRecord, key: string) {
+    const parties = key === "customer" ? customers : key === "vendor" ? vendors : null;
+    const name = (record.data[key] ?? "").trim().toLowerCase();
+    if (!parties || !name) return undefined;
+    const idKey = key === "customer" ? "customerId" : "vendorId";
+    const party = parties.find((entry) => entry.id === record.data[idKey]) ?? parties.find((entry) => [entry.data.name, entry.data.displayName, entry.data.company].some((value) => value?.trim().toLowerCase() === name));
+    return party ? `/app/${key === "customer" ? "customers" : "vendors"}?open=${encodeURIComponent(party.id)}` : undefined;
+  }
   const [bulkPaymentOpen, setBulkPaymentOpen] = useState(false);
   const [bulkExpenseIds, setBulkExpenseIds] = useState<string[]>([]);
   const [refundTargets, setRefundTargets] = useState<BookkeepingRecord[] | null>(null);
@@ -1154,6 +1164,7 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
           onOpen={module.kind === "journals" ? undefined : (record) => setDetailId(record.id)}
           onDelete={(record) => void handleDelete(record)}
           onAction={(kind, record) => void handleAction(kind, record)}
+          partyHref={partyHref}
           selection={supportsBulkActions ? {
             selectedIds,
             onToggle: toggleSelected,

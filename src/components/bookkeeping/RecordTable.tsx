@@ -2,6 +2,7 @@
 
 import { ArrowRightLeft, BadgeCheck, Ban, Check, CircleDollarSign, Copy, Ellipsis, Link2, Mail, PackageCheck, Pencil, Play, Printer, Trash2, Undo2 } from "lucide-react";
 
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -29,6 +30,8 @@ interface RecordTableProps {
   onOpen?: (record: BookkeepingRecord) => void;
   onDelete: (record: BookkeepingRecord) => void;
   onAction: (kind: RecordActionKind, record: BookkeepingRecord) => void;
+  /** Where a cell's customer or supplier name links to (their page), when they are on file. */
+  partyHref?: (record: BookkeepingRecord, key: string) => string | undefined;
   /** When given, each row gets a checkbox for actions on several records at once. */
   selection?: {
     selectedIds: ReadonlySet<string>;
@@ -250,7 +253,7 @@ function RowMenu({ label, actions }: { label: string; actions: RecordMenuAction[
   );
 }
 
-export default function RecordTable({ module, records, columns = module.columns, columnLabels: headerLabels, homeCurrency = "", onEdit, openOnRowClick = false, onOpen, onDelete, onAction, selection }: RecordTableProps) {
+export default function RecordTable({ module, records, columns = module.columns, columnLabels: headerLabels, homeCurrency = "", onEdit, openOnRowClick = false, onOpen, onDelete, onAction, selection, partyHref }: RecordTableProps) {
   const allSelected = Boolean(selection) && records.length > 0 && records.every((record) => selection?.selectedIds.has(record.id));
   const someSelected = Boolean(selection) && records.some((record) => selection?.selectedIds.has(record.id));
   if (records.length === 0) {
@@ -304,11 +307,16 @@ export default function RecordTable({ module, records, columns = module.columns,
                     />
                   </TableCell>
                 ) : null}
-                {columns.map((key, index) => (
-                  <TableCell key={key} className={`max-w-[240px] px-4 py-3 text-sm ${key === "address" ? "whitespace-normal" : "whitespace-nowrap"}`}>
-                    {key === module.titleKey || index === 0 ? <span className="font-medium text-primary">{displayValue(record, key, homeCurrency)}</span> : displayValue(record, key, homeCurrency)}
-                  </TableCell>
-                ))}
+                {columns.map((key, index) => {
+                  const href = index > 0 && key !== module.titleKey ? partyHref?.(record, key) : undefined;
+                  return (
+                    <TableCell key={key} className={`max-w-[240px] px-4 py-3 text-sm ${key === "address" ? "whitespace-normal" : "whitespace-nowrap"}`}>
+                      {key === module.titleKey || index === 0
+                        ? <span className="font-medium text-primary">{displayValue(record, key, homeCurrency)}</span>
+                        : href ? <Link href={href} className="text-primary underline-offset-4 hover:underline" title={`Open ${displayValue(record, key, homeCurrency)}`}>{displayValue(record, key, homeCurrency)}</Link> : displayValue(record, key, homeCurrency)}
+                    </TableCell>
+                  );
+                })}
                 <TableCell className="w-12 px-2 text-right">
                   <RowMenu label={record.data[module.titleKey] || module.label.toLowerCase()} actions={recordActions(module, record, onAction, { onEdit: () => onEdit(record), onDelete: () => onDelete(record) })} />
                 </TableCell>
