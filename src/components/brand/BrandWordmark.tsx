@@ -29,13 +29,7 @@ export default function BrandWordmark({ className, size = "default" }: BrandWord
           compact ? "h-9 px-2.5 text-sm" : "h-10 px-3.5 text-base",
         )}
       >
-        <span>MIK LEDGER</span>
-        {/* The same three colours as the line under MIK on the icon. */}
-        <span className="absolute inset-x-0 bottom-0 flex h-1">
-          <span className="w-1/3 bg-green-500" />
-          <span className="w-1/3 bg-amber-400" />
-          <span className="w-1/3 bg-red-500" />
-        </span>
+        MIK LEDGER
       </span>
     </span>
   );
