@@ -385,7 +385,7 @@ export function assertCanWrite(me: WorkspaceUser, kind: string) {
 /** Throws when the plan has run out (records are read-only) or doesn't include this part of the product. */
 export function assertPlanAllows(me: WorkspaceUser, kind: string) {
   if (me.access.locked) throw new ActionError("Your business is on the Free plan, which is for the owner only. Ask the owner to upgrade so the team can make changes.");
-  const needed = featuresForKind(kind);
+  const needed = featuresForKind(kind, true);
   if (!needed.some((feature) => me.access.features.includes(feature))) throw new ActionError(`${featureLabels[needed[0]]} isn’t in your plan. Add the ${planFor(needed[0]).name} in Billing to use it.`);
 }
 

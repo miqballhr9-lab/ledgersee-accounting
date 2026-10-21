@@ -9,7 +9,7 @@ import { defaultWarehouse, lotRegister, stockByWarehouse } from "@/lib/warehouse
 export const metadata: Metadata = { title: "Point of sale" };
 
 export default async function PosPage() {
-  await requireFeature("accounting");
+  await requireFeature("pos");
   const groups = await listBookkeepingRecordGroups(["customers", "crm-price-books", "accounts", "settings", "taxes", "warehouses", "stock-transfers", ...inventoryKinds]);
   const all = Object.values(groups).flat();
   const stock = buildInventory(all);

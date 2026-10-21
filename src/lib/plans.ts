@@ -5,8 +5,8 @@
  * Checkout charges whatever this file says, so no prices need setting up in Stripe.
  */
 
-export type Feature = "accounting" | "inventory" | "crm" | "hr";
-export type PlanKey = "free" | "starter" | "crm" | "hrm" | "business" | "enterprise";
+export type Feature = "accounting" | "inventory" | "crm" | "hr" | "pos";
+export type PlanKey = "free" | "starter" | "crm" | "hrm" | "pos" | "business" | "enterprise";
 export type BillingInterval = "month" | "year";
 
 export interface Plan {
@@ -76,6 +76,17 @@ export const plans: Plan[] = [
     highlights: ["Employees, contracts and documents", "Attendance, time off and recruitment", "Payroll with salary slips", "Up to 10 users"],
   },
   {
+    key: "pos",
+    name: "POS app",
+    type: "app",
+    description: "Sell over the counter in your shop.",
+    monthly: 10,
+    yearly: yearly(10),
+    users: 3,
+    features: ["pos"],
+    highlights: ["Fast checkout with barcode scan", "Cash and card, change and printed receipts", "Returns and refunds", "Stock by warehouse and serial number", "Up to 3 users"],
+  },
+  {
     key: "business",
     name: "Business bundle",
     type: "bundle",
@@ -83,8 +94,8 @@ export const plans: Plan[] = [
     monthly: 29,
     yearly: yearly(29),
     users: 6,
-    features: ["accounting", "inventory", "crm"],
-    highlights: ["Accounting app and CRM app", "Inventory, warehouses, lots and serial numbers", "Quotes and invoices from deals", "Up to 6 users"],
+    features: ["accounting", "inventory", "crm", "pos"],
+    highlights: ["Accounting app, CRM app and POS app", "Inventory, warehouses, lots and serial numbers", "Quotes and invoices from deals", "Up to 6 users"],
   },
   {
     key: "enterprise",
@@ -94,14 +105,14 @@ export const plans: Plan[] = [
     monthly: 79,
     yearly: yearly(79),
     users: Number.POSITIVE_INFINITY,
-    features: ["accounting", "inventory", "crm", "hr"],
+    features: ["accounting", "inventory", "crm", "hr", "pos"],
     highlights: ["Everything in Business", "HRM app: people, time off and payroll", "Every app added later", "Unlimited users"],
   },
 ];
 
 export const planByKey = (key: string | undefined) => plans.find((plan) => plan.key === key);
 
-export const featureLabels: Record<Feature, string> = { accounting: "Accounting", inventory: "Inventory", crm: "CRM", hr: "HR and payroll" };
+export const featureLabels: Record<Feature, string> = { accounting: "Accounting", inventory: "Inventory", crm: "CRM", hr: "HR and payroll", pos: "Point of sale" };
 
 /** The cheapest paid plan that includes a feature, for "upgrade to …" messages. */
 export const planFor = (feature: Feature) => plans.find((plan) => plan.monthly > 0 && plan.features.includes(feature)) ?? plans[plans.length - 1];
@@ -138,10 +149,14 @@ export function combinePlans(keys: PlanKey[]) {
 
 /**
  * The features that let someone change a kind of record; any one is enough.
- * Customers, items and quotes are shared by the Accounting and CRM apps.
+ * Customers, items and quotes are shared by the Accounting and CRM apps; the
+ * POS app keeps its own customers and items, and saves sales receipts and
+ * returns (invoices and credit notes) from the till.
  */
-export function featuresForKind(kind: string): Feature[] {
-  if (["customers", "items", "estimates"].includes(kind)) return ["accounting", "crm"];
+export function featuresForKind(kind: string, saving = false): Feature[] {
+  if (kind === "estimates") return ["accounting", "crm"];
+  if (kind === "customers" || kind === "items") return ["accounting", "crm", "pos"];
+  if (saving && (kind === "invoices" || kind === "credit-notes" || kind === "payments")) return ["accounting", "pos"];
   if (kind.startsWith("crm-")) return ["crm"];
   if (kind.startsWith("hr-") || kind === "employees" || kind === "payroll") return ["hr"];
   if (["inventory-movements", "warehouses", "stock-transfers"].includes(kind)) return ["inventory"];

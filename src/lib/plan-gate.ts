@@ -10,6 +10,7 @@ export function appHome(features: Feature[]) {
   if (features.includes("accounting")) return "/app";
   if (features.includes("crm")) return "/app/crm";
   if (features.includes("hr")) return "/app/hr";
+  if (features.includes("pos")) return "/app/pos";
   return "/app/billing";
 }
 

@@ -113,7 +113,7 @@ interface AppFrameProps {
 
 /** Which app each menu group belongs to; groups not listed (Organization) are for everyone. */
 const groupFeature: Record<string, Feature> = {
-  Overview: "accounting", CRM: "crm", "Point of sale": "accounting", Sales: "accounting", Purchases: "accounting", Inventory: "inventory", Accounts: "accounting",
+  Overview: "accounting", CRM: "crm", "Point of sale": "pos", Sales: "accounting", Purchases: "accounting", Inventory: "inventory", Accounts: "accounting",
   HRM: "hr", Payroll: "hr", "My portal": "hr", Budgets: "accounting",
 };
 
@@ -241,7 +241,10 @@ export default function AppFrame({ userName, userEmail, role, workspaceName, isO
   };
   const hasApp = (feature: Feature | undefined) => !feature || !features || features.includes(feature);
   // Reports also hold the CRM and payroll reports, so anyone with an app sees them.
+  // With the POS app but not Accounting, the till's items and customers sit under Point of sale.
+  const posOnly = hasApp("pos") && !hasApp("accounting");
   const visibleGroups = navigationGroups
+    .map((group) => (posOnly && group.label === "Point of sale" ? { ...group, items: [...group.items, { slug: "items", label: "Items & services", icon: "Package" }, { slug: "customers", label: "Customers", icon: "Users" }] } : group))
     .map((group) => ({ ...group, items: group.items.filter((item) => allowed(itemHref(item.slug)) && (item.slug === "reports" ? Boolean(features?.length) || !features : hasApp(groupFeature[group.label]))) }))
     // Without Accounting, the Accounts group holds only Reports.
     .map((group) => (group.label === "Accounts" && !hasApp("accounting") ? { ...group, label: "Reports" } : group))

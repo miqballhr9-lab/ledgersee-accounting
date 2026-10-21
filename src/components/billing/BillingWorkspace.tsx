@@ -173,7 +173,7 @@ export default function BillingWorkspace({ enabled, paymentsReady, canManage, ac
           <h2 className="font-semibold">Apps</h2>
           <p className="text-sm text-muted-foreground">Take only what you need, one app or several together.</p>
         </div>
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-5">
           {plans.filter((plan) => plan.type !== "bundle").map((plan) => planCard(plan))}
         </div>
 

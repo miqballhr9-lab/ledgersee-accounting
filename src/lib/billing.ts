@@ -41,7 +41,7 @@ export interface BillingAccess {
   users: number;
 }
 
-const allFeatures: Feature[] = ["accounting", "inventory", "crm", "hr"];
+const allFeatures: Feature[] = ["accounting", "inventory", "crm", "hr", "pos"];
 
 /** Workspaces that never pay, such as the business that runs this product (BILLING_EXEMPT_EMAILS). */
 function exempt(email: string) {
