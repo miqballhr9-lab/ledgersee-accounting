@@ -4,9 +4,10 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Activity, ArrowLeft, Building2, CheckCircle2, Eye, Gift, LogOut, Inbox, LayoutDashboard, Megaphone, MoreHorizontal, Pause, Play, Search, ServerCog, Timer, Trash2, UserPlus, Users, XCircle } from "lucide-react";
+import { Activity, ArrowLeft, Building2, CheckCircle2, Download, Eye, Gift, History, LogOut, Mail, Send, Inbox, LayoutDashboard, Megaphone, MoreHorizontal, Pause, Play, Search, ServerCog, Timer, Trash2, UserPlus, Users, XCircle } from "lucide-react";
 
-import { clearAnnouncement, deleteFeedback, extendTrial, saveAnnouncement, sendTestEmail, setBusinessFlags, setFeedbackStatus, signOutEverywhere, startViewAs } from "@/app/admin-actions";
+import { clearAnnouncement, deleteBusiness, deleteFeedback, emailOwners, exportBusiness, extendTrial, saveAnnouncement, sendTestEmail, setBusinessFlags, setFeedbackStatus, signOutEverywhere, startViewAs, type EmailAudience } from "@/app/admin-actions";
+import { downloadBackup } from "@/lib/backup-download";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
@@ -15,7 +16,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { readableError } from "@/lib/action-error";
-import type { AdminBusiness, AdminFeedback, AdminUser, StatusCheck } from "@/lib/platform-data";
+import type { AdminBusiness, AdminFeedback, AdminLogEntry, AdminUser, StatusCheck } from "@/lib/platform-data";
 
 interface AdminConsoleProps {
   adminEmail: string;
@@ -23,21 +24,35 @@ interface AdminConsoleProps {
   people: AdminUser[];
   inbox: AdminFeedback[];
   announcement: { message: string; tone: "info" | "warning"; until: string } | null;
+  activity: AdminLogEntry[];
   status: StatusCheck[];
 }
 
-type Tab = "dashboard" | "businesses" | "users" | "feedback" | "system" | "announcement";
+type Tab = "dashboard" | "businesses" | "users" | "feedback" | "email" | "activity" | "system" | "announcement";
 
 const tabs: { key: Tab; label: string; icon: React.ElementType }[] = [
   { key: "dashboard", label: "Dashboard", icon: LayoutDashboard },
   { key: "businesses", label: "Businesses", icon: Building2 },
   { key: "users", label: "Users", icon: Users },
   { key: "feedback", label: "Feedback", icon: Inbox },
+  { key: "email", label: "Email owners", icon: Mail },
+  { key: "activity", label: "Activity", icon: History },
   { key: "system", label: "System status", icon: ServerCog },
   { key: "announcement", label: "Announcement", icon: Megaphone },
 ];
 
 const DAY = 86_400_000;
+
+function size(bytes: number) {
+  return bytes >= 1_048_576 ? `${(bytes / 1_048_576).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
+}
+
+const audiences: { value: EmailAudience; label: string }[] = [
+  { value: "all", label: "All business owners" },
+  { value: "active", label: "Active in the last 30 days" },
+  { value: "inactive", label: "Quiet for 30 days or more" },
+  { value: "trial", label: "On a free trial" },
+];
 
 function daysAgo(value: string) {
   return value ? Math.floor((Date.now() - Date.parse(value)) / DAY) : Infinity;
@@ -72,7 +87,7 @@ function Pill({ tone, children }: { tone: "good" | "bad" | "warn" | "info" | "ne
 }
 
 /** The platform owner's panel, over every business on MIK LEDGER. */
-export default function AdminConsole({ adminEmail, businesses, people, inbox, announcement, status }: AdminConsoleProps) {
+export default function AdminConsole({ adminEmail, businesses, people, inbox, announcement, activity, status }: AdminConsoleProps) {
   const router = useRouter();
   const [tab, setTab] = useState<Tab>("dashboard");
   const [busy, setBusy] = useState("");
@@ -83,6 +98,10 @@ export default function AdminConsole({ adminEmail, businesses, people, inbox, an
   const [notice, setNotice] = useState(announcement?.message ?? "");
   const [noticeTone, setNoticeTone] = useState<"info" | "warning">(announcement?.tone ?? "info");
   const [noticeUntil, setNoticeUntil] = useState(announcement?.until ?? "");
+  const [audience, setAudience] = useState<EmailAudience>("all");
+  const [mailSubject, setMailSubject] = useState("");
+  const [mailBody, setMailBody] = useState("");
+  const [activitySearch, setActivitySearch] = useState("");
 
   async function run(key: string, action: () => Promise<unknown>, done: string) {
     setBusy(key);
@@ -132,6 +151,19 @@ export default function AdminConsole({ adminEmail, businesses, people, inbox, an
       toast.error(error instanceof Error ? readableError(error) : "That didn't work. Please try again.");
       setBusy("");
     }
+  }
+
+  function backup(business: AdminBusiness) {
+    void run(`backup-${business.ownerId}`, async () => {
+      const data = await exportBusiness(business.ownerId);
+      await downloadBackup(data, "xlsx", `mikledger-${business.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "business"}`);
+    }, `Backup of ${business.name} downloaded.`);
+  }
+
+  function remove(business: AdminBusiness) {
+    const typed = window.prompt(`Delete ${business.name} for good? Its owner's sign-in and every record (${business.records} records, ${business.invoices} invoices) are removed and can't be brought back. Download a backup first if in doubt.\n\nType the owner's email (${business.ownerEmail}) to confirm:`);
+    if (typed === null) return;
+    void run(`delete-${business.ownerId}`, () => deleteBusiness(business.ownerId, typed), `${business.name} was deleted.`);
   }
 
   function pause(business: AdminBusiness) {
@@ -243,7 +275,7 @@ export default function AdminConsole({ adminEmail, businesses, people, inbox, an
               <Table>
                 <TableHeader>
                   <TableRow className="bg-muted/40 hover:bg-muted/40">
-                    {["Business", "Owner", "Signed up", "Last active", "Users", "Records", "Plan", "Status", ""].map((heading) => <TableHead key={heading} className="whitespace-nowrap text-xs">{heading}</TableHead>)}
+                    {["Business", "Owner", "Signed up", "Last active", "Users", "Records", "Data", "Plan", "Status", ""].map((heading) => <TableHead key={heading} className="whitespace-nowrap text-xs">{heading}</TableHead>)}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -255,6 +287,7 @@ export default function AdminConsole({ adminEmail, businesses, people, inbox, an
                       <TableCell className={`whitespace-nowrap text-sm ${daysAgo(business.lastActive) >= 30 ? "text-muted-foreground" : ""}`}>{when(business.lastActive)}</TableCell>
                       <TableCell className="text-sm tabular-nums">{business.users}</TableCell>
                       <TableCell className="text-sm tabular-nums">{business.records}<span className="block text-xs text-muted-foreground">{business.invoices} invoices</span></TableCell>
+                      <TableCell className="whitespace-nowrap text-sm tabular-nums">{size(business.dataBytes)}<span className="block text-xs text-muted-foreground">{business.files} {business.files === 1 ? "file" : "files"}</span></TableCell>
                       <TableCell className="whitespace-nowrap text-sm">{business.freeAccess ? "Free access" : business.plan}{business.trialEndsAt ? <span className="block text-xs text-muted-foreground">until {date(business.trialEndsAt)}</span> : null}</TableCell>
                       <TableCell>{business.suspended ? <Pill tone="bad">Paused</Pill> : daysAgo(business.lastActive) < 7 ? <Pill tone="good">Active</Pill> : daysAgo(business.lastActive) >= 30 ? <Pill tone="neutral">Inactive</Pill> : <Pill tone="info">Quiet</Pill>}</TableCell>
                       <TableCell className="text-right">
@@ -262,6 +295,7 @@ export default function AdminConsole({ adminEmail, businesses, people, inbox, an
                           <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" aria-label={`Actions for ${business.name}`} disabled={busy.endsWith(business.ownerId)}><MoreHorizontal size={15} /></Button>} />
                           <DropdownMenuContent align="end" className="min-w-56">
                             <DropdownMenuItem onClick={() => void viewAs(business)}><Eye size={14} />View as (read-only)</DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => backup(business)}><Download size={14} />Download backup (Excel)</DropdownMenuItem>
                             <DropdownMenuSeparator />
                             {business.freeAccess
                               ? <DropdownMenuItem onClick={() => void run(`flags-${business.ownerId}`, () => setBusinessFlags(business.ownerId, { freeAccess: false }), "Free access removed.")}><XCircle size={14} />Remove free access</DropdownMenuItem>
@@ -275,12 +309,13 @@ export default function AdminConsole({ adminEmail, businesses, people, inbox, an
                             {business.suspended
                               ? <DropdownMenuItem onClick={() => void run(`flags-${business.ownerId}`, () => setBusinessFlags(business.ownerId, { suspended: false }), `${business.name} is back on.`)}><Play size={14} />Resume business</DropdownMenuItem>
                               : <DropdownMenuItem className="text-destructive" onClick={() => pause(business)}><Pause size={14} />Pause business</DropdownMenuItem>}
+                            {business.ownerEmail.toLowerCase() !== adminEmail.toLowerCase() ? <DropdownMenuItem className="text-destructive" onClick={() => remove(business)}><Trash2 size={14} />Delete business…</DropdownMenuItem> : null}
                           </DropdownMenuContent>
                         </DropdownMenu>
                       </TableCell>
                     </TableRow>
                   ))}
-                  {!shownBusinesses.length ? <TableRow><TableCell colSpan={9} className="h-32 text-center text-sm text-muted-foreground">No businesses match.</TableCell></TableRow> : null}
+                  {!shownBusinesses.length ? <TableRow><TableCell colSpan={10} className="h-32 text-center text-sm text-muted-foreground">No businesses match.</TableCell></TableRow> : null}
                 </TableBody>
               </Table>
             </div>
@@ -359,6 +394,74 @@ export default function AdminConsole({ adminEmail, businesses, people, inbox, an
               </article>
             ))}
             {!shownFeedback.length ? <p className="rounded-lg border border-dashed border-border bg-card px-4 py-10 text-center text-sm text-muted-foreground">No feedback here.</p> : null}
+          </section>
+        ) : null}
+
+        {tab === "email" ? (
+          <section className="max-w-2xl space-y-4 rounded-lg border border-border bg-card p-5">
+            <div>
+              <h2 className="text-base font-semibold">Email business owners</h2>
+              <p className="mt-1 text-sm text-muted-foreground">Sends a plain email to each owner, starting “Hello {"{name}"},”. Paused businesses are left out. Gmail sends about 500 emails a day, so keep groups small.</p>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="mail-audience">Send to</Label>
+              <Select value={audience} onValueChange={(value) => setAudience((value as EmailAudience) || "all")}>
+                <SelectTrigger id="mail-audience" className="w-full sm:w-80"><SelectValue>{audiences.find((item) => item.value === audience)?.label}</SelectValue></SelectTrigger>
+                <SelectContent>{audiences.map((item) => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}</SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">{(() => {
+                const days = (value: string) => (value ? (Date.now() - Date.parse(value)) / DAY : Infinity);
+                const count = businesses.filter((business) => !business.suspended && (audience === "active" ? days(business.lastActive) < 30 : audience === "inactive" ? days(business.lastActive) >= 30 : audience === "trial" ? Boolean(business.trialEndsAt) : true)).length;
+                return `${count} ${count === 1 ? "owner" : "owners"} will get it.`;
+              })()}</p>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="mail-subject">Subject</Label>
+              <Input id="mail-subject" maxLength={150} value={mailSubject} onChange={(event) => setMailSubject(event.target.value)} placeholder="e.g. New in MIK LEDGER: two-step sign-in" />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="mail-body">Message</Label>
+              <Textarea id="mail-body" rows={8} maxLength={5000} value={mailBody} onChange={(event) => setMailBody(event.target.value)} placeholder="Write your message. A blank line starts a new paragraph." />
+            </div>
+            <Button className="gap-1.5" disabled={busy === "mail" || !mailSubject.trim() || mailBody.trim().length < 5} onClick={() => {
+              if (!window.confirm(`Send “${mailSubject.trim()}” to ${audiences.find((item) => item.value === audience)?.label.toLowerCase()}?`)) return;
+              void run("mail", async () => {
+                const result = await emailOwners(audience, mailSubject, mailBody);
+                if (result.failed) toast.warning(`${result.failed} ${result.failed === 1 ? "email" : "emails"} couldn't be sent.`);
+                setMailSubject("");
+                setMailBody("");
+                toast.message(`${result.sent} ${result.sent === 1 ? "email" : "emails"} sent.`);
+              }, "Done.");
+            }}><Send size={15} />{busy === "mail" ? "Sending…" : "Send email"}</Button>
+          </section>
+        ) : null}
+
+        {tab === "activity" ? (
+          <section className="overflow-hidden rounded-lg border border-border bg-card">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3">
+              <p className="text-sm font-semibold">What Super Admins did</p>
+              <div className="relative w-full sm:w-64">
+                <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                <Input value={activitySearch} onChange={(event) => setActivitySearch(event.target.value)} placeholder="Search action or business" className="pl-9" aria-label="Search activity" />
+              </div>
+            </div>
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader><TableRow className="bg-muted/40 hover:bg-muted/40">{["When", "Who", "Action", "Business / person", "Details"].map((heading) => <TableHead key={heading} className="whitespace-nowrap text-xs">{heading}</TableHead>)}</TableRow></TableHeader>
+                <TableBody>
+                  {activity.filter((entry) => { const text = activitySearch.trim().toLowerCase(); return !text || [entry.action, entry.target, entry.detail, entry.by].some((value) => value.toLowerCase().includes(text)); }).map((entry) => (
+                    <TableRow key={entry.id}>
+                      <TableCell className="whitespace-nowrap text-sm">{new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(entry.at))}</TableCell>
+                      <TableCell className="text-sm">{entry.by}</TableCell>
+                      <TableCell className="whitespace-nowrap text-sm font-medium">{entry.action}</TableCell>
+                      <TableCell className="max-w-[280px] truncate text-sm" title={entry.target}>{entry.target}</TableCell>
+                      <TableCell className="max-w-[360px] truncate text-sm text-muted-foreground" title={entry.detail}>{entry.detail}</TableCell>
+                    </TableRow>
+                  ))}
+                  {!activity.length ? <TableRow><TableCell colSpan={5} className="h-32 text-center text-sm text-muted-foreground">Nothing yet. Pausing, trials, free access, view-as, backups, deletes and emails are listed here.</TableCell></TableRow> : null}
+                </TableBody>
+              </Table>
+            </div>
           </section>
         ) : null}
 

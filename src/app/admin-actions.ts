@@ -9,7 +9,10 @@ import { ActionError } from "@/lib/action-error";
 import { getUser, requireUser } from "@/lib/auth";
 import { subscriptionFor, saveSubscription } from "@/lib/billing";
 import { sendEmail } from "@/lib/email";
-import { ANNOUNCEMENT_KIND, BUSINESS_FLAGS_KIND, FEEDBACK_KIND, isPlatformAdmin } from "@/lib/platform";
+import { businessRecords, type BusinessBackup } from "@/lib/backup";
+import { emailConfigured } from "@/lib/email";
+import { ADMIN_LOG_KIND, ANNOUNCEMENT_KIND, BUSINESS_FLAGS_KIND, FEEDBACK_KIND, isPlatformAdmin } from "@/lib/platform";
+import { loadAdminData } from "@/lib/platform-data";
 import { recordAudit } from "@/lib/audit";
 import { revalidatePath } from "@/lib/revalidate";
 import { signViewAs, VIEW_AS_COOKIE, VIEW_AS_SECONDS } from "@/lib/view-as";
@@ -22,8 +25,25 @@ async function requirePlatformAdmin() {
 }
 
 async function ownerExists(ownerId: string) {
-  const [row] = await db.select({ id: user.id }).from(user).where(eq(user.id, ownerId)).limit(1);
+  const [row] = await db.select({ id: user.id, name: user.name, email: user.email }).from(user).where(eq(user.id, ownerId)).limit(1);
   if (!row) throw new ActionError("That business no longer exists.");
+  return row;
+}
+
+/** Notes what a Super Admin did, for the Activity tab. Never blocks the action itself. */
+async function logAdmin(admin: { id: string; email: string }, action: string, target = "", detail = "") {
+  try {
+    await db.insert(bookkeepingRecord).values({ userId: admin.id, kind: ADMIN_LOG_KIND, data: { action, target: target.slice(0, 200), detail: detail.slice(0, 300), by: admin.email, at: new Date().toISOString() } });
+  } catch (error) {
+    console.error("[admin] couldn't log", error);
+  }
+}
+
+/** "Acme Traders (owner@x.com)" for the activity log. */
+async function businessLabel(ownerId: string) {
+  const owner = await ownerExists(ownerId);
+  const [settings] = await db.select({ data: bookkeepingRecord.data }).from(bookkeepingRecord).where(and(eq(bookkeepingRecord.userId, ownerId), eq(bookkeepingRecord.kind, "settings"))).limit(1);
+  return { owner, name: settings?.data.companyName?.trim() || owner.name, label: `${settings?.data.companyName?.trim() || owner.name} (${owner.email})` };
 }
 
 /** Pauses or resumes a business, or gives it free access; the change is noted with who made it. */
@@ -42,12 +62,15 @@ export async function setBusinessFlags(ownerId: string, patch: { suspended?: boo
   data.changedAt = new Date().toISOString();
   if (row) await db.update(bookkeepingRecord).set({ data, updatedAt: new Date() }).where(eq(bookkeepingRecord.id, row.id));
   else await db.insert(bookkeepingRecord).values({ userId: ownerId, kind: BUSINESS_FLAGS_KIND, data });
+  const { label } = await businessLabel(ownerId);
+  if (patch.suspended !== undefined) await logAdmin(admin, patch.suspended ? "Paused business" : "Resumed business", label, data.suspendedNote);
+  if (patch.freeAccess !== undefined) await logAdmin(admin, patch.freeAccess ? "Gave free access" : "Removed free access", label);
   revalidatePath("/admin");
 }
 
 /** Gives a business more free trial: the trial runs on from today or from its current end, whichever is later. */
 export async function extendTrial(ownerId: string, months: number): Promise<string> {
-  await requirePlatformAdmin();
+  const admin = await requirePlatformAdmin();
   await ownerExists(ownerId);
   if (!Number.isInteger(months) || months < 1 || months > 24) throw new ActionError("Choose between 1 and 24 months.");
   const subscription = await subscriptionFor(ownerId);
@@ -56,6 +79,7 @@ export async function extendTrial(ownerId: string, months: number): Promise<stri
   const end = new Date(from);
   end.setUTCMonth(end.getUTCMonth() + months);
   await saveSubscription(ownerId, { status: "trialing", trialEndsAt: end.toISOString() });
+  await logAdmin(admin, "Extended trial", (await businessLabel(ownerId)).label, `${months} ${months === 1 ? "month" : "months"}, until ${end.toISOString().slice(0, 10)}`);
   revalidatePath("/admin");
   return end.toISOString();
 }
@@ -68,12 +92,14 @@ export async function saveAnnouncement(message: string, tone: "info" | "warning"
   if (until && !/^\d{4}-\d{2}-\d{2}$/.test(until)) throw new ActionError("Choose a valid last day.");
   await db.update(bookkeepingRecord).set({ data: { active: "false" }, updatedAt: new Date() }).where(eq(bookkeepingRecord.kind, ANNOUNCEMENT_KIND));
   await db.insert(bookkeepingRecord).values({ userId: admin.id, kind: ANNOUNCEMENT_KIND, data: { message: text, tone: tone === "warning" ? "warning" : "info", until, active: "true", by: admin.email } });
+  await logAdmin(admin, "Put up announcement", "Everyone", text);
   revalidatePath("/", "layout");
 }
 
 export async function clearAnnouncement(): Promise<void> {
-  await requirePlatformAdmin();
+  const admin = await requirePlatformAdmin();
   await db.delete(bookkeepingRecord).where(eq(bookkeepingRecord.kind, ANNOUNCEMENT_KIND));
+  await logAdmin(admin, "Took down announcement");
   revalidatePath("/", "layout");
 }
 
@@ -120,6 +146,7 @@ export async function startViewAs(ownerId: string): Promise<void> {
   if (ownerId === admin.id) throw new ActionError("That's your own business; open it normally.");
   (await cookies()).set(VIEW_AS_COOKIE, signViewAs(admin.id, ownerId), { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax", path: "/", maxAge: VIEW_AS_SECONDS });
   await recordAudit({ id: ownerId, name: "MIK LEDGER support", email: admin.email }, "Viewed for support (read-only)", "support-view", ownerId, { description: `By ${admin.email}` });
+  await logAdmin(admin, "Viewed business (read-only)", (await businessLabel(ownerId)).label);
 }
 
 /** Back to the admin's own business. Open to anyone signed in: it only removes a cookie. */
@@ -129,8 +156,74 @@ export async function stopViewAs(): Promise<void> {
 
 /** Signs a person out on every device, e.g. after they report a lost phone. */
 export async function signOutEverywhere(userId: string): Promise<number> {
-  await requirePlatformAdmin();
+  const admin = await requirePlatformAdmin();
+  const person = await ownerExists(userId);
   const removed = await db.delete(session).where(eq(session.userId, userId)).returning({ id: session.id });
+  await logAdmin(admin, "Signed out everywhere", `${person.name} (${person.email})`, `${removed.length} ${removed.length === 1 ? "device" : "devices"}`);
   revalidatePath("/admin");
   return removed.length;
+}
+
+/** A business's full backup, for support or before deleting it. Logged. */
+export async function exportBusiness(ownerId: string): Promise<BusinessBackup> {
+  const admin = await requirePlatformAdmin();
+  const { owner, name, label } = await businessLabel(ownerId);
+  const records = await businessRecords(ownerId);
+  await logAdmin(admin, "Downloaded backup", label, `${records.length} records`);
+  return { exportedAt: new Date().toISOString(), account: { name: owner.name, email: owner.email }, business: name, records };
+}
+
+/**
+ * Deletes a business for good: its owner's sign-in and every record it holds.
+ * Team members keep their own sign-ins, they simply belong to no business any
+ * more. The admin must type the owner's email to confirm.
+ */
+export async function deleteBusiness(ownerId: string, confirmEmail: string): Promise<void> {
+  const admin = await requirePlatformAdmin();
+  const { owner, label } = await businessLabel(ownerId);
+  if (owner.id === admin.id || isPlatformAdmin(owner.email)) throw new ActionError("A Super Admin's own business can't be deleted here.");
+  if (confirmEmail.trim().toLowerCase() !== owner.email.toLowerCase()) throw new ActionError("Type the owner's email exactly to confirm.");
+  const [counted] = await db.select({ id: bookkeepingRecord.id }).from(bookkeepingRecord).where(eq(bookkeepingRecord.userId, ownerId));
+  await db.transaction(async (tx) => {
+    await tx.delete(bookkeepingRecord).where(eq(bookkeepingRecord.userId, ownerId));
+    await tx.delete(user).where(eq(user.id, ownerId));
+  });
+  await logAdmin(admin, "Deleted business", label, counted ? "with its records" : "it had no records");
+  revalidatePath("/admin");
+}
+
+export type EmailAudience = "all" | "active" | "inactive" | "trial";
+
+/**
+ * Emails business owners: everyone, those active in the last 30 days, those
+ * quiet for 30 days or more, or those on a trial. Five at a time; returns how
+ * many went out and how many failed.
+ */
+export async function emailOwners(audience: EmailAudience, subject: string, message: string): Promise<{ sent: number; failed: number }> {
+  const admin = await requirePlatformAdmin();
+  if (!emailConfigured()) throw new ActionError("Email isn't set up yet. Add GMAIL_USER and GMAIL_APP_PASSWORD in Vercel first.");
+  const title = subject.trim().slice(0, 150);
+  const body = message.trim().slice(0, 5000);
+  if (!title || body.length < 5) throw new ActionError("Write a subject and a message first.");
+  const { businesses } = await loadAdminData();
+  const days = (value: string) => (value ? (Date.now() - Date.parse(value)) / 86400000 : Infinity);
+  const chosen = businesses.filter((business) => !business.suspended && (
+    audience === "active" ? days(business.lastActive) < 30
+      : audience === "inactive" ? days(business.lastActive) >= 30
+        : audience === "trial" ? Boolean(business.trialEndsAt)
+          : true));
+  if (!chosen.length) throw new ActionError("No business owners match that choice.");
+  if (chosen.length > 400) throw new ActionError("That's more than 400 owners; Gmail allows about 500 emails a day. Choose a smaller group.");
+  const escape = (text: string) => text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const html = (name: string) => `<p>Hello ${escape(name)},</p>${escape(body).split(/\n{2,}/).map((part) => `<p>${part.replace(/\n/g, "<br>")}</p>`).join("")}<p>— MIK LEDGER</p>`;
+  let sent = 0;
+  let failed = 0;
+  for (let index = 0; index < chosen.length; index += 5) {
+    const results = await Promise.all(chosen.slice(index, index + 5).map((business) =>
+      sendEmail({ to: business.ownerEmail, subject: title, html: html(business.ownerName), fromName: "MIK LEDGER" }).catch(() => false)));
+    sent += results.filter(Boolean).length;
+    failed += results.filter((ok) => !ok).length;
+  }
+  await logAdmin(admin, "Emailed business owners", { all: "All owners", active: "Active owners", inactive: "Inactive owners", trial: "Owners on trial" }[audience], `“${title}”: ${sent} sent${failed ? `, ${failed} failed` : ""}`);
+  return { sent, failed };
 }

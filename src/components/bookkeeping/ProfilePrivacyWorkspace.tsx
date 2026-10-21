@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import SecurityPanel from "@/components/account/SecurityPanel";
+import { downloadBackup } from "@/lib/backup-download";
 
 interface ProfilePrivacyWorkspaceProps {
   initialName: string;
@@ -51,36 +52,7 @@ export default function ProfilePrivacyWorkspace({ initialName, email, membership
     setIsExporting(true);
     try {
       const data = await exportMyAccountData();
-      const stamp = new Date().toISOString().slice(0, 10);
-      if (format === "xlsx") {
-        // One sheet per kind of record (Customers, Invoices, …), one row per record.
-        const XLSX = await import("xlsx");
-        const workbook = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([
-          ["MIK LEDGER backup"], [], ["Business", data.business], ["Exported by", `${data.account.name} <${data.account.email}>`], ["Exported at", data.exportedAt], ["Records", data.records.length],
-          [], ["Each sheet holds one kind of record. Line items are kept as text in their own column."],
-        ]), "About");
-        const byKind = new Map<string, typeof data.records>();
-        for (const record of data.records) byKind.set(record.kind, [...(byKind.get(record.kind) ?? []), record]);
-        const used = new Set<string>(["About"]);
-        for (const [kind, records] of [...byKind.entries()].sort(([a], [b]) => a.localeCompare(b))) {
-          const keys = [...new Set(records.flatMap((record) => Object.keys(record.data)))];
-          const rows = records.map((record) => [record.id, record.createdAt, record.updatedAt, ...keys.map((key) => String(record.data[key] ?? "").slice(0, 32000))]);
-          let name = (kind.charAt(0).toUpperCase() + kind.slice(1).replace(/-/g, " ")).replace(/[\\/?*[\]:]/g, "").slice(0, 31);
-          for (let n = 2; used.has(name); n += 1) name = `${name.slice(0, 28)} ${n}`;
-          used.add(name);
-          XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([["Record id", "Created", "Updated", ...keys], ...rows]), name);
-        }
-        XLSX.writeFile(workbook, `mikledger-backup-${stamp}.xlsx`);
-      } else {
-        const file = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
-        const downloadUrl = URL.createObjectURL(file);
-        const anchor = document.createElement("a");
-        anchor.href = downloadUrl;
-        anchor.download = `mikledger-backup-${stamp}.json`;
-        anchor.click();
-        window.setTimeout(() => URL.revokeObjectURL(downloadUrl), 1000);
-      }
+      await downloadBackup(data, format);
       setNotice(data.records.length ? `Your backup is ready: ${data.records.length} records.` : "Your download is ready. Only the business owner or an Admin gets the business's records.");
     } catch (error) {
       setNotice(error instanceof Error ? readableError(error) : "We couldn’t prepare your download. Try again.");

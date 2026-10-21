@@ -19,6 +19,8 @@ export const BUSINESS_FLAGS_KIND = "platform-business";
 export const FEEDBACK_KIND = "platform-feedback";
 /** The announcement strip, stored under the platform admin who wrote it. */
 export const ANNOUNCEMENT_KIND = "platform-announcement";
+/** What each Super Admin did, stored under the admin who did it. */
+export const ADMIN_LOG_KIND = "platform-log";
 
 /** People who may open the Super Admin panel: PLATFORM_ADMIN_EMAILS, comma separated. */
 export function isPlatformAdmin(email: string | null | undefined) {

@@ -7,10 +7,10 @@ import { bookkeepingRecord, session, user } from "@/db/schema";
 import { emailConfigured, smtpSettings } from "@/lib/email";
 import { planByKey, planKeysOf } from "@/lib/plans";
 import { blobConfigured } from "@/lib/storage";
-import { ANNOUNCEMENT_KIND, BUSINESS_FLAGS_KIND, FEEDBACK_KIND } from "@/lib/platform";
+import { ADMIN_LOG_KIND, ANNOUNCEMENT_KIND, BUSINESS_FLAGS_KIND, FEEDBACK_KIND } from "@/lib/platform";
 
 /** Kinds that aren't a business's own work, left out of its record counts. */
-const notWork = ["audit-events", "sign-in-log", "settings", "subscription", "team-members", BUSINESS_FLAGS_KIND, FEEDBACK_KIND, ANNOUNCEMENT_KIND, "automation-log"];
+const notWork = ["audit-events", "sign-in-log", ADMIN_LOG_KIND, "settings", "subscription", "team-members", BUSINESS_FLAGS_KIND, FEEDBACK_KIND, ANNOUNCEMENT_KIND, "automation-log"];
 
 export interface AdminBusiness {
   ownerId: string;
@@ -28,6 +28,19 @@ export interface AdminBusiness {
   suspended: boolean;
   suspendedNote: string;
   freeAccess: boolean;
+  /** Space its records take in the database, in bytes. */
+  dataBytes: number;
+  /** Attachments, receipts, logos and other uploaded files its records point to. */
+  files: number;
+}
+
+export interface AdminLogEntry {
+  id: string;
+  at: string;
+  by: string;
+  action: string;
+  target: string;
+  detail: string;
 }
 
 export interface AdminUser {
@@ -64,11 +77,14 @@ export interface StatusCheck {
 const iso = (value: Date | string | null | undefined) => (value ? new Date(value).toISOString() : "");
 
 export async function loadAdminData() {
-  const [users, sessions, signIns, stats, memberships, settings, subscriptions, flags, feedback, announcements] = await Promise.all([
+  const [users, sessions, signIns, usage, fileCounts, log, stats, memberships, settings, subscriptions, flags, feedback, announcements] = await Promise.all([
     db.select({ id: user.id, name: user.name, email: user.email, createdAt: user.createdAt, twoStep: user.twoFactorEnabled }).from(user),
     db.select({ userId: session.userId, last: sql<Date>`max(${session.updatedAt})`, live: sql<number>`count(*) filter (where ${session.expiresAt} > now())` }).from(session).groupBy(session.userId),
     // Sign-ins outlive the sessions they opened, so "last signed in" survives signing out.
     db.select({ userId: bookkeepingRecord.userId, last: sql<Date>`max(${bookkeepingRecord.createdAt})` }).from(bookkeepingRecord).where(eq(bookkeepingRecord.kind, "sign-in-log")).groupBy(bookkeepingRecord.userId),
+    db.select({ userId: bookkeepingRecord.userId, bytes: sql<number>`sum(pg_column_size(${bookkeepingRecord.data}))` }).from(bookkeepingRecord).groupBy(bookkeepingRecord.userId),
+    db.execute<{ user_id: string; files: number }>(sql`select r.user_id, count(*)::int as files from ${bookkeepingRecord} r, jsonb_each_text(r.data) e where e.key ~* '(attach|receipt|logo|file|photo|document|resume|image|avatar)' and e.value ~ '^https?://' group by r.user_id`),
+    db.select().from(bookkeepingRecord).where(eq(bookkeepingRecord.kind, ADMIN_LOG_KIND)).orderBy(desc(bookkeepingRecord.createdAt)).limit(300),
     db.select({
       userId: bookkeepingRecord.userId,
       records: sql<number>`count(*) filter (where ${bookkeepingRecord.kind} not in (${sql.join(notWork.map((kind) => sql`${kind}`), sql`, `)}))`,
@@ -87,6 +103,8 @@ export async function loadAdminData() {
   for (const row of signIns) if (iso(row.last) > (lastSession.get(row.userId) ?? "")) lastSession.set(row.userId, iso(row.last));
   const liveSessions = new Map(sessions.map((row) => [row.userId, Number(row.live)]));
   const statsBy = new Map(stats.map((row) => [row.userId, row]));
+  const bytesBy = new Map(usage.map((row) => [row.userId, Number(row.bytes ?? 0)]));
+  const filesBy = new Map(fileCounts.rows.map((row) => [row.user_id, Number(row.files)]));
   const active = memberships.filter((row) => row.data.status === "Active" && row.data.enabled !== "false" && row.data.memberUserId && row.data.memberUserId !== row.ownerId);
   // Someone invited into another business works there; everyone else owns their own.
   const memberOf = new Map(active.map((row) => [row.data.memberUserId, row]));
@@ -115,6 +133,8 @@ export async function loadAdminData() {
       suspended: flag.suspended === "true",
       suspendedNote: flag.suspendedNote ?? "",
       freeAccess: flag.freeAccess === "true",
+      dataBytes: bytesBy.get(owner.id) ?? 0,
+      files: filesBy.get(owner.id) ?? 0,
     };
   }).sort((a, b) => b.signedUp.localeCompare(a.signedUp));
 
@@ -143,7 +163,9 @@ export async function loadAdminData() {
     ? { message: announcements[0].data.message ?? "", tone: announcements[0].data.tone === "warning" ? "warning" as const : "info" as const, until: announcements[0].data.until ?? "" }
     : null;
 
-  return { businesses, people, inbox, announcement, status: systemStatus() };
+  const activity: AdminLogEntry[] = log.map((row) => ({ id: row.id, at: row.data.at || iso(row.createdAt), by: row.data.by ?? "", action: row.data.action ?? "", target: row.data.target ?? "", detail: row.data.detail ?? "" }));
+
+  return { businesses, people, inbox, announcement, activity, status: systemStatus() };
 }
 
 /** What this deployment has switched on, without ever showing a key. */
