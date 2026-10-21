@@ -45,9 +45,10 @@ export const modules: readonly ModuleDefinition[] = [
   {
     slug: "customers", kind: "customers", label: "Customer", plural: "Customers",
     description: "People and businesses you invoice.", titleKey: "name",
-    columns: ["name", "company", "email", "phone", "openingBalance"],
+    columns: ["customerNumber", "name", "company", "email", "phone", "openingBalance"],
     fields: [
       { key: "name", label: "Display name", section: "Customer details", required: true },
+      { key: "customerNumber", label: "Customer no.", placeholder: "e.g. C-001", help: "Filled with the next number in your series; change the first one to set your own pattern." },
       { key: "customerType", label: "Customer type", type: "select", options: ["Individual", "Business"] },
       { key: "firstName", label: "First name" },
       { key: "middleName", label: "Middle name" },
@@ -81,9 +82,10 @@ export const modules: readonly ModuleDefinition[] = [
   {
     slug: "vendors", kind: "vendors", label: "Supplier", plural: "Suppliers",
     description: "People and businesses you buy from.", titleKey: "name",
-    columns: ["name", "company", "email", "phone", "openingBalance"],
+    columns: ["supplierNumber", "name", "company", "email", "phone", "openingBalance"],
     fields: [
       { key: "name", label: "Display name", section: "Supplier details", required: true },
+      { key: "supplierNumber", label: "Supplier no.", placeholder: "e.g. S-001", help: "Filled with the next number in your series; change the first one to set your own pattern." },
       { key: "supplierType", label: "Supplier type", type: "select", options: ["Individual", "Business"] },
       { key: "firstName", label: "First name" },
       { key: "middleName", label: "Middle name" },

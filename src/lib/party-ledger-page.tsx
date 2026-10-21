@@ -8,11 +8,13 @@ import { requireUser } from "@/lib/auth";
 import { buildLedger } from "@/lib/ledger";
 import { partyLedger } from "@/lib/party-ledger";
 import { requireFeature } from "@/lib/plan-gate";
+import { assignMissingPartyNumbers } from "@/lib/party-number-backfill";
 
 /** The customer or supplier ledger page, for /app/customers/[id]/ledger and /app/vendors/[id]/ledger. */
 export async function PartyLedgerPage({ party, id, from, to }: { party: "customer" | "supplier"; id: string; from?: string; to?: string }) {
   await requireFeature("accounting");
   const me = await requireUser();
+  await assignMissingPartyNumbers(me.id, party === "customer" ? "customers" : "vendors");
   const records = await listAllBookkeepingRecords();
   const kind = party === "customer" ? "customers" : "vendors";
   const record = records.find((row) => row.kind === kind && row.id === id);
@@ -44,7 +46,7 @@ export async function PartyLedgerPage({ party, id, from, to }: { party: "custome
       party={party}
       partyId={id}
       name={display}
-      details={[...address, data.email, data.phone].filter((value): value is string => Boolean(value))}
+      details={[data[party === "customer" ? "customerNumber" : "supplierNumber"] ? `${party === "customer" ? "Customer" : "Supplier"} no. ${data[party === "customer" ? "customerNumber" : "supplierNumber"]}` : "", ...address, data.email, data.phone].filter((value): value is string => Boolean(value))}
       company={settings.companyName || me.workspaceName}
       companyDetails={[settings.email, settings.phone].filter((value): value is string => Boolean(value))}
       currency={settings.currency || "USD"}

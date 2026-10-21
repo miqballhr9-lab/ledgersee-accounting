@@ -37,6 +37,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { navigationGroups, type ModuleDefinition } from "@/lib/bookkeeping-config";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
 import { formatCustomerAddress } from "@/lib/customer-utils";
+import { nextPartyNumber } from "@/lib/party-number";
 import { creditFromInvoice, currencyAmount, dueDateForTerms, homeRate, lineSummary, parseInvoiceLines } from "@/lib/invoice-utils";
 import { paymentAccountLabel, paymentAccountType, receivingAccountType } from "@/lib/payment-accounts";
 import { budgetActualRecords, recordsWithinBudgetDates, type BudgetLine } from "@/lib/budget-utils";
@@ -111,6 +112,7 @@ const LIST_CUSTOMIZATIONS: Partial<Record<string, ListCustomization>> = {
   customers: {
     storageKey: "mikledger:customer-list-preferences:v1",
     options: [
+      { key: "customerNumber", label: "Customer no." },
       { key: "name", label: "Name" },
       { key: "company", label: "Company" },
       { key: "email", label: "Email" },
@@ -118,7 +120,7 @@ const LIST_CUSTOMIZATIONS: Partial<Record<string, ListCustomization>> = {
       { key: "address", label: "Address" },
       { key: "openingBalance", label: "Opening balance" },
     ],
-    defaultColumns: ["name", "company", "email", "phone", "openingBalance"],
+    defaultColumns: ["customerNumber", "name", "company", "email", "phone", "openingBalance"],
     requiredColumn: "name",
     pageSizes: [50, 75, 100, 150, 300],
     defaultPageSize: 50,
@@ -153,8 +155,10 @@ function readListPreferences(customization: ListCustomization): ListPreferences 
     const parsed: unknown = JSON.parse(stored);
     if (typeof parsed !== "object" || parsed === null) return null;
     const preferences = parsed as Record<string, unknown>;
+    // Columns added since the choice was saved show if they are shown by default.
+    const known = Array.isArray(preferences.known) ? (preferences.known as unknown[]) : ["name", "company", "email", "phone", "address", "openingBalance", "date", "entryType", "reference", "contact", "dueDate", "balance", "amount", "memo", "lastModified", "status"];
     const columns = Array.isArray(preferences.columns)
-      ? customization.options.map((option) => option.key).filter((key) => (preferences.columns as unknown[]).includes(key))
+      ? customization.options.map((option) => option.key).filter((key) => (preferences.columns as unknown[]).includes(key) || (!known.includes(key) && customization.defaultColumns.includes(key)))
       : [...customization.defaultColumns];
     if (!columns.includes(customization.requiredColumn)) columns.unshift(customization.requiredColumn);
     const pageSize = customization.pageSizes.find((size) => size === preferences.pageSize) ?? customization.defaultPageSize;
@@ -200,6 +204,7 @@ function createDefaults(module: ModuleDefinition, records: BookkeepingRecord[], 
   const prefix = settings?.invoicePrefix || "INV-";
 
   if (module.kind === "items") values.itemType = "Inventory";
+  if (module.kind === "customers") values.customerNumber = nextPartyNumber("customers", records);
   if (module.kind === "invoices") {
     values.invoiceNumber = `${prefix}${String(sequence).padStart(4, "0")}`;
     values.issueDate = dateString(today);
@@ -524,7 +529,7 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
     setStoredListPreferences(next);
     setPage(1);
     try {
-      window.localStorage.setItem(customization.storageKey, JSON.stringify(next));
+      window.localStorage.setItem(customization.storageKey, JSON.stringify({ ...next, known: customization.options.map((option) => option.key) }));
     } catch {
       // Private windows can refuse storage; the choice still applies until the page reloads.
     }

@@ -26,6 +26,7 @@ import { standardAccounts } from "@/lib/standard-accounts";
 import { budgetActual, budgetExpectedTotal, payrollBudgetHead, budgetVariance, parseBudgetLines, parseCsv, recordsWithinBudgetDates, resolveBudgetLineAccount, type BudgetCategory, type BudgetLine, type BudgetLineType, type BudgetPeriod } from "@/lib/budget-utils";
 import { calculatePayroll, payrollCsvFields, serializePayroll, type EmployerContribution, type PayrollValues, type SalaryTaxRule } from "@/lib/payroll-utils";
 import { packFor } from "@/lib/tax-packs";
+import { nextPartyNumber, partyNumberKey } from "@/lib/party-number";
 import { paymentTermOptions, termsFor } from "@/lib/payment-terms";
 import { buildLedger } from "@/lib/ledger";
 import type { PayrollLiabilityKind } from "@/lib/payroll-liabilities";
@@ -450,6 +451,16 @@ async function saveRecord(
     }
     if (data.itemType !== "Inventory") data = { ...data, openingQty: "", openingDate: "" };
     if (data.itemType !== "Bundle" && !(Number(data.rate) >= 0)) throw new ActionError("Enter a sales price of zero or more.");
+  }
+  if (kind === "customers" || kind === "vendors") {
+    // Customer and supplier numbers: the next in the series when left empty, and never used twice.
+    const numberKey = partyNumberKey[kind];
+    const others = (await db.select().from(bookkeepingRecord).where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, kind)))).filter((row) => row.id !== id);
+    const chosen = (data[numberKey] ?? "").trim();
+    if (!chosen) data = { ...data, [numberKey]: nextPartyNumber(kind, others) };
+    else if (others.some((row) => (row.data[numberKey] ?? "").trim().toLowerCase() === chosen.toLowerCase())) {
+      throw new ActionError(`${kind === "customers" ? "Customer" : "Supplier"} no. ${chosen} is already used. Leave it empty for the next number.`);
+    }
   }
   if (kind === "payroll") {
     data = normalizePayrollData(data, await payrollRules(me.id));

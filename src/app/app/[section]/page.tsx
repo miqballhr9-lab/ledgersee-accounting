@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { listAllBookkeepingRecords, listBookkeepingRecordGroups } from "@/app/actions";
 import CompanySettings from "@/components/settings/CompanySettings";
 import { requireUser } from "@/lib/auth";
+import { assignMissingPartyNumbers } from "@/lib/party-number-backfill";
 import ChartOfAccountsWorkspace from "@/components/bookkeeping/ChartOfAccountsWorkspace";
 import { buildLedger } from "@/lib/ledger";
 import InventoryWorkspace from "@/components/bookkeeping/InventoryWorkspace";
@@ -137,6 +138,7 @@ export default async function SectionPage({ params, searchParams }: SectionPageP
   }
 
   if (section === "vendors") {
+    await assignMissingPartyNumbers((await requireUser()).id, "vendors");
     const groups = await listBookkeepingRecordGroups(["vendors", "bills", "accounts", "settings"]);
     return (
       <VendorsWorkspace
@@ -186,6 +188,7 @@ export default async function SectionPage({ params, searchParams }: SectionPageP
   for (const kind of partyDocuments) kinds.add(kind);
   // Quantity on hand comes from the documents that move stock.
   if (module.kind === "items" || module.kind === "stock-transfers" || kinds.has("items")) for (const kind of inventoryKinds) kinds.add(kind);
+  if (module.kind === "customers") await assignMissingPartyNumbers((await requireUser()).id, "customers");
   const groups = await listBookkeepingRecordGroups([...kinds]);
   const stock = kinds.has("items") ? buildInventory(Object.values(groups).flat()) : null;
   const withStock = (list: BookkeepingRecord[]) => (stock ? list.map((item) => (stock.has(item.id) ? { ...item, data: { ...item.data, qtyOnHand: String(stock.get(item.id)!.onHand) } } : item)) : list);

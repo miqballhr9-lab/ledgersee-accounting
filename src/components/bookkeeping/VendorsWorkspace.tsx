@@ -19,6 +19,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { moduleBySlug, type ModuleDefinition } from "@/lib/bookkeeping-config";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
 import { homeRate } from "@/lib/invoice-utils";
+import { nextPartyNumber } from "@/lib/party-number";
 
 interface VendorsWorkspaceProps {
   records: BookkeepingRecord[];
@@ -77,6 +78,7 @@ export default function VendorsWorkspace({ records: initialRecords, bills, accou
     const normalizedSearch = search.trim().toLocaleLowerCase();
     return summaries.filter(({ vendor, currentBalance, overdueBills }) => {
       const matchesSearch = !normalizedSearch || [
+        vendor.data.supplierNumber,
         vendor.data.displayName,
         vendor.data.name,
         vendor.data.company,
@@ -115,7 +117,7 @@ export default function VendorsWorkspace({ records: initialRecords, bills, accou
 
   function openNewVendor() {
     setEditingRecord(null);
-    setDefaults({ openingBalance: "0", openingBalanceDate: asOfDate });
+    setDefaults({ openingBalance: "0", openingBalanceDate: asOfDate, supplierNumber: nextPartyNumber("vendors", records) });
     setActionMessage("");
     setEditorOpen(true);
   }
@@ -261,7 +263,7 @@ export default function VendorsWorkspace({ records: initialRecords, bills, accou
             <TableHeader>
               <TableRow className="bg-muted/40 hover:bg-muted/40">
                 <TableHead className="w-10 pl-4"><Checkbox aria-label="Select all suppliers" checked={visibleVendors.length > 0 && visibleVendors.every(({ vendor }) => selectedIds.has(vendor.id))} onCheckedChange={(checked) => setSelectedIds((current) => { const next = new Set(current); visibleVendors.forEach(({ vendor }) => (checked ? next.add(vendor.id) : next.delete(vendor.id))); return next; })} /></TableHead>
-                {["Supplier", "Email", "Phone", "Open bills", "Balance", ""].map((heading) => (
+                {["Supplier no.", "Supplier", "Email", "Phone", "Open bills", "Balance", ""].map((heading) => (
                   <TableHead key={heading || "actions"} className="whitespace-nowrap text-xs font-medium text-muted-foreground">{heading}</TableHead>
                 ))}
               </TableRow>
@@ -270,6 +272,7 @@ export default function VendorsWorkspace({ records: initialRecords, bills, accou
               {visibleVendors.map(({ vendor, openBills, currentBalance }) => (
                 <TableRow key={vendor.id} data-state={selectedIds.has(vendor.id) ? "selected" : undefined} className="group cursor-pointer" onClick={(event) => { if (!(event.target as HTMLElement).closest("button, a, [role=menu], [role=checkbox]")) setDetailId(vendor.id); }}>
                   <TableCell className="w-10 pl-4" onClick={(event) => event.stopPropagation()}><Checkbox aria-label={`Select ${vendor.data.displayName || vendor.data.name || "supplier"}`} checked={selectedIds.has(vendor.id)} onCheckedChange={(checked) => toggleSelected(vendor.id, checked === true)} /></TableCell>
+                  <TableCell className="whitespace-nowrap text-[13px] tabular-nums text-muted-foreground">{vendor.data.supplierNumber || "—"}</TableCell>
                   <TableCell className="max-w-[280px]">
                     <Button type="button" variant="link" className="block h-auto max-w-full justify-start p-0 text-left" onClick={() => setDetailId(vendor.id)}>
                       <span className="block truncate text-[13px] font-medium text-primary" title={vendor.data.displayName || vendor.data.company || vendor.data.name || ""}>{vendor.data.displayName || vendor.data.company || vendor.data.name || "Unnamed supplier"}</span>
@@ -295,7 +298,7 @@ export default function VendorsWorkspace({ records: initialRecords, bills, accou
               ))}
               {!visibleVendors.length ? (
                 <TableRow>
-                  <TableCell colSpan={7} className="h-52 whitespace-normal text-center">
+                  <TableCell colSpan={8} className="h-52 whitespace-normal text-center">
                     <div className="sticky left-0 w-[calc(100vw-4.5rem)] sm:static sm:mx-auto sm:w-auto sm:max-w-sm">
                       <p className="text-sm font-medium">{records.length ? "No suppliers match this search" : "No suppliers yet"}</p>
                       <p className="mt-1 text-sm text-muted-foreground">{records.length ? "Try another search or balance filter." : "Add a supplier to keep contact details and bills connected."}</p>
