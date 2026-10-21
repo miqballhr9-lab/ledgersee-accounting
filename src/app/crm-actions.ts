@@ -225,6 +225,8 @@ function buildData(mod: CrmModule, input: Record<string, string>, context: Looku
   }
   if (!data.owner) data.owner = ownerName;
   for (const field of mod.fields) {
+    // A deal product with an item takes its price from the item (or the customer's price book) when none is given.
+    if (mod.kind === "crm-deal-products" && field.key === "price" && data.itemId) continue;
     if (field.required && !field.readOnly && !data[field.key]?.trim()) throw new ActionError(`${field.label} is required.`);
   }
   if (mod.titleKey === "fullName") data.fullName = fullName(data);
@@ -820,6 +822,7 @@ export async function importCrmRecords(kind: string, rows: Record<string, string
   const mod = crmModuleFor(kind, context);
   const failed: { row: number; message: string }[] = [];
   let created = 0;
+  const importedDeals: string[] = [];
   let sequence = mod.numbering ? Number((await nextNumber(me.id, kind, mod.numbering.key, "")).replace(/\D/g, "")) : 0;
   for (const [index, row] of rows.entries()) {
     try {
@@ -830,11 +833,14 @@ export async function importCrmRecords(kind: string, rows: Record<string, string
         sequence += 1;
       }
       await db.insert(bookkeepingRecord).values({ userId: me.id, kind, data });
+      if (kind === "crm-deal-products") importedDeals.push(data.dealId ?? "");
       created += 1;
     } catch (error) {
       failed.push({ row: index + 2, message: error instanceof ActionError ? error.message : "This row couldn’t be saved." });
     }
   }
+  // Imported deal products set their deals' amounts, as products added one by one do.
+  if (importedDeals.length) await syncDealAmount(me.id, importedDeals);
   revalidatePath("/app", "layout");
   return { created, failed: failed.slice(0, 50) };
 }
