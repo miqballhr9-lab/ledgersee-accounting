@@ -425,9 +425,8 @@ async function asWorkspaceUser(signedIn: SignedInUser): Promise<WorkspaceUser> {
   }
   const membership = await membershipFor(signedIn.id);
   if (!membership) return { ...signedIn, actorId: signedIn.id, ownerId: signedIn.id, role: "Admin", isOwner: true, workspaceName: signedIn.name, access: await billingAccess(signedIn.id, signedIn.email) };
-  // The Free plan is for the owner alone; team members can still look, not change anything.
   const access = await billingAccess(membership.ownerId, membership.ownerEmail);
-  return { ...signedIn, id: membership.ownerId, actorId: signedIn.id, ownerId: membership.ownerId, role: membership.role, isOwner: false, workspaceName: membership.ownerName, access: access.enabled && access.plan === "free" ? { ...access, locked: true } : access };
+  return { ...signedIn, id: membership.ownerId, actorId: signedIn.id, ownerId: membership.ownerId, role: membership.role, isOwner: false, workspaceName: membership.ownerName, access };
 }
 
 /** The signed-in person in their workspace, or null. For layouts and pages that redirect. */
@@ -475,7 +474,7 @@ export function assertCanWrite(me: WorkspaceUser, kind: string) {
 export function assertPlanAllows(me: WorkspaceUser, kind: string) {
   assertNotViewing(me);
   if (me.access.suspended) throw new ActionError("This business has been paused by MIK LEDGER, so nothing can be changed. Contact support to turn it back on.");
-  if (me.access.locked) throw new ActionError("Your business is on the Free plan, which is for the owner only. Ask the owner to upgrade so the team can make changes.");
+  if (me.access.locked) throw new ActionError(me.isOwner ? "Your free trial or plan has ended, so nothing can be changed. Choose a plan in Billing to carry on; your records are all still here." : "This business's free trial or plan has ended, so nothing can be changed. Ask the owner to choose a plan in Billing.");
   const needed = featuresForKind(kind, true);
   if (!needed.some((feature) => me.access.features.includes(feature))) throw new ActionError(`${featureLabels[needed[0]]} isn’t in your plan. Add the ${planFor(needed[0]).name} in Billing to use it.`);
 }

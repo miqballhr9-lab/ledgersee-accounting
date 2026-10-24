@@ -5,16 +5,20 @@ import { and, asc, eq } from "drizzle-orm";
 import { cache } from "react";
 
 import { db } from "@/db";
-import { bookkeepingRecord } from "@/db/schema";
+import { bookkeepingRecord, user } from "@/db/schema";
 import { ActionError } from "@/lib/action-error";
-import { businessFlagsFor } from "@/lib/platform";
+import { businessFlagsFor, isPlatformAdmin } from "@/lib/platform";
 import { combinePlans, planByKey, planKeysOf, TRIAL_MONTHS, type Feature, type PlanKey } from "@/lib/plans";
 
 /**
- * Subscriptions, paid through Stripe. Billing is off until STRIPE_SECRET_KEY is
- * set: until then every workspace keeps the whole product, as before. Each
- * workspace owner has one "subscription" record; it is never editable through
- * the record forms, only by checkout and Stripe's webhook.
+ * Subscriptions, paid through Stripe. Every business gets a free trial of the
+ * whole product for TRIAL_MONTHS from the day it signed up; after that it needs
+ * a paid plan to keep working, or access the platform owner gives it in Super
+ * Admin (a longer trial, free access, or chosen apps). Without one it becomes
+ * read-only: everything can be looked at and downloaded, nothing changed.
+ * The trial counts whether or not online payments (STRIPE_SECRET_KEY) are on.
+ * Each owner has one "subscription" record, changed only by checkout, Stripe's
+ * webhook and Super Admin.
  */
 
 const SUBSCRIPTION_KIND = "subscription";
@@ -26,7 +30,7 @@ export const billingEnabled = () => Boolean(process.env.STRIPE_SECRET_KEY);
 export interface BillingAccess {
   /** False when Stripe isn't set up, or the workspace is on the free list. */
   enabled: boolean;
-  /** Records can be read and exported, not changed: a team member's workspace is on the owner-only Free plan. */
+  /** Records can be read and exported, not changed: the trial or plan has run out. */
   locked: boolean;
   /** The first plan, for messages; plans holds every app or bundle bought. */
   plan: PlanKey;
@@ -54,11 +58,12 @@ function exempt(email: string) {
   return (process.env.BILLING_EXEMPT_EMAILS ?? "").split(",").map((entry) => entry.trim().toLowerCase()).filter(Boolean).includes(email.trim().toLowerCase());
 }
 
-/** The workspace's subscription record; a new workspace starts a trial of everything. */
+/** The workspace's subscription record; a new workspace starts a trial of everything, counted from sign-up. */
 export async function subscriptionFor(ownerId: string) {
   const [row] = await db.select().from(bookkeepingRecord).where(and(eq(bookkeepingRecord.userId, ownerId), eq(bookkeepingRecord.kind, SUBSCRIPTION_KIND))).orderBy(asc(bookkeepingRecord.createdAt)).limit(1);
   if (row) return row;
-  const end = new Date();
+  const [owner] = await db.select({ createdAt: user.createdAt }).from(user).where(eq(user.id, ownerId)).limit(1);
+  const end = new Date(owner?.createdAt ?? Date.now());
   end.setUTCMonth(end.getUTCMonth() + TRIAL_MONTHS);
   const trialEndsAt = end.toISOString();
   const [created] = await db.insert(bookkeepingRecord).values({ userId: ownerId, kind: SUBSCRIPTION_KIND, data: { plan: "enterprise", status: "trialing", trialEndsAt } }).returning();
@@ -75,8 +80,8 @@ export async function saveSubscription(ownerId: string, patch: Record<string, st
 export const billingAccess = cache(async function billingAccess(ownerId: string, ownerEmail: string): Promise<BillingAccess> {
   const flags = await businessFlagsFor(ownerId);
   const access = flags.freeAccess ? openAccess() : await planAccess(ownerId, ownerEmail);
-  // Apps chosen by the platform owner replace what the plan gives, whether billing is on or not.
-  const chosen = flags.apps ? { features: flags.apps, appsLimited: true } : {};
+  // Apps chosen by the platform owner replace what the plan gives and keep the business working.
+  const chosen = flags.apps ? { features: flags.apps, appsLimited: true, locked: false } : {};
   return { ...access, ...chosen, suspended: flags.suspended, suspendedNote: flags.suspendedNote };
 });
 
@@ -87,27 +92,27 @@ function openAccess(): BillingAccess {
 
 async function planAccess(ownerId: string, ownerEmail: string): Promise<BillingAccess> {
   const open = openAccess();
-  if (!billingEnabled() || exempt(ownerEmail)) return open;
+  // The platform owner's own business, and any on BILLING_EXEMPT_EMAILS, never run out.
+  if (exempt(ownerEmail) || isPlatformAdmin(ownerEmail)) return open;
   const data = (await subscriptionFor(ownerId)).data;
   const now = Date.now();
   const keys = planKeysOf(data);
   const bought = combinePlans(keys);
   const base = { ...open, enabled: true, plan: keys[0], plans: keys, planName: bought.name, trialEndsAt: data.trialEndsAt ?? "", currentPeriodEnd: data.currentPeriodEnd ?? "", cancelAtPeriodEnd: data.cancelAtPeriodEnd === "true", interval: data.interval ?? "" };
   const paidUp = { ...base, features: bought.features, users: bought.users };
-  // When a trial or paid plan runs out, the business carries on with the Free plan; nothing is locked or deleted.
-  const free = planByKey("free")!;
-  const onFree = { ...base, plan: free.key, plans: [free.key], planName: free.name, features: free.features, users: free.users, cancelAtPeriodEnd: false, interval: "" };
+  // When the trial or a paid plan runs out the business becomes read-only until it buys a plan; nothing is deleted.
+  const ended = { ...base, locked: true, features: allFeatures, cancelAtPeriodEnd: false, interval: "" };
   const before = (date: string | undefined, extraDays = 0) => Boolean(date) && now < Date.parse(date!) + extraDays * 86_400_000;
   switch (data.status) {
     case "active":
       return { ...paidUp, status: "active" };
     case "trialing":
       // A trial started at checkout is on the chosen plan; the free trial is everything.
-      return before(data.trialEndsAt) ? { ...(data.stripeSubscriptionId ? paidUp : { ...base, features: allFeatures }), status: "trialing" } : { ...onFree, status: "trial_ended" };
+      return before(data.trialEndsAt) ? { ...(data.stripeSubscriptionId ? paidUp : { ...base, features: allFeatures }), status: "trialing" } : { ...ended, status: "trial_ended" };
     case "past_due":
-      return before(data.pastDueSince, GRACE_DAYS) ? { ...paidUp, status: "past_due" } : { ...onFree, status: "past_due" };
+      return before(data.pastDueSince, GRACE_DAYS) ? { ...paidUp, status: "past_due" } : { ...ended, status: "past_due" };
     default:
-      return before(data.currentPeriodEnd) ? { ...paidUp, status: "canceled" } : { ...onFree, status: data.status === "canceled" ? "canceled" : "trial_ended" };
+      return before(data.currentPeriodEnd) ? { ...paidUp, status: "canceled" } : { ...ended, status: data.status === "canceled" ? "canceled" : "trial_ended" };
   }
 }
 

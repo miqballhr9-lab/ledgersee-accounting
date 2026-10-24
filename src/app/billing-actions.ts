@@ -25,7 +25,7 @@ export async function choosePlans(planKeys: string[], interval: BillingInterval)
   const me = await owner();
   if (!["month", "year"].includes(interval)) throw new ActionError("Choose monthly or yearly.");
   const keys = normalizePlans(Array.isArray(planKeys) ? planKeys.map(String) : []);
-  if (!keys.length) throw new ActionError("Choose at least one app or bundle. The Free plan needs no payment.");
+  if (!keys.length) throw new ActionError("Choose at least one app or bundle.");
   const row = await subscriptionFor(me.ownerId);
   const data = row.data;
   const base = await siteUrl();

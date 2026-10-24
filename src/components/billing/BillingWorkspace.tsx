@@ -49,7 +49,7 @@ export default function BillingWorkspace({ enabled, paymentsReady, canManage, ac
   const [interval, setInterval] = useState<BillingInterval>(access.interval === "year" ? "year" : "month");
   const [busy, setBusy] = useState("");
   const subscribed = hasCustomer && ["active", "trialing", "past_due"].includes(access.status) && access.interval !== "";
-  const current = enabled && access.plans[0] !== "free" ? access.plans : [];
+  const current = enabled && !access.locked ? access.plans : [];
   const [selected, setSelected] = useState<PlanKey[]>(() => (current.length && access.interval ? current : upgrade ? [planFor(upgrade).key] : []));
   const total = selected.reduce((sum, key) => sum + planPrice(planByKey(key)!, interval), 0);
   const unchanged = subscribed && interval === access.interval && selected.length === current.length && selected.every((key) => current.includes(key));
@@ -63,7 +63,6 @@ export default function BillingWorkspace({ enabled, paymentsReady, canManage, ac
   }
 
   function planCard(plan: Plan) {
-    const isFree = plan.type === "free";
     const picked = selected.includes(plan.key);
     const coveredBy = !picked ? selected.map((key) => planByKey(key)!).find((other) => other.type === "bundle" && plan.features.every((feature) => other.features.includes(feature))) : undefined;
     const highlight = picked || (upgrade ? planFor(upgrade).key === plan.key : false);
@@ -71,29 +70,17 @@ export default function BillingWorkspace({ enabled, paymentsReady, canManage, ac
       <article key={plan.key} className={`flex flex-col rounded-lg border bg-card p-5 ${highlight ? "border-primary shadow-sm" : "border-border"}`}>
         <div className="flex items-center justify-between gap-2">
           <h3 className="text-lg font-semibold">{plan.name}</h3>
-          {current.includes(plan.key) || (isFree && enabled && access.plan === "free") ? <Badge variant="secondary">Current</Badge> : upgrade && planFor(upgrade).key === plan.key ? <Badge>Needed</Badge> : null}
+          {current.includes(plan.key) ? <Badge variant="secondary">Current</Badge> : upgrade && planFor(upgrade).key === plan.key ? <Badge>Needed</Badge> : null}
         </div>
         <p className="mt-1 text-sm text-muted-foreground">{plan.description}</p>
-        <p className="mt-4"><span className="text-3xl font-semibold tabular-nums">${formatPlanPrice(planPrice(plan, interval))}</span><span className="text-sm text-muted-foreground">{isFree ? " for ever" : ` / ${interval === "year" ? "year" : "month"}`}</span></p>
-        {!isFree && interval === "year" && plan.monthly * 12 > plan.yearly ? <p className="text-xs font-medium text-primary">Save ${formatPlanPrice(plan.monthly * 12 - plan.yearly)} a year</p> : null}
+        <p className="mt-4"><span className="text-3xl font-semibold tabular-nums">${formatPlanPrice(planPrice(plan, interval))}</span><span className="text-sm text-muted-foreground">{` / ${interval === "year" ? "year" : "month"}`}</span></p>
+        {interval === "year" && plan.monthly * 12 > plan.yearly ? <p className="text-xs font-medium text-primary">Save ${formatPlanPrice(plan.monthly * 12 - plan.yearly)} a year</p> : null}
         <ul className="mt-4 flex-1 space-y-2 text-sm">
           {plan.highlights.map((line) => <li key={line} className="flex gap-2"><Check size={16} className="mt-0.5 shrink-0 text-primary" />{line}</li>)}
         </ul>
-        {isFree ? (
-          <Button
-            type="button"
-            className="mt-5 w-full"
-            variant="outline"
-            disabled={!enabled || !canManage || access.plan === "free" || !subscribed || access.cancelAtPeriodEnd || Boolean(busy)}
-            onClick={() => { if (window.confirm("Move to the Free plan? Your apps stay until the end of the period you've paid for, then only accounting for one user is included.")) void run("cancel", cancelSubscription, "You'll move to the Free plan at the end of this period."); }}
-          >
-            {enabled && access.plan === "free" ? "Your plan" : subscribed && !access.cancelAtPeriodEnd ? "Switch to Free" : "Included after the trial"}
-          </Button>
-        ) : (
-          <Button type="button" className="mt-5 w-full" variant={picked ? "default" : "outline"} aria-pressed={picked} disabled={Boolean(coveredBy) || Boolean(busy)} onClick={() => toggle(plan.key)}>
-            {coveredBy ? `In the ${coveredBy.name}` : picked ? <><Check size={15} />Selected</> : plan.type === "bundle" ? `Choose ${plan.name}` : `Add ${plan.name}`}
-          </Button>
-        )}
+        <Button type="button" className="mt-5 w-full" variant={picked ? "default" : "outline"} aria-pressed={picked} disabled={Boolean(coveredBy) || Boolean(busy)} onClick={() => toggle(plan.key)}>
+          {coveredBy ? `In the ${coveredBy.name}` : picked ? <><Check size={15} />Selected</> : plan.type === "bundle" ? `Choose ${plan.name}` : `Add ${plan.name}`}
+        </Button>
       </article>
     );
   }
@@ -119,7 +106,7 @@ export default function BillingWorkspace({ enabled, paymentsReady, canManage, ac
       <section>
         <p className="text-xs font-medium uppercase tracking-[0.12em] text-primary">Organization / Billing</p>
         <h1 className="mt-1 text-[26px] font-semibold tracking-tight sm:text-3xl">Plan and billing</h1>
-        <p className="mt-1.5 max-w-2xl text-sm text-muted-foreground">Choose the plan for your business. Every business starts with {TRIAL_MONTHS} months free with everything included, then keeps the Free plan for ever unless it upgrades. Change or cancel at any time.</p>
+        <p className="mt-1.5 max-w-2xl text-sm text-muted-foreground">Choose the plan for your business. Every business starts with {TRIAL_MONTHS} months free with everything included; after that a plan is needed to keep working. Your records are never deleted. Change or cancel at any time.</p>
       </section>
 
       {notice === "success" ? <p role="status" className="rounded-lg border border-primary/30 bg-primary/5 px-4 py-3 text-sm">Thank you! Your payment went through. Your plan updates here within a minute.</p> : null}
@@ -128,7 +115,13 @@ export default function BillingWorkspace({ enabled, paymentsReady, canManage, ac
       {upgrade ? <p role="status" className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">{featureLabels[upgrade]} isn&apos;t in your plan. Add the {planFor(upgrade).name}, or a bundle that includes it.</p> : null}
 
       {!paymentsReady ? (
-        <p className="rounded-lg border border-dashed border-border bg-card px-4 py-3 text-sm text-muted-foreground">Online payments aren&apos;t switched on yet, so every part of MIK LEDGER is open to you for now. The plans below show what will be offered.</p>
+        access.locked ? (
+          <p role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">Your free trial ended{access.trialEndsAt ? ` on ${formatDate(access.trialEndsAt)}` : ""}. You can still look at and download your records. Online payment isn&apos;t open yet, so to keep working, use &quot;Send feedback&quot; at the top and MIK LEDGER will turn your business back on.</p>
+        ) : access.status === "trialing" ? (
+          <p className="rounded-lg border border-border bg-card px-4 py-3 text-sm">Free trial of every app: <span className="font-medium">{daysLeft} {daysLeft === 1 ? "day" : "days"} left</span>, until {formatDate(access.trialEndsAt)}. Online payments aren&apos;t switched on yet; the plans below show what will be offered.</p>
+        ) : (
+          <p className="rounded-lg border border-border bg-card px-4 py-3 text-sm">This business has free access; there is nothing to pay.</p>
+        )
       ) : !enabled ? (
         <p className="rounded-lg border border-border bg-card px-4 py-3 text-sm">This business has free access to everything; there is nothing to pay.</p>
       ) : (
@@ -137,11 +130,11 @@ export default function BillingWorkspace({ enabled, paymentsReady, canManage, ac
             <p className="text-xs text-muted-foreground">Current plan</p>
             <p className="mt-1 flex items-center gap-2 text-lg font-semibold">
               {access.status === "trialing" && !subscribed ? "Free trial (all apps)" : access.planName}
-              <Badge variant={access.locked ? "destructive" : "secondary"}>{access.plan === "free" ? "Free for ever" : statusText[access.status]}</Badge>
+              <Badge variant={access.locked ? "destructive" : "secondary"}>{statusText[access.status]}</Badge>
             </p>
             <p className="mt-1 text-sm text-muted-foreground">
               {access.status === "trialing" ? `${daysLeft} ${daysLeft === 1 ? "day" : "days"} left, until ${formatDate(access.trialEndsAt)}.`
-                : access.plan === "free" ? "Accounting for one user. Upgrade for inventory, CRM, HR and payroll, and for your team; nothing has been deleted."
+                : access.locked ? "Read-only: choose a plan below to carry on. Nothing has been deleted."
                 : access.status === "past_due" ? "The last payment didn't go through. Update your card to keep your plan."
                 : access.cancelAtPeriodEnd ? `Cancelled; it stays active until ${formatDate(access.currentPeriodEnd)}.`
                 : access.currentPeriodEnd ? `Renews on ${formatDate(access.currentPeriodEnd)}, billed ${access.interval === "year" ? "yearly" : "monthly"}.` : ""}
@@ -174,7 +167,7 @@ export default function BillingWorkspace({ enabled, paymentsReady, canManage, ac
           <p className="text-sm text-muted-foreground">Take only what you need, one app or several together.</p>
         </div>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-5">
-          {plans.filter((plan) => plan.type !== "bundle").map((plan) => planCard(plan))}
+          {plans.filter((plan) => plan.type === "app").map((plan) => planCard(plan))}
         </div>
 
         <div>

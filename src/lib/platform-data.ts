@@ -5,9 +5,9 @@ import { desc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { bookkeepingRecord, session, user } from "@/db/schema";
 import { emailConfigured, smtpSettings } from "@/lib/email";
-import { planByKey, planKeysOf } from "@/lib/plans";
+import { planByKey, planKeysOf, TRIAL_MONTHS } from "@/lib/plans";
 import { blobConfigured, privateBlobToken } from "@/lib/storage";
-import { ADMIN_APPS, ADMIN_LOG_KIND, ANNOUNCEMENT_KIND, BUSINESS_FLAGS_KIND, FEEDBACK_KIND } from "@/lib/platform";
+import { ADMIN_APPS, ADMIN_LOG_KIND, ANNOUNCEMENT_KIND, BUSINESS_FLAGS_KIND, FEEDBACK_KIND, isPlatformAdmin } from "@/lib/platform";
 
 /** Kinds that aren't a business's own work, left out of its record counts. */
 const notWork = ["audit-events", "sign-in-log", ADMIN_LOG_KIND, "settings", "subscription", "team-members", BUSINESS_FLAGS_KIND, FEEDBACK_KIND, ANNOUNCEMENT_KIND, "automation-log"];
@@ -28,6 +28,8 @@ export interface AdminBusiness {
   suspended: boolean;
   suspendedNote: string;
   freeAccess: boolean;
+  /** Its trial or plan has run out and nothing you gave keeps it open: read-only. */
+  expired: boolean;
   /** Apps chosen by hand (keys of ADMIN_APPS); empty when the business follows its plan. */
   apps: string[];
   /** Space its records take in the database, in bytes. */
@@ -120,6 +122,13 @@ export async function loadAdminData() {
     const flag = flags.find((row) => row.ownerId === owner.id)?.data ?? {};
     const company = settings.find((row) => row.ownerId === owner.id)?.data;
     const keys = subscription ? planKeysOf(subscription) : [];
+    // A business that hasn't opened the app since trials began has no record yet; its trial runs from sign-up.
+    const signupTrialEnd = new Date(owner.createdAt);
+    signupTrialEnd.setUTCMonth(signupTrialEnd.getUTCMonth() + TRIAL_MONTHS);
+    const trialEnd = subscription ? subscription.trialEndsAt ?? "" : signupTrialEnd.toISOString();
+    const onTrial = !subscription || (subscription.status === "trialing" && !subscription.stripeSubscriptionId);
+    const paidUntil = subscription?.status === "active" || (subscription?.currentPeriodEnd && Date.parse(subscription.currentPeriodEnd) > Date.now());
+    const expired = !isPlatformAdmin(owner.email) && flag.freeAccess !== "true" && !flag.apps && (onTrial ? Date.parse(trialEnd) <= Date.now() : !paidUntil);
     return {
       ownerId: owner.id,
       name: company?.companyName?.trim() || owner.name,
@@ -130,11 +139,12 @@ export async function loadAdminData() {
       users: 1 + team.length,
       records: Number(stat?.records ?? 0),
       invoices: Number(stat?.invoices ?? 0),
-      plan: !subscription ? "Free beta" : subscription.status === "trialing" && !subscription.stripeSubscriptionId ? "Trial" : keys.map((key) => planByKey(key)?.name ?? key).join(" + "),
-      trialEndsAt: subscription?.status === "trialing" ? subscription.trialEndsAt ?? "" : "",
+      plan: isPlatformAdmin(owner.email) ? "Owner (never ends)" : onTrial ? (expired ? "Trial ended" : "Trial") : keys.map((key) => planByKey(key)?.name ?? key).join(" + "),
+      trialEndsAt: onTrial && !isPlatformAdmin(owner.email) ? trialEnd : "",
       suspended: flag.suspended === "true",
       suspendedNote: flag.suspendedNote ?? "",
       freeAccess: flag.freeAccess === "true",
+      expired,
       apps: flag.apps ? ADMIN_APPS.filter((app) => app.features.every((feature) => flag.apps.split(",").includes(feature))).map((app) => app.key) : [],
       dataBytes: bytesBy.get(owner.id) ?? 0,
       files: filesBy.get(owner.id) ?? 0,

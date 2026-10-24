@@ -147,6 +147,7 @@ export default function AdminConsole({ adminEmail, businesses, people, inbox, an
     if (filter === "inactive") return daysAgo(business.lastActive) >= 30;
     if (filter === "paused") return business.suspended;
     if (filter === "free") return business.freeAccess;
+    if (filter === "expired") return business.expired;
     return true;
   });
   const userNeedle = userSearch.trim().toLowerCase();
@@ -293,13 +294,14 @@ export default function AdminConsole({ adminEmail, businesses, people, inbox, an
                   <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search name or email" className="pl-9" aria-label="Search businesses" />
                 </div>
                 <Select value={filter} onValueChange={(value) => setFilter(String(value ?? "all"))}>
-                  <SelectTrigger className="w-44" aria-label="Show"><SelectValue>{({ all: "All businesses", active: "Active this week", inactive: "Inactive 30+ days", paused: "Paused", free: "Free access" } as Record<string, string>)[filter]}</SelectValue></SelectTrigger>
+                  <SelectTrigger className="w-44" aria-label="Show"><SelectValue>{({ all: "All businesses", active: "Active this week", inactive: "Inactive 30+ days", paused: "Paused", free: "Free access", expired: "Trial ended" } as Record<string, string>)[filter]}</SelectValue></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All businesses</SelectItem>
                     <SelectItem value="active">Active this week</SelectItem>
                     <SelectItem value="inactive">Inactive 30+ days</SelectItem>
                     <SelectItem value="paused">Paused</SelectItem>
                     <SelectItem value="free">Free access</SelectItem>
+                    <SelectItem value="expired">Trial ended</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -321,8 +323,8 @@ export default function AdminConsole({ adminEmail, businesses, people, inbox, an
                       <TableCell className="text-sm tabular-nums">{business.users}</TableCell>
                       <TableCell className="text-sm tabular-nums">{business.records}<span className="block text-xs text-muted-foreground">{business.invoices} invoices</span></TableCell>
                       <TableCell className="whitespace-nowrap text-sm tabular-nums">{size(business.dataBytes)}<span className="block text-xs text-muted-foreground">{business.files} {business.files === 1 ? "file" : "files"}</span></TableCell>
-                      <TableCell className="whitespace-nowrap text-sm">{business.apps.length ? `Only ${appChoices.filter((app) => business.apps.includes(app.key)).map((app) => app.label).join(", ")}` : business.freeAccess ? "Free access" : business.plan}{business.trialEndsAt ? <span className="block text-xs text-muted-foreground">until {date(business.trialEndsAt)}</span> : null}</TableCell>
-                      <TableCell>{business.suspended ? <Pill tone="bad">Paused</Pill> : daysAgo(business.lastActive) < 7 ? <Pill tone="good">Active</Pill> : daysAgo(business.lastActive) >= 30 ? <Pill tone="neutral">Inactive</Pill> : <Pill tone="info">Quiet</Pill>}</TableCell>
+                      <TableCell className="whitespace-nowrap text-sm">{business.apps.length ? `Only ${appChoices.filter((app) => business.apps.includes(app.key)).map((app) => app.label).join(", ")}` : business.freeAccess ? "Free access" : business.plan}{business.trialEndsAt ? <span className="block text-xs text-muted-foreground">{business.expired ? "ended" : "until"} {date(business.trialEndsAt)}</span> : null}</TableCell>
+                      <TableCell>{business.suspended ? <Pill tone="bad">Paused</Pill> : business.expired ? <Pill tone="warn">Read-only</Pill> : daysAgo(business.lastActive) < 7 ? <Pill tone="good">Active</Pill> : daysAgo(business.lastActive) >= 30 ? <Pill tone="neutral">Inactive</Pill> : <Pill tone="info">Quiet</Pill>}</TableCell>
                       <TableCell className="text-right">
                         <DropdownMenu>
                           <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" aria-label={`Actions for ${business.name}`} disabled={busy.endsWith(business.ownerId)}><MoreHorizontal size={15} /></Button>} />

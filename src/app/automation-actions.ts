@@ -460,7 +460,8 @@ export async function runAutomationRule(id: string): Promise<void> {
 export async function runDueAutomations(): Promise<void> {
   const me = await requireUser();
   // Rules act for the whole business, so only its Admins set them off; the daily job covers the rest.
-  if (me.role !== "Admin" || me.viewingAs) return;
+  // A business whose trial or plan ended, or that is paused, changes nothing on its own either.
+  if (me.role !== "Admin" || me.viewingAs || me.access.locked || me.access.suspended) return;
   // Reminders people set on their own tasks go out whatever the automation mode.
   await sendDueTaskReminders(me.id, me.name, me.email).catch(() => undefined);
   if ((await currentMode(me.id)) !== "Automation") return;

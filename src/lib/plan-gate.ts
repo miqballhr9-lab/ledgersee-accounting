@@ -16,7 +16,7 @@ export function appHome(features: Feature[]) {
 
 /**
  * Sends people to Billing when their plan includes none of these parts of the
- * product. A team member on the owner-only Free plan can still read everything.
+ * product. A business whose trial or plan has ended can still read everything.
  */
 export async function requireFeature(...features: Feature[]) {
   const me = await getWorkspaceUser();
