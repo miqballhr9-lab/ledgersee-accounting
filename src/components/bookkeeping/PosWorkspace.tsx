@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Banknote, Camera, CreditCard, Minus, Package, Plus, Printer, ReceiptText, ScanBarcode, Search, ShoppingCart, Trash2, Undo2, Warehouse, X } from "lucide-react";
+import { Banknote, Camera, CreditCard, Minus, Package, PauseCircle, Play, Plus, Printer, ReceiptText, ScanBarcode, Search, ShoppingCart, Trash2, Undo2, Warehouse, X } from "lucide-react";
 
 import { saveBookkeepingRecord } from "@/app/actions";
 import PosReturnDialog from "@/components/bookkeeping/PosReturnDialog";
@@ -21,6 +21,7 @@ import { isInventoryItem } from "@/lib/inventory";
 import { currencyAmount, invoiceTax } from "@/lib/invoice-utils";
 import { receivingAccountType } from "@/lib/payment-accounts";
 import { customerPriceBook, priceBookPrice } from "@/lib/price-books";
+import { useHeldSales, type HeldSale } from "@/lib/pos-held";
 
 interface PosWorkspaceProps {
   items: BookkeepingRecord[];
@@ -44,6 +45,8 @@ interface PosWorkspaceProps {
   today: string;
   /** Only the business's Admin may delete a sale or take its payment off. */
   isAdmin?: boolean;
+  /** The business, so sales held on this device stay with it. */
+  businessId?: string;
 }
 
 interface CartLine {
@@ -84,7 +87,7 @@ const escapeHtml = (value: string) => value.replace(/[&<>"']/g, (char) => ({ "&"
  */
 const bySerial = (item: BookkeepingRecord) => item.data.tracking === "Serial number";
 
-export default function PosWorkspace({ items, customers, priceBooks = [], accounts, taxes, receipts, returns = [], warehouses = [], stockAt = {}, serials = [], settings, currency, today, isAdmin = false }: PosWorkspaceProps) {
+export default function PosWorkspace({ items, customers, priceBooks = [], accounts, taxes, receipts, returns = [], warehouses = [], stockAt = {}, serials = [], settings, currency, today, isAdmin = false, businessId = "" }: PosWorkspaceProps) {
   const router = useRouter();
   const searchRef = useRef<HTMLInputElement>(null);
   const products = useMemo(() => items.filter((item) => item.data.name?.trim() && item.data.itemType !== "Bundle" && item.data.active !== "false"), [items]);
@@ -108,6 +111,8 @@ export default function PosWorkspace({ items, customers, priceBooks = [], accoun
   const [warehouse, setWarehouse] = useState(warehouses[0] ?? "");
   const [returning, setReturning] = useState(false);
   const [salesOpen, setSalesOpen] = useState(false);
+  const [heldOpen, setHeldOpen] = useState(false);
+  const { held, save: saveHeld } = useHeldSales(businessId);
 
   const money = (value: number) => currencyAmount(value, currency);
   // With warehouses, only what the chosen one holds can be sold.
@@ -295,6 +300,40 @@ export default function PosWorkspace({ items, customers, priceBooks = [], accoun
     }
   }
 
+  /** Puts the sale being rung up aside, so the next customer can be served. */
+  function holdSale(quiet = false) {
+    if (!basket.length) return held;
+    const chosen = customers.find((entry) => entry.id === customer);
+    const entry: HeldSale = { id: crypto.randomUUID(), at: new Date().toISOString(), customer, customerName: chosen?.data.name?.trim() || WALK_IN, lines: basket, discount, taxId, warehouse };
+    const next = [entry, ...held].slice(0, 30);
+    try {
+      saveHeld(next);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "The sale couldn't be held.", { position: "top-center" });
+      return held;
+    }
+    setCart([]);
+    setDiscount("");
+    setCustomer(WALK_IN);
+    setTendered("");
+    if (!quiet) toast.success(`Sale held for ${entry.customerName}. Resume it from "Held".`, { position: "top-center" });
+    setTimeout(() => searchRef.current?.focus(), 50);
+    return next;
+  }
+
+  /** Brings a held sale back to the register; a sale already being rung up is held first. */
+  function resumeSale(entry: HeldSale) {
+    const list = basket.length ? holdSale(true) : held;
+    saveHeld(list.filter((sale) => sale.id !== entry.id));
+    setCart(entry.lines);
+    setCustomer(customers.some((option) => option.id === entry.customer) ? entry.customer : WALK_IN);
+    setDiscount(entry.discount);
+    setTaxId(entry.taxId);
+    if (entry.warehouse && warehouses.includes(entry.warehouse)) setWarehouse(entry.warehouse);
+    setHeldOpen(false);
+    if (basket.length) toast.message("The sale you were on is now held.", { position: "top-center" });
+  }
+
   function newSale() {
     setCart([]);
     setDiscount("");
@@ -367,6 +406,7 @@ export default function PosWorkspace({ items, customers, priceBooks = [], accoun
               </Select>
             </div>
           ) : null}
+          <Button type="button" variant="outline" className="h-auto gap-2 self-stretch" onClick={() => setHeldOpen(true)} disabled={!held.length}><PauseCircle size={15} />Held{held.length ? <span className="rounded-full bg-primary px-1.5 text-[11px] font-semibold text-primary-foreground">{held.length}</span> : null}</Button>
           <Button type="button" variant="outline" className="h-auto gap-2 self-stretch" onClick={() => setSalesOpen(true)}><ReceiptText size={15} />Sales</Button>
           <Button type="button" variant="outline" className="h-auto gap-2 self-stretch" onClick={() => setReturning(true)} disabled={!receipts.length}><Undo2 size={15} />Return / refund</Button>
           {[["Today's sales", String(todays.length)], ["Takings", money(takings)], ["Cash", money(byMethod("Cash"))], ["Card", money(byMethod("Card"))], ...(todaysReturns ? [["Refunds", `−${money(todaysReturns)}`]] : [])].map(([label, value]) => (
@@ -441,7 +481,12 @@ export default function PosWorkspace({ items, customers, priceBooks = [], accoun
         <aside className="flex min-h-0 flex-col rounded-xl border border-border bg-card" aria-label="Current sale">
           <div className="flex items-center justify-between gap-2 border-b border-border p-3">
             <h2 className="flex items-center gap-2 font-semibold"><ShoppingCart size={17} />Current sale</h2>
-            {cart.length ? <Button type="button" variant="ghost" size="sm" className="text-muted-foreground" onClick={() => setCart([])}><X size={14} />Clear</Button> : null}
+            {cart.length ? (
+              <div className="flex gap-1">
+                <Button type="button" variant="outline" size="sm" className="gap-1" onClick={() => holdSale()} title="Put this sale aside and serve the next customer"><PauseCircle size={14} />Hold</Button>
+                <Button type="button" variant="ghost" size="sm" className="text-muted-foreground" onClick={() => setCart([])}><X size={14} />Clear</Button>
+              </div>
+            ) : null}
           </div>
           <div className="space-y-2 border-b border-border p-3">
             <Label htmlFor="pos-customer" className="text-xs text-muted-foreground">Customer</Label>
@@ -509,6 +554,32 @@ export default function PosWorkspace({ items, customers, priceBooks = [], accoun
         </aside>
       </div>
 
+      <Dialog open={heldOpen} onOpenChange={setHeldOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Held sales</DialogTitle>
+            <DialogDescription>Sales put aside on this till. Resume one to add more and take payment; nothing is in the books until it is completed.</DialogDescription>
+          </DialogHeader>
+          <ul className="max-h-[60dvh] divide-y divide-border overflow-y-auto rounded-lg border border-border">
+            {held.map((entry) => {
+              const count = entry.lines.reduce((sum, line) => sum + line.quantity, 0);
+              const value = entry.lines.reduce((sum, line) => sum + line.price * line.quantity, 0);
+              return (
+                <li key={entry.id} className="flex items-center gap-3 px-3 py-2.5">
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-medium">{entry.customerName}</p>
+                    <p className="truncate text-xs text-muted-foreground">{count} {count === 1 ? "item" : "items"} · {money(value)} before tax · held {new Date(entry.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</p>
+                    <p className="truncate text-xs text-muted-foreground">{entry.lines.map((line) => `${line.quantity} × ${line.name}`).join(", ")}</p>
+                  </div>
+                  <Button type="button" size="sm" className="gap-1" onClick={() => resumeSale(entry)}><Play size={14} />Resume</Button>
+                  <Button type="button" size="icon-sm" variant="ghost" className="text-destructive hover:text-destructive" aria-label={`Remove the sale held for ${entry.customerName}`} onClick={() => { if (window.confirm(`Remove the sale held for ${entry.customerName}? It was never completed, so nothing else changes.`)) saveHeld(held.filter((sale) => sale.id !== entry.id)); }}><Trash2 size={15} /></Button>
+                </li>
+              );
+            })}
+            {!held.length ? <li className="px-3 py-8 text-center text-sm text-muted-foreground">No sales on hold.</li> : null}
+          </ul>
+        </DialogContent>
+      </Dialog>
       <PosSalesDialog open={salesOpen} onOpenChange={setSalesOpen} receipts={receipts} returns={returns} payAccounts={payAccounts} currency={currency} today={today} onPrint={printSaved} onChanged={() => router.refresh()} isAdmin={isAdmin} />
       <PosReturnDialog open={returning} onOpenChange={setReturning} receipts={receipts} returns={returns} items={items} payAccounts={payAccounts} currency={currency} today={today} onDone={() => router.refresh()} />
 

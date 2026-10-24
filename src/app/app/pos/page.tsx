@@ -39,6 +39,7 @@ export default async function PosPage() {
       currency={settings.currency || "USD"}
       today={new Date().toISOString().slice(0, 10)}
       isAdmin={me.role === "Admin"}
+      businessId={me.id}
     />
   );
 }
