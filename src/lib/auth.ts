@@ -47,8 +47,10 @@ async function recordSignIn(session: { userId: string; ipAddress?: string | null
       .where(and(eq(schema.bookkeepingRecord.userId, session.userId), eq(schema.bookkeepingRecord.kind, SIGN_IN_LOG_KIND)))
       .orderBy(desc(schema.bookkeepingRecord.createdAt)).limit(1);
     const userAgent = (session.userAgent ?? "").slice(0, 300);
+    // Vercel names the visitor's country (two letters) on every request; elsewhere it's simply blank.
+    const country = await headers().then((list) => (list.get("x-vercel-ip-country") ?? "").slice(0, 2).toUpperCase()).catch(() => "");
     if (last && last.data.userAgent === userAgent && Date.now() - last.createdAt.getTime() < 2 * 60 * 1000) return;
-    await db.insert(schema.bookkeepingRecord).values({ userId: session.userId, kind: SIGN_IN_LOG_KIND, data: { at: new Date().toISOString(), ipAddress: session.ipAddress ?? "", userAgent } });
+    await db.insert(schema.bookkeepingRecord).values({ userId: session.userId, kind: SIGN_IN_LOG_KIND, data: { at: new Date().toISOString(), ipAddress: session.ipAddress ?? "", userAgent, country } });
     await db.execute(sql`delete from ${schema.bookkeepingRecord} where ${schema.bookkeepingRecord.userId} = ${session.userId} and ${schema.bookkeepingRecord.kind} = ${SIGN_IN_LOG_KIND} and ${schema.bookkeepingRecord.id} not in (select ${schema.bookkeepingRecord.id} from ${schema.bookkeepingRecord} where ${schema.bookkeepingRecord.userId} = ${session.userId} and ${schema.bookkeepingRecord.kind} = ${SIGN_IN_LOG_KIND} order by ${schema.bookkeepingRecord.createdAt} desc limit ${SIGN_INS_KEPT})`);
   } catch (error) {
     console.error("[auth] couldn't note the sign-in", error);

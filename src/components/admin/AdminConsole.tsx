@@ -53,6 +53,20 @@ const appChoices = [
   { key: "pos", label: "POS", note: "Point of sale register" },
 ];
 
+const regionNames = (() => {
+  try {
+    return new Intl.DisplayNames(["en"], { type: "region" });
+  } catch {
+    return null;
+  }
+})();
+
+/** "Pakistan" from "PK"; a name typed in settings is shown as it is. */
+function countryName(value: string) {
+  if (/^[A-Z]{2}$/.test(value)) return regionNames?.of(value) ?? value;
+  return value;
+}
+
 function size(bytes: number) {
   return bytes >= 1_048_576 ? `${(bytes / 1_048_576).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
 }
@@ -142,7 +156,7 @@ export default function AdminConsole({ adminEmail, businesses, people, inbox, an
 
   const needle = search.trim().toLowerCase();
   const shownBusinesses = businesses.filter((business) => {
-    if (needle && ![business.name, business.ownerName, business.ownerEmail].some((value) => value.toLowerCase().includes(needle))) return false;
+    if (needle && ![business.name, business.ownerName, business.ownerEmail, countryName(business.country)].some((value) => value.toLowerCase().includes(needle))) return false;
     if (filter === "active") return daysAgo(business.lastActive) < 7;
     if (filter === "inactive") return daysAgo(business.lastActive) >= 30;
     if (filter === "paused") return business.suspended;
@@ -291,7 +305,7 @@ export default function AdminConsole({ adminEmail, businesses, people, inbox, an
               <div className="flex w-full flex-wrap gap-2 sm:w-auto">
                 <div className="relative min-w-0 basis-full sm:w-64 sm:basis-auto">
                   <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                  <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search name or email" className="pl-9" aria-label="Search businesses" />
+                  <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search name, email or country" className="pl-9" aria-label="Search businesses" />
                 </div>
                 <Select value={filter} onValueChange={(value) => setFilter(String(value ?? "all"))}>
                   <SelectTrigger className="w-44" aria-label="Show"><SelectValue>{({ all: "All businesses", active: "Active this week", inactive: "Inactive 30+ days", paused: "Paused", free: "Free access", expired: "Trial ended" } as Record<string, string>)[filter]}</SelectValue></SelectTrigger>
@@ -310,7 +324,7 @@ export default function AdminConsole({ adminEmail, businesses, people, inbox, an
               <Table>
                 <TableHeader>
                   <TableRow className="bg-muted/40 hover:bg-muted/40">
-                    {["Business", "Owner", "Signed up", "Last active", "Users", "Records", "Data", "Plan", "Status", ""].map((heading) => <TableHead key={heading} className="whitespace-nowrap text-xs">{heading}</TableHead>)}
+                    {["Business", "Owner", "Country", "Signed up", "Last active", "Users", "Records", "Data", "Plan", "Status", ""].map((heading) => <TableHead key={heading} className="whitespace-nowrap text-xs">{heading}</TableHead>)}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -318,6 +332,7 @@ export default function AdminConsole({ adminEmail, businesses, people, inbox, an
                     <TableRow key={business.ownerId}>
                       <TableCell className="max-w-[220px] text-sm font-medium"><span className="block truncate" title={business.name}>{business.name}</span></TableCell>
                       <TableCell className="max-w-[240px] text-sm"><span className="block truncate">{business.ownerName}</span><a href={`mailto:${business.ownerEmail}`} className="block truncate text-xs text-primary hover:underline">{business.ownerEmail}</a></TableCell>
+                      <TableCell className="whitespace-nowrap text-sm">{business.country ? <>{countryName(business.country)}{business.countryFromSignIn ? <span className="block text-xs text-muted-foreground">from sign-in</span> : null}</> : <span className="text-muted-foreground">—</span>}</TableCell>
                       <TableCell className="whitespace-nowrap text-sm">{date(business.signedUp)}</TableCell>
                       <TableCell className={`whitespace-nowrap text-sm ${daysAgo(business.lastActive) >= 30 ? "text-muted-foreground" : ""}`}>{when(business.lastActive)}</TableCell>
                       <TableCell className="text-sm tabular-nums">{business.users}</TableCell>
@@ -351,11 +366,11 @@ export default function AdminConsole({ adminEmail, businesses, people, inbox, an
                       </TableCell>
                     </TableRow>
                   ))}
-                  {!shownBusinesses.length ? <TableRow><TableCell colSpan={10} className="h-32 text-center text-sm text-muted-foreground">No businesses match.</TableCell></TableRow> : null}
+                  {!shownBusinesses.length ? <TableRow><TableCell colSpan={11} className="h-32 text-center text-sm text-muted-foreground">No businesses match.</TableCell></TableRow> : null}
                 </TableBody>
               </Table>
             </div>
-            <p className="border-t border-border px-4 py-2.5 text-xs text-muted-foreground">You see counts and activity here. “View as” opens a business read-only for support; it shows in that business&apos;s Audit Log. A paused business can sign in and look, but can&apos;t change anything. Free access and trials apply once online payments are switched on; until then everything is free for everyone.</p>
+            <p className="border-t border-border px-4 py-2.5 text-xs text-muted-foreground">You see counts and activity here. “View as” opens a business read-only for support; it shows in that business&apos;s Audit Log. A paused business can sign in and look, but can&apos;t change anything. Every business has a 6-month free trial; after it, only a paid plan, a longer trial, free access or chosen apps keep it working (otherwise it is read-only).</p>
           </section>
         ) : null}
 

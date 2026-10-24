@@ -7,6 +7,7 @@ import { bookkeepingRecord, session, user } from "@/db/schema";
 import { emailConfigured, smtpSettings } from "@/lib/email";
 import { planByKey, planKeysOf, TRIAL_MONTHS } from "@/lib/plans";
 import { blobConfigured, privateBlobToken } from "@/lib/storage";
+import { packFor } from "@/lib/tax-packs";
 import { ADMIN_APPS, ADMIN_LOG_KIND, ANNOUNCEMENT_KIND, BUSINESS_FLAGS_KIND, FEEDBACK_KIND, isPlatformAdmin } from "@/lib/platform";
 
 /** Kinds that aren't a business's own work, left out of its record counts. */
@@ -28,6 +29,9 @@ export interface AdminBusiness {
   suspended: boolean;
   suspendedNote: string;
   freeAccess: boolean;
+  /** Where it is: the country in its company settings, else a two-letter code from where it last signed in. */
+  country: string;
+  countryFromSignIn: boolean;
   /** Its trial or plan has run out and nothing you gave keeps it open: read-only. */
   expired: boolean;
   /** Apps chosen by hand (keys of ADMIN_APPS); empty when the business follows its plan. */
@@ -85,7 +89,7 @@ export async function loadAdminData() {
     db.select({ id: user.id, name: user.name, email: user.email, createdAt: user.createdAt, twoStep: user.twoFactorEnabled }).from(user),
     db.select({ userId: session.userId, last: sql<Date>`max(${session.updatedAt})`, live: sql<number>`count(*) filter (where ${session.expiresAt} > now())` }).from(session).groupBy(session.userId),
     // Sign-ins outlive the sessions they opened, so "last signed in" survives signing out.
-    db.select({ userId: bookkeepingRecord.userId, last: sql<Date>`max(${bookkeepingRecord.createdAt})` }).from(bookkeepingRecord).where(eq(bookkeepingRecord.kind, "sign-in-log")).groupBy(bookkeepingRecord.userId),
+    db.select({ userId: bookkeepingRecord.userId, last: sql<Date>`max(${bookkeepingRecord.createdAt})`, country: sql<string>`(array_agg(${bookkeepingRecord.data}->>'country' order by ${bookkeepingRecord.createdAt} desc) filter (where coalesce(${bookkeepingRecord.data}->>'country', '') <> ''))[1]` }).from(bookkeepingRecord).where(eq(bookkeepingRecord.kind, "sign-in-log")).groupBy(bookkeepingRecord.userId),
     db.select({ userId: bookkeepingRecord.userId, bytes: sql<number>`sum(pg_column_size(${bookkeepingRecord.data}))` }).from(bookkeepingRecord).groupBy(bookkeepingRecord.userId),
     db.execute<{ user_id: string; files: number }>(sql`select r.user_id, count(*)::int as files from ${bookkeepingRecord} r, jsonb_each_text(r.data) e where e.key ~* '(attach|receipt|logo|file|photo|document|resume|image|avatar)' and e.value ~ '^https?://' group by r.user_id`),
     db.select().from(bookkeepingRecord).where(eq(bookkeepingRecord.kind, ADMIN_LOG_KIND)).orderBy(desc(bookkeepingRecord.createdAt)).limit(300),
@@ -105,6 +109,7 @@ export async function loadAdminData() {
 
   const lastSession = new Map(sessions.map((row) => [row.userId, iso(row.last)]));
   for (const row of signIns) if (iso(row.last) > (lastSession.get(row.userId) ?? "")) lastSession.set(row.userId, iso(row.last));
+  const signInCountry = new Map(signIns.filter((row) => row.country).map((row) => [row.userId, row.country]));
   const liveSessions = new Map(sessions.map((row) => [row.userId, Number(row.live)]));
   const statsBy = new Map(stats.map((row) => [row.userId, row]));
   const bytesBy = new Map(usage.map((row) => [row.userId, Number(row.bytes ?? 0)]));
@@ -144,6 +149,10 @@ export async function loadAdminData() {
       suspended: flag.suspended === "true",
       suspendedNote: flag.suspendedNote ?? "",
       freeAccess: flag.freeAccess === "true",
+      ...(() => {
+        const set = company?.addressCountry?.trim() || packFor(company?.taxCountry)?.country || "";
+        return { country: set || signInCountry.get(owner.id) || "", countryFromSignIn: !set && signInCountry.has(owner.id) };
+      })(),
       expired,
       apps: flag.apps ? ADMIN_APPS.filter((app) => app.features.every((feature) => flag.apps.split(",").includes(feature))).map((app) => app.key) : [],
       dataBytes: bytesBy.get(owner.id) ?? 0,
