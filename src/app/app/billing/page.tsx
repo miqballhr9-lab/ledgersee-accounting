@@ -3,7 +3,7 @@ import type { Metadata } from "next";
 import BillingWorkspace, { type BillingPayment } from "@/components/billing/BillingWorkspace";
 import { requireUser } from "@/lib/auth";
 import { billingEnabled, subscriptionFor } from "@/lib/billing";
-import { daysUntil, type Feature } from "@/lib/plans";
+import { daysUntil, featureLabels, type Feature } from "@/lib/plans";
 
 export const metadata: Metadata = { title: "Billing" };
 
@@ -23,7 +23,14 @@ export default async function BillingPage({ searchParams }: { searchParams: Prom
     }
   }
   const upgradeFeature = (["inventory", "crm", "hr"] as Feature[]).find((feature) => feature === upgrade);
+  const chosenApps = me.access.appsLimited ? me.access.features.filter((feature) => feature !== "inventory").map((feature) => featureLabels[feature]).join(", ") : "";
   return (
+    <>
+    {chosenApps ? (
+      <div className="mx-auto mt-6 w-full max-w-5xl px-4 sm:px-7">
+        <p className="rounded-lg border border-primary/20 bg-primary/5 px-4 py-3 text-sm" role="status">MIK LEDGER has set up your business with: <span className="font-medium">{chosenApps}</span>. To add another app, use &quot;Send feedback&quot; at the top and we&apos;ll turn it on.</p>
+      </div>
+    ) : null}
     <BillingWorkspace
       enabled={enabled}
       paymentsReady={billingEnabled()}
@@ -35,5 +42,6 @@ export default async function BillingPage({ searchParams }: { searchParams: Prom
       notice={status === "success" || status === "changed" || status === "cancelled" ? status : undefined}
       upgrade={upgradeFeature}
     />
+    </>
   );
 }

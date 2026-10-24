@@ -43,6 +43,8 @@ export interface BillingAccess {
   /** Paused by the platform owner (Super Admin): nothing can be changed. */
   suspended: boolean;
   suspendedNote: string;
+  /** Set when the platform owner chose this business's apps by hand. */
+  appsLimited?: boolean;
 }
 
 const allFeatures: Feature[] = ["accounting", "inventory", "crm", "hr", "pos"];
@@ -73,7 +75,9 @@ export async function saveSubscription(ownerId: string, patch: Record<string, st
 export const billingAccess = cache(async function billingAccess(ownerId: string, ownerEmail: string): Promise<BillingAccess> {
   const flags = await businessFlagsFor(ownerId);
   const access = flags.freeAccess ? openAccess() : await planAccess(ownerId, ownerEmail);
-  return { ...access, suspended: flags.suspended, suspendedNote: flags.suspendedNote };
+  // Apps chosen by the platform owner replace what the plan gives, whether billing is on or not.
+  const chosen = flags.apps ? { features: flags.apps, appsLimited: true } : {};
+  return { ...access, ...chosen, suspended: flags.suspended, suspendedNote: flags.suspendedNote };
 });
 
 /** Everything, free: billing is off, or the business is on the free list. */

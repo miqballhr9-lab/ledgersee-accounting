@@ -4,11 +4,13 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Activity, ArrowLeft, Building2, CheckCircle2, Download, Eye, Gift, History, LogOut, Mail, Send, Inbox, LayoutDashboard, Megaphone, MoreHorizontal, Pause, Play, Search, ServerCog, Timer, Trash2, UserPlus, Users, XCircle } from "lucide-react";
+import { Activity, AppWindow, ArrowLeft, Building2, CheckCircle2, Download, Eye, Gift, History, LogOut, Mail, Send, Inbox, LayoutDashboard, Megaphone, MoreHorizontal, Pause, Play, Search, ServerCog, Timer, Trash2, UserPlus, Users, XCircle } from "lucide-react";
 
-import { clearAnnouncement, deleteBusiness, deleteFeedback, emailOwners, exportBusiness, extendTrial, saveAnnouncement, sendTestEmail, setBusinessFlags, setFeedbackStatus, moveFilesToPrivate, signOutEverywhere, startViewAs, type EmailAudience } from "@/app/admin-actions";
+import { clearAnnouncement, deleteBusiness, deleteFeedback, emailOwners, exportBusiness, extendTrial, saveAnnouncement, sendTestEmail, setBusinessFlags, setFeedbackStatus, moveFilesToPrivate, setBusinessApps, signOutEverywhere, startViewAs, type EmailAudience } from "@/app/admin-actions";
 import { downloadBackup } from "@/lib/backup-download";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -42,6 +44,14 @@ const tabs: { key: Tab; label: string; icon: React.ElementType }[] = [
 ];
 
 const DAY = 86_400_000;
+
+/** The apps a business can be given one by one (same keys as ADMIN_APPS on the server). */
+const appChoices = [
+  { key: "accounting", label: "Accounting", note: "Sales, purchases, banking, inventory, reports" },
+  { key: "crm", label: "CRM", note: "Leads, deals, campaigns" },
+  { key: "hrm", label: "HRM", note: "Employees, attendance, time off, payroll" },
+  { key: "pos", label: "POS", note: "Point of sale register" },
+];
 
 function size(bytes: number) {
   return bytes >= 1_048_576 ? `${(bytes / 1_048_576).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
@@ -102,6 +112,8 @@ export default function AdminConsole({ adminEmail, businesses, people, inbox, an
   const [mailSubject, setMailSubject] = useState("");
   const [mailBody, setMailBody] = useState("");
   const [activitySearch, setActivitySearch] = useState("");
+  const [appsFor, setAppsFor] = useState<AdminBusiness | null>(null);
+  const [pickedApps, setPickedApps] = useState<string[]>([]);
 
   async function run(key: string, action: () => Promise<unknown>, done: string) {
     setBusy(key);
@@ -204,6 +216,27 @@ export default function AdminConsole({ adminEmail, businesses, people, inbox, an
         </nav>
       </header>
 
+      <Dialog open={Boolean(appsFor)} onOpenChange={(open) => { if (!open) setAppsFor(null); }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Apps for {appsFor?.name}</DialogTitle>
+            <DialogDescription>Only the ticked apps show in this business&apos;s menu and can be used. Turning an app off hides it; nothing is deleted, and turning it on again brings everything back.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            {appChoices.map((app) => (
+              <label key={app.key} className="flex cursor-pointer items-start gap-3 rounded-md border border-border px-3 py-2.5 hover:bg-muted/40">
+                <Checkbox className="mt-0.5" checked={pickedApps.includes(app.key)} onCheckedChange={(value) => setPickedApps((current) => (value === true ? [...new Set([...current, app.key])] : current.filter((key) => key !== app.key)))} />
+                <span><span className="block text-sm font-medium">{app.label}</span><span className="block text-xs text-muted-foreground">{app.note}</span></span>
+              </label>
+            ))}
+          </div>
+          <DialogFooter className="gap-2 sm:justify-between">
+            <Button variant="ghost" disabled={busy === "apps" || !appsFor?.apps.length} onClick={() => { const target = appsFor!; void run("apps", () => setBusinessApps(target.ownerId, null), `${target.name} is back on its plan's apps.`).then(() => setAppsFor(null)); }}>Back to plan</Button>
+            <Button disabled={busy === "apps" || !pickedApps.length} onClick={() => { const target = appsFor!; void run("apps", () => setBusinessApps(target.ownerId, pickedApps), `${target.name}: apps updated.`).then(() => setAppsFor(null)); }}>{busy === "apps" ? "Saving…" : "Save apps"}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <main className="mx-auto w-full max-w-[1440px] px-4 py-6 sm:px-7">
         {tab === "dashboard" ? (
           <div className="space-y-5">
@@ -288,7 +321,7 @@ export default function AdminConsole({ adminEmail, businesses, people, inbox, an
                       <TableCell className="text-sm tabular-nums">{business.users}</TableCell>
                       <TableCell className="text-sm tabular-nums">{business.records}<span className="block text-xs text-muted-foreground">{business.invoices} invoices</span></TableCell>
                       <TableCell className="whitespace-nowrap text-sm tabular-nums">{size(business.dataBytes)}<span className="block text-xs text-muted-foreground">{business.files} {business.files === 1 ? "file" : "files"}</span></TableCell>
-                      <TableCell className="whitespace-nowrap text-sm">{business.freeAccess ? "Free access" : business.plan}{business.trialEndsAt ? <span className="block text-xs text-muted-foreground">until {date(business.trialEndsAt)}</span> : null}</TableCell>
+                      <TableCell className="whitespace-nowrap text-sm">{business.apps.length ? `Only ${appChoices.filter((app) => business.apps.includes(app.key)).map((app) => app.label).join(", ")}` : business.freeAccess ? "Free access" : business.plan}{business.trialEndsAt ? <span className="block text-xs text-muted-foreground">until {date(business.trialEndsAt)}</span> : null}</TableCell>
                       <TableCell>{business.suspended ? <Pill tone="bad">Paused</Pill> : daysAgo(business.lastActive) < 7 ? <Pill tone="good">Active</Pill> : daysAgo(business.lastActive) >= 30 ? <Pill tone="neutral">Inactive</Pill> : <Pill tone="info">Quiet</Pill>}</TableCell>
                       <TableCell className="text-right">
                         <DropdownMenu>
@@ -296,6 +329,7 @@ export default function AdminConsole({ adminEmail, businesses, people, inbox, an
                           <DropdownMenuContent align="end" className="min-w-56">
                             <DropdownMenuItem onClick={() => void viewAs(business)}><Eye size={14} />View as (read-only)</DropdownMenuItem>
                             <DropdownMenuItem onClick={() => backup(business)}><Download size={14} />Download backup (Excel)</DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => { setAppsFor(business); setPickedApps(business.apps.length ? business.apps : appChoices.map((app) => app.key)); }}><AppWindow size={14} />Choose apps…</DropdownMenuItem>
                             <DropdownMenuSeparator />
                             {business.freeAccess
                               ? <DropdownMenuItem onClick={() => void run(`flags-${business.ownerId}`, () => setBusinessFlags(business.ownerId, { freeAccess: false }), "Free access removed.")}><XCircle size={14} />Remove free access</DropdownMenuItem>

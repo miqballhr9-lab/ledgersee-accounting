@@ -7,7 +7,7 @@ import { bookkeepingRecord, session, user } from "@/db/schema";
 import { emailConfigured, smtpSettings } from "@/lib/email";
 import { planByKey, planKeysOf } from "@/lib/plans";
 import { blobConfigured, privateBlobToken } from "@/lib/storage";
-import { ADMIN_LOG_KIND, ANNOUNCEMENT_KIND, BUSINESS_FLAGS_KIND, FEEDBACK_KIND } from "@/lib/platform";
+import { ADMIN_APPS, ADMIN_LOG_KIND, ANNOUNCEMENT_KIND, BUSINESS_FLAGS_KIND, FEEDBACK_KIND } from "@/lib/platform";
 
 /** Kinds that aren't a business's own work, left out of its record counts. */
 const notWork = ["audit-events", "sign-in-log", ADMIN_LOG_KIND, "settings", "subscription", "team-members", BUSINESS_FLAGS_KIND, FEEDBACK_KIND, ANNOUNCEMENT_KIND, "automation-log"];
@@ -28,6 +28,8 @@ export interface AdminBusiness {
   suspended: boolean;
   suspendedNote: string;
   freeAccess: boolean;
+  /** Apps chosen by hand (keys of ADMIN_APPS); empty when the business follows its plan. */
+  apps: string[];
   /** Space its records take in the database, in bytes. */
   dataBytes: number;
   /** Attachments, receipts, logos and other uploaded files its records point to. */
@@ -133,6 +135,7 @@ export async function loadAdminData() {
       suspended: flag.suspended === "true",
       suspendedNote: flag.suspendedNote ?? "",
       freeAccess: flag.freeAccess === "true",
+      apps: flag.apps ? ADMIN_APPS.filter((app) => app.features.every((feature) => flag.apps.split(",").includes(feature))).map((app) => app.key) : [],
       dataBytes: bytesBy.get(owner.id) ?? 0,
       files: filesBy.get(owner.id) ?? 0,
     };

@@ -12,7 +12,7 @@ import { sendEmail } from "@/lib/email";
 import { businessRecords, type BusinessBackup } from "@/lib/backup";
 import { checkEmailSetup, emailConfigured } from "@/lib/email";
 import { PRIVATE_FILE_PREFIX, privateBlobToken } from "@/lib/storage";
-import { ADMIN_LOG_KIND, ANNOUNCEMENT_KIND, BUSINESS_FLAGS_KIND, FEEDBACK_KIND, isPlatformAdmin, isVerifiedPlatformAdmin } from "@/lib/platform";
+import { ADMIN_APPS, ADMIN_LOG_KIND, ANNOUNCEMENT_KIND, BUSINESS_FLAGS_KIND, FEEDBACK_KIND, isPlatformAdmin, isVerifiedPlatformAdmin } from "@/lib/platform";
 import { loadAdminData } from "@/lib/platform-data";
 import { recordAudit } from "@/lib/audit";
 import { revalidatePath } from "@/lib/revalidate";
@@ -297,4 +297,22 @@ export async function sendAdminConfirmLink(): Promise<{ ok: true } | { ok: false
   if (problem) return { ok: false, reason: problem };
   await auth.api.sendVerificationEmail({ body: { email: me.email, callbackURL: "/admin" }, headers: await headers() });
   return { ok: true };
+}
+
+/**
+ * Chooses which apps a business may use (Accounting, CRM, HRM, POS), whatever
+ * its plan says; null puts it back on its plan. Apps that are off disappear from
+ * its menu, and their pages and saves are refused. Nothing is deleted.
+ */
+export async function setBusinessApps(ownerId: string, appKeys: string[] | null): Promise<void> {
+  const admin = await requirePlatformAdmin();
+  const { label } = await businessLabel(ownerId);
+  const chosen = appKeys === null ? null : ADMIN_APPS.filter((app) => appKeys.includes(app.key));
+  if (chosen && !chosen.length) throw new ActionError("Choose at least one app. To stop a business altogether, pause it instead.");
+  const [row] = await db.select().from(bookkeepingRecord).where(and(eq(bookkeepingRecord.userId, ownerId), eq(bookkeepingRecord.kind, BUSINESS_FLAGS_KIND))).limit(1);
+  const data: Record<string, string> = { ...(row?.data ?? {}), apps: chosen ? chosen.flatMap((app) => app.features).join(",") : "", changedBy: admin.email, changedAt: new Date().toISOString() };
+  if (row) await db.update(bookkeepingRecord).set({ data, updatedAt: new Date() }).where(eq(bookkeepingRecord.id, row.id));
+  else await db.insert(bookkeepingRecord).values({ userId: ownerId, kind: BUSINESS_FLAGS_KIND, data });
+  await logAdmin(admin, chosen ? "Chose apps" : "Apps back to plan", label, chosen ? chosen.map((app) => app.label).join(", ") : "Whatever the plan gives");
+  revalidatePath("/admin");
 }

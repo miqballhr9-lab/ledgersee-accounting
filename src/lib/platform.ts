@@ -5,6 +5,7 @@ import { cache } from "react";
 
 import { db } from "@/db";
 import { bookkeepingRecord } from "@/db/schema";
+import type { Feature } from "@/lib/plans";
 
 /**
  * The platform owner's controls, above every business: who may open /admin,
@@ -44,12 +45,30 @@ export interface BusinessFlags {
   suspendedNote: string;
   /** Every app, unlimited users, nothing to pay, whatever billing says. */
   freeAccess: boolean;
+  /** The apps the platform owner turned on for this business; null means whatever its plan gives. */
+  apps: Feature[] | null;
+}
+
+/** The apps a business can be given one by one, and the parts of the product each one opens. */
+export const ADMIN_APPS: { key: string; label: string; features: Feature[] }[] = [
+  { key: "accounting", label: "Accounting", features: ["accounting", "inventory"] },
+  { key: "crm", label: "CRM", features: ["crm"] },
+  { key: "hrm", label: "HRM", features: ["hr"] },
+  { key: "pos", label: "POS", features: ["pos"] },
+];
+
+const knownFeatures: Feature[] = ["accounting", "inventory", "crm", "hr", "pos"];
+
+function parseApps(value: string | undefined): Feature[] | null {
+  if (!value?.trim()) return null;
+  const features = value.split(",").map((entry) => entry.trim()).filter((entry): entry is Feature => knownFeatures.includes(entry as Feature));
+  return features.length ? [...new Set(features)] : null;
 }
 
 /** A business's flags; none set means a normal business. Read once per request. */
 export const businessFlagsFor = cache(async function businessFlagsFor(ownerId: string): Promise<BusinessFlags> {
   const [row] = await db.select().from(bookkeepingRecord).where(and(eq(bookkeepingRecord.userId, ownerId), eq(bookkeepingRecord.kind, BUSINESS_FLAGS_KIND))).limit(1);
-  return { suspended: row?.data.suspended === "true", suspendedNote: row?.data.suspendedNote ?? "", freeAccess: row?.data.freeAccess === "true" };
+  return { suspended: row?.data.suspended === "true", suspendedNote: row?.data.suspendedNote ?? "", freeAccess: row?.data.freeAccess === "true", apps: parseApps(row?.data.apps) };
 });
 
 export interface Announcement {
