@@ -122,19 +122,36 @@ export function blobConfigured() {
 }
 
 /**
+ * The PRIVATE Blob store's token, when one is connected. Connect a second Blob
+ * store with access "Private" and the environment variable prefix PRIVATE
+ * (Vercel then adds PRIVATE_BLOB_READ_WRITE_TOKEN, or PRIVATE_READ_WRITE_TOKEN).
+ * Files in it can't be opened by link: only /api/files serves them, after
+ * checking the person is signed in to the business that owns the file.
+ */
+export function privateBlobToken() {
+  return (process.env.PRIVATE_BLOB_READ_WRITE_TOKEN || process.env.PRIVATE_READ_WRITE_TOKEN || "").trim() || null;
+}
+
+/** Where a private file is opened from inside the app. */
+export const PRIVATE_FILE_PREFIX = "/api/files/";
+
+/**
  * A short-lived token that lets the browser upload one file to the Blob store,
  * under the business's own folder, with the same types and size limit as above.
+ * Private files go to the private store; a company logo stays public, because
+ * it is shown on shared invoices and in emails to people who don't sign in.
  */
-export async function blobUploadToken(ownerId: string, filename: string, contentType: string) {
+export async function blobUploadToken(ownerId: string, filename: string, contentType: string, access: "public" | "private") {
   if (contentType && !(ALLOWED_UPLOAD_TYPES as readonly string[]).includes(contentType)) throw new ActionError("That file type isn't supported.");
   const safeName = (filename.split(/[\\/]/).pop() ?? "file").replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "").slice(-80) || "file";
   const pathname = `${ownerId}/${randomUUID()}-${safeName}`;
   const clientToken = await generateClientTokenFromReadWriteToken({
+    token: access === "private" ? privateBlobToken() ?? undefined : undefined,
     pathname,
     allowedContentTypes: [...ALLOWED_UPLOAD_TYPES],
     maximumSizeInBytes: 10 * 1024 * 1024,
     validUntil: Date.now() + 10 * 60 * 1000,
     addRandomSuffix: false,
   });
-  return { pathname, clientToken };
+  return { pathname, clientToken, access };
 }

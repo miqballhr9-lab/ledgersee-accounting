@@ -126,7 +126,7 @@ export default function CompanySettings({ settings, workspaceName }: CompanySett
     setUploading(true);
     setError("");
     try {
-      const uploadedUrl = await uploadFile(file);
+      const uploadedUrl = await uploadFile(file, "logo");
             setDraft((current) => ({ ...current, logo: uploadedUrl, logoName: file.name }));
     } catch (uploadError) {
       setError(uploadError instanceof Error ? readableError(uploadError) : "The upload didn’t finish. Please try again.");

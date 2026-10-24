@@ -1,6 +1,6 @@
 "use server";
 
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { cookies } from "next/headers";
 
 import { db } from "@/db";
@@ -11,6 +11,7 @@ import { subscriptionFor, saveSubscription } from "@/lib/billing";
 import { sendEmail } from "@/lib/email";
 import { businessRecords, type BusinessBackup } from "@/lib/backup";
 import { emailConfigured } from "@/lib/email";
+import { PRIVATE_FILE_PREFIX, privateBlobToken } from "@/lib/storage";
 import { ADMIN_LOG_KIND, ANNOUNCEMENT_KIND, BUSINESS_FLAGS_KIND, FEEDBACK_KIND, isPlatformAdmin, isVerifiedPlatformAdmin } from "@/lib/platform";
 import { loadAdminData } from "@/lib/platform-data";
 import { recordAudit } from "@/lib/audit";
@@ -226,4 +227,59 @@ export async function emailOwners(audience: EmailAudience, subject: string, mess
   }
   await logAdmin(admin, "Emailed business owners", { all: "All owners", active: "Active owners", inactive: "Inactive owners", trial: "Owners on trial" }[audience], `“${title}”: ${sent} sent${failed ? `, ${failed} failed` : ""}`);
   return { sent, failed };
+}
+
+const PUBLIC_BLOB_URL = /https:\/\/[a-z0-9]+\.public\.blob\.vercel-storage\.com\/([^\s"'<>\\]+)/gi;
+
+/**
+ * Moves files already uploaded to the public store into the private one, a
+ * batch at a time, and points each record at its new /api/files address. A
+ * company logo stays public: shared invoices and emails show it to people who
+ * don't sign in. The public copy is deleted only after the record is updated.
+ */
+export async function moveFilesToPrivate(): Promise<{ moved: number; failed: number; remaining: number }> {
+  const admin = await requirePlatformAdmin();
+  const privateToken = privateBlobToken();
+  if (!privateToken) throw new ActionError("Connect a private Blob store first (see System status).");
+  const { put, del } = await import("@vercel/blob");
+  const rows = await db.select().from(bookkeepingRecord).where(sql`${bookkeepingRecord.data}::text like '%.public.blob.vercel-storage.com/%'`);
+  let moved = 0;
+  let failed = 0;
+  let budget = 60;
+  for (const row of rows) {
+    if (budget <= 0) break;
+    const next: Record<string, string> = { ...row.data };
+    const oldUrls: string[] = [];
+    for (const [key, value] of Object.entries(row.data)) {
+      if (row.kind === "settings" && key === "logo") continue;
+      const found = [...value.matchAll(PUBLIC_BLOB_URL)];
+      let replaced = value;
+      for (const match of found) {
+        const pathname = decodeURIComponent(match[1]);
+        // Only a business's own folder moves into that business's private files.
+        if (!pathname.startsWith(`${row.userId}/`) || budget <= 0) continue;
+        budget -= 1;
+        try {
+          const response = await fetch(match[0]);
+          if (!response.ok) throw new Error(String(response.status));
+          await put(pathname, await response.blob(), { access: "private", token: privateToken, contentType: response.headers.get("content-type") || undefined, addRandomSuffix: false, allowOverwrite: true });
+          replaced = replaced.split(match[0]).join(`${PRIVATE_FILE_PREFIX}${pathname}`);
+          oldUrls.push(match[0]);
+          moved += 1;
+        } catch (error) {
+          console.error("[admin] couldn't move %s", match[0], error);
+          failed += 1;
+        }
+      }
+      next[key] = replaced;
+    }
+    if (!oldUrls.length) continue;
+    await db.update(bookkeepingRecord).set({ data: next }).where(eq(bookkeepingRecord.id, row.id));
+    await del(oldUrls).catch((error) => console.error("[admin] old public copies not deleted", error));
+  }
+  const [left] = await db.select({ count: sql<number>`count(*)` }).from(bookkeepingRecord)
+    .where(sql`(case when ${bookkeepingRecord.kind} = 'settings' then ${bookkeepingRecord.data} - 'logo' else ${bookkeepingRecord.data} end)::text like '%.public.blob.vercel-storage.com/%'`);
+  await logAdmin(admin, "Moved files to private storage", "All businesses", `${moved} moved${failed ? `, ${failed} failed` : ""}`);
+  revalidatePath("/admin");
+  return { moved, failed, remaining: Number(left?.count ?? 0) };
 }

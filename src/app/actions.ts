@@ -14,7 +14,7 @@ import { businessRecords, type BusinessBackup } from "@/lib/backup";
 import { canReadKind } from "@/lib/permissions";
 import { syncAttachmentRepayments } from "@/lib/hr-rules";
 import { sendEmailOrThrow } from "@/lib/email";
-import { blobConfigured, blobUploadToken, createUploadUrl } from "@/lib/storage";
+import { blobConfigured, blobUploadToken, createUploadUrl, privateBlobToken } from "@/lib/storage";
 import { dueDateForTerms, invoiceTax, parseInvoiceLines, serialList } from "@/lib/invoice-utils";
 import { defaultWarehouse, lotRegister, stockByWarehouse } from "@/lib/warehouses";
 import { buildInventory, inventoryKinds, isInventoryItem } from "@/lib/inventory";
@@ -2945,12 +2945,16 @@ export async function getAttachmentUploadTarget(
   filename: string,
   contentType: string,
   size: number,
-): Promise<{ provider: "blob"; pathname: string; clientToken: string } | { provider: "platform"; uploadUrl: string; publicUrl: string }> {
+  purpose: "file" | "logo" = "file",
+): Promise<{ provider: "blob"; pathname: string; clientToken: string; access: "public" | "private" } | { provider: "platform"; uploadUrl: string; publicUrl: string }> {
   const me = await requireUser();
+  assertNotViewing(me);
   if (me.role === "Viewer") throw new ActionError("Your role doesn’t allow changing records. Ask an Admin in your business.");
   if (size > 10 * 1024 * 1024) throw new ActionError("Attachments must be 10 MB or smaller.");
-  // A connected Vercel Blob store takes the file; the browser gets a one-hour token for this one path.
-  if (blobConfigured()) return { provider: "blob", ...(await blobUploadToken(me.ownerId, filename, contentType)) };
+  // Receipts, HR documents and other attachments go to the private store when one is
+  // connected; the browser gets a ten-minute token for this one path.
+  if (purpose === "file" && privateBlobToken()) return { provider: "blob", ...(await blobUploadToken(me.ownerId, filename, contentType, "private")) };
+  if (blobConfigured()) return { provider: "blob", ...(await blobUploadToken(me.ownerId, filename, contentType, "public")) };
   const target = await createUploadUrl({ filename, contentType, size });
   return { provider: "platform", uploadUrl: target.uploadUrl, publicUrl: target.publicUrl };
 }

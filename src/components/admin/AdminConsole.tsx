@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Activity, ArrowLeft, Building2, CheckCircle2, Download, Eye, Gift, History, LogOut, Mail, Send, Inbox, LayoutDashboard, Megaphone, MoreHorizontal, Pause, Play, Search, ServerCog, Timer, Trash2, UserPlus, Users, XCircle } from "lucide-react";
 
-import { clearAnnouncement, deleteBusiness, deleteFeedback, emailOwners, exportBusiness, extendTrial, saveAnnouncement, sendTestEmail, setBusinessFlags, setFeedbackStatus, signOutEverywhere, startViewAs, type EmailAudience } from "@/app/admin-actions";
+import { clearAnnouncement, deleteBusiness, deleteFeedback, emailOwners, exportBusiness, extendTrial, saveAnnouncement, sendTestEmail, setBusinessFlags, setFeedbackStatus, moveFilesToPrivate, signOutEverywhere, startViewAs, type EmailAudience } from "@/app/admin-actions";
 import { downloadBackup } from "@/lib/backup-download";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -478,6 +478,12 @@ export default function AdminConsole({ adminEmail, businesses, people, inbox, an
               </ul>
             </div>
             <div className="flex flex-wrap items-center gap-3">
+              {status.find((check) => check.name === "Private files")?.ok ? (
+                <Button variant="outline" disabled={busy === "files"} onClick={() => void run("files", async () => {
+                  const result = await moveFilesToPrivate();
+                  toast.message(`${result.moved} ${result.moved === 1 ? "file" : "files"} moved${result.failed ? `, ${result.failed} failed` : ""}.${result.remaining ? ` ${result.remaining} records still have public files: press again.` : " All files are private."}`);
+                }, "Done.")}>{busy === "files" ? "Moving…" : "Move files to private"}</Button>
+              ) : null}
               <Button variant="outline" disabled={busy === "email"} onClick={() => void run("email", async () => { if (!(await sendTestEmail())) throw new Error("The email couldn't be sent. Check the email settings in Vercel."); }, `Test email sent to ${adminEmail}. Check your inbox.`)}>Send test email</Button>
               <p className="text-xs text-muted-foreground">Keys are never shown here. Change them in Vercel → Project → Settings → Environment Variables, then redeploy.</p>
             </div>
