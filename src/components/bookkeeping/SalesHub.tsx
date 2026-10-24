@@ -4,9 +4,9 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { ArrowDownToLine, CalendarDays, ChevronDown, CircleDollarSign, MoreHorizontal, Plus, Printer, Search, Trash2 } from "lucide-react";
+import { ArrowDownToLine, CalendarDays, ChevronDown, CircleDollarSign, MoreHorizontal, Plus, Printer, Search, Trash2, Undo2 } from "lucide-react";
 
-import { deleteBookkeepingRecord } from "@/app/actions";
+import { deleteBookkeepingRecord, undoInvoicePayments } from "@/app/actions";
 
 import ReceivePaymentDialog, { invoiceBalance, isOpenInvoice } from "@/components/bookkeeping/ReceivePaymentDialog";
 import RecordEditor from "@/components/bookkeeping/RecordEditor";
@@ -33,6 +33,8 @@ interface SalesHubProps {
   accounts: BookkeepingRecord[];
   currency: string;
   asOfDate: string;
+  /** Only the business's Admin may delete a sale or undo its payment. */
+  isAdmin?: boolean;
 }
 
 type SaleType = "Invoice" | "Sales receipt" | "Payment" | "Estimate" | "Sales order" | "Credit note";
@@ -107,7 +109,7 @@ function MoneyBar({ segments }: { segments: Array<{ label: string; amount: strin
   );
 }
 
-export default function SalesHub({ invoices, estimates, salesOrders, creditNotes, payments, customers, items, accounts, currency, asOfDate }: SalesHubProps) {
+export default function SalesHub({ invoices, estimates, salesOrders, creditNotes, payments, customers, items, accounts, currency, asOfDate, isAdmin = false }: SalesHubProps) {
   const router = useRouter();
   const [typeFilter, setTypeFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("All statuses");
@@ -131,10 +133,12 @@ export default function SalesHub({ invoices, estimates, salesOrders, creditNotes
     const result: SaleRow[] = [];
     for (const invoice of invoices) {
       const receipt = invoice.data.docType === "Sales receipt";
-      const balance = receipt ? 0 : invoiceBalance(invoice);
+      // A receipt whose payment was undone is owed again, like an open invoice.
+      const balance = receipt && (Number(invoice.data.paidAmount) || 0) > 0 ? 0 : invoiceBalance(invoice);
       const draft = ["Draft", "Void", "Cancelled"].includes(invoice.data.status ?? "");
       const overdue = !receipt && !draft && balance > 0.005 && Boolean(invoice.data.dueDate) && invoice.data.dueDate < asOfDate;
-      const status = receipt ? "Paid" : draft ? invoice.data.status : balance <= 0.005 ? "Paid" : overdue ? "Overdue" : (Number(invoice.data.paidAmount) || 0) > 0 ? "Partially paid" : "Open";
+      const receiptPaid = (Number(invoice.data.paidAmount) || 0) > 0;
+      const status = receipt ? (receiptPaid ? "Paid" : "Unpaid") : draft ? invoice.data.status : balance <= 0.005 ? "Paid" : overdue ? "Overdue" : (Number(invoice.data.paidAmount) || 0) > 0 ? "Partially paid" : "Open";
       // Every amount here is in the home currency, whatever currency the invoice is in.
       const rate = homeRate(invoice.data, currency);
       result.push({
@@ -253,8 +257,33 @@ export default function SalesHub({ invoices, estimates, salesOrders, creditNotes
   const pageChecked = pageRows.length > 0 && pageRows.every((row) => selected.has(row.key));
   const toggle = (key: string, on: boolean) => setSelected((current) => { const next = new Set(current); if (on) next.add(key); else next.delete(key); return next; });
 
+  async function undoPayment(row: SaleRow) {
+    if (!window.confirm(`Undo the payment on ${row.type.toLowerCase()} ${row.number}? It stays, shown as unpaid, so you can correct it, receive the payment again or delete it.`)) return;
+    try {
+      await undoInvoicePayments(row.id);
+      toast.success(`Payment removed from ${row.number}.`);
+      router.refresh();
+    } catch (error) {
+      toast.error(error instanceof Error ? readableError(error) : "We couldn’t undo that payment.");
+    }
+  }
+
+  async function deleteOne(row: SaleRow) {
+    if (!window.confirm(`Delete ${row.type.toLowerCase()} ${row.number}? Any payment on it is removed too. This can’t be undone.`)) return;
+    try {
+      await deleteBookkeepingRecord(row.kind as RecordKind, row.id);
+      setRemoved((current) => new Set([...current, row.key]));
+      toast.success(`${row.type} ${row.number} deleted.`);
+      router.refresh();
+    } catch (error) {
+      toast.error(error instanceof Error ? readableError(error) : "It couldn’t be deleted.");
+    }
+  }
+
   async function deleteChosen() {
-    const deletable = chosen.filter((row) => row.kind);
+    // Sales staff can tidy quotes and orders; only an Admin deletes invoices and receipts.
+    const deletable = chosen.filter((row) => row.kind && (isAdmin || row.kind !== "invoices"));
+    if (!isAdmin && chosen.some((row) => row.kind === "invoices")) toast.message("Only an Admin can delete invoices and sales receipts; those are left as they are.");
     const skipped = chosen.length - deletable.length;
     if (!deletable.length) return toast.error("Payments can't be deleted here. Open the invoice and remove the payment there.");
     if (!window.confirm(`Delete ${deletable.length} ${deletable.length === 1 ? "transaction" : "transactions"}? This can’t be undone.${skipped ? ` ${skipped} payment${skipped === 1 ? "" : "s"} will be left as they are.` : ""}`)) return;
@@ -414,6 +443,13 @@ export default function SalesHub({ invoices, estimates, salesOrders, creditNotes
                             <>
                               <DropdownMenuSeparator />
                               <DropdownMenuItem onClick={() => setReceiving({ customer: row.customer, invoiceId: row.invoice!.id })}><CircleDollarSign size={14} />Receive payment</DropdownMenuItem>
+                            </>
+                          ) : null}
+                          {isAdmin && row.kind === "invoices" ? (
+                            <>
+                              <DropdownMenuSeparator />
+                              {(Number(invoiceById.get(row.id)?.data.paidAmount) || 0) > 0 ? <DropdownMenuItem onClick={() => void undoPayment(row)}><Undo2 size={14} />Undo payment</DropdownMenuItem> : null}
+                              <DropdownMenuItem className="text-destructive" onClick={() => void deleteOne(row)}><Trash2 size={14} />Delete</DropdownMenuItem>
                             </>
                           ) : null}
                         </DropdownMenuContent>

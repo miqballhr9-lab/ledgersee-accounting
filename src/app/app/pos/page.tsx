@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import { listBookkeepingRecordGroups } from "@/app/actions";
 import PosWorkspace from "@/components/bookkeeping/PosWorkspace";
 import { buildInventory, inventoryKinds } from "@/lib/inventory";
+import { requireUser } from "@/lib/auth";
 import { requireFeature } from "@/lib/plan-gate";
 import { defaultWarehouse, lotRegister, stockByWarehouse } from "@/lib/warehouses";
 
@@ -10,6 +11,7 @@ export const metadata: Metadata = { title: "Point of sale" };
 
 export default async function PosPage() {
   await requireFeature("pos");
+  const me = await requireUser();
   const groups = await listBookkeepingRecordGroups(["customers", "crm-price-books", "accounts", "settings", "taxes", "warehouses", "stock-transfers", ...inventoryKinds]);
   const all = Object.values(groups).flat();
   const stock = buildInventory(all);
@@ -36,6 +38,7 @@ export default async function PosPage() {
       settings={settings}
       currency={settings.currency || "USD"}
       today={new Date().toISOString().slice(0, 10)}
+      isAdmin={me.role === "Admin"}
     />
   );
 }

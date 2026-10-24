@@ -3,12 +3,14 @@ import type { Metadata } from "next";
 import { listBookkeepingRecordGroups } from "@/app/actions";
 import SalesHub from "@/components/bookkeeping/SalesHub";
 import { buildInventory, inventoryKinds } from "@/lib/inventory";
+import { requireUser } from "@/lib/auth";
 import { requireFeature } from "@/lib/plan-gate";
 
 export const metadata: Metadata = { title: "All sales" };
 
 export default async function SalesPage() {
   await requireFeature("accounting");
+  const me = await requireUser();
   const groups = await listBookkeepingRecordGroups(["estimates", "sales-orders", "payments", "customers", "accounts", "settings", ...inventoryKinds]);
   const stock = buildInventory(Object.values(groups).flat());
   const items = (groups.items ?? []).map((item) => (stock.has(item.id) ? { ...item, data: { ...item.data, qtyOnHand: String(stock.get(item.id)!.onHand) } } : item));
@@ -24,6 +26,7 @@ export default async function SalesPage() {
       accounts={groups.accounts ?? []}
       currency={groups.settings?.[0]?.data.currency || "USD"}
       asOfDate={new Date().toISOString().slice(0, 10)}
+      isAdmin={me.role === "Admin"}
     />
   );
 }

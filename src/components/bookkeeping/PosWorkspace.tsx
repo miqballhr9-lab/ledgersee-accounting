@@ -8,6 +8,7 @@ import { Banknote, Camera, CreditCard, Minus, Package, Plus, Printer, ReceiptTex
 
 import { saveBookkeepingRecord } from "@/app/actions";
 import PosReturnDialog from "@/components/bookkeeping/PosReturnDialog";
+import PosSalesDialog from "@/components/bookkeeping/PosSalesDialog";
 import CameraScanner from "@/components/bookkeeping/CameraScanner";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -41,6 +42,8 @@ interface PosWorkspaceProps {
   settings: Record<string, string>;
   currency: string;
   today: string;
+  /** Only the business's Admin may delete a sale or take its payment off. */
+  isAdmin?: boolean;
 }
 
 interface CartLine {
@@ -81,7 +84,7 @@ const escapeHtml = (value: string) => value.replace(/[&<>"']/g, (char) => ({ "&"
  */
 const bySerial = (item: BookkeepingRecord) => item.data.tracking === "Serial number";
 
-export default function PosWorkspace({ items, customers, priceBooks = [], accounts, taxes, receipts, returns = [], warehouses = [], stockAt = {}, serials = [], settings, currency, today }: PosWorkspaceProps) {
+export default function PosWorkspace({ items, customers, priceBooks = [], accounts, taxes, receipts, returns = [], warehouses = [], stockAt = {}, serials = [], settings, currency, today, isAdmin = false }: PosWorkspaceProps) {
   const router = useRouter();
   const searchRef = useRef<HTMLInputElement>(null);
   const products = useMemo(() => items.filter((item) => item.data.name?.trim() && item.data.itemType !== "Bundle" && item.data.active !== "false"), [items]);
@@ -104,6 +107,7 @@ export default function PosWorkspace({ items, customers, priceBooks = [], accoun
   const [lastNumber, setLastNumber] = useState(0);
   const [warehouse, setWarehouse] = useState(warehouses[0] ?? "");
   const [returning, setReturning] = useState(false);
+  const [salesOpen, setSalesOpen] = useState(false);
 
   const money = (value: number) => currencyAmount(value, currency);
   // With warehouses, only what the chosen one holds can be sold.
@@ -300,6 +304,26 @@ export default function PosWorkspace({ items, customers, priceBooks = [], accoun
     setTimeout(() => searchRef.current?.focus(), 50);
   }
 
+  /** A saved sale, back in the shape the receipt printer takes, to print it again. */
+  function printSaved(receipt: BookkeepingRecord) {
+    let lines: CartLine[] = [];
+    try {
+      const parsed: Array<Record<string, string>> = JSON.parse(receipt.data.lineItems || "[]");
+      lines = parsed.map((line) => ({ itemId: line.itemId ?? "", name: line.name ?? "", price: num(line.rate), quantity: num(line.quantity), ...(line.serials ? { serials: line.serials.split(",").map((serial) => serial.trim()).filter(Boolean) } : {}) }));
+    } catch {
+      lines = [];
+    }
+    const subtotal = lines.reduce((sum, line) => sum + line.price * line.quantity, 0);
+    const discountTaken = num(receipt.data.discount);
+    const totalPaid = num(receipt.data.amount);
+    printReceipt({
+      id: receipt.id, number: receipt.data.invoiceNumber || "", lines, subtotal, discount: discountTaken, tax: Math.max(0, totalPaid - subtotal + discountTaken), taxLabel: receipt.data.taxName || "Tax", total: totalPaid,
+      paidWith: num(receipt.data.paidAmount) > 0 ? [receipt.data.posPayment, receipt.data.paymentAccountName].filter(Boolean).join(" · ") : "Unpaid",
+      tendered: num(receipt.data.cashTendered) || num(receipt.data.paidAmount), change: num(receipt.data.changeDue),
+      customer: receipt.data.customer || WALK_IN, at: new Date(receipt.createdAt).toLocaleString(),
+    });
+  }
+
   /** A narrow receipt for an 80 mm slip printer, in its own window so nothing else prints. */
   function printReceipt(sale: CompletedSale) {
     const win = window.open("", "_blank", "width=380,height=640");
@@ -343,6 +367,7 @@ export default function PosWorkspace({ items, customers, priceBooks = [], accoun
               </Select>
             </div>
           ) : null}
+          <Button type="button" variant="outline" className="h-auto gap-2 self-stretch" onClick={() => setSalesOpen(true)}><ReceiptText size={15} />Sales</Button>
           <Button type="button" variant="outline" className="h-auto gap-2 self-stretch" onClick={() => setReturning(true)} disabled={!receipts.length}><Undo2 size={15} />Return / refund</Button>
           {[["Today's sales", String(todays.length)], ["Takings", money(takings)], ["Cash", money(byMethod("Cash"))], ["Card", money(byMethod("Card"))], ...(todaysReturns ? [["Refunds", `−${money(todaysReturns)}`]] : [])].map(([label, value]) => (
             <div key={label} className="rounded-lg border border-border bg-card px-3 py-2">
@@ -484,6 +509,7 @@ export default function PosWorkspace({ items, customers, priceBooks = [], accoun
         </aside>
       </div>
 
+      <PosSalesDialog open={salesOpen} onOpenChange={setSalesOpen} receipts={receipts} returns={returns} payAccounts={payAccounts} currency={currency} today={today} onPrint={printSaved} onChanged={() => router.refresh()} isAdmin={isAdmin} />
       <PosReturnDialog open={returning} onOpenChange={setReturning} receipts={receipts} returns={returns} items={items} payAccounts={payAccounts} currency={currency} today={today} onDone={() => router.refresh()} />
 
       <CameraScanner open={cameraOpen} onOpenChange={setCameraOpen} onCode={(code) => { if (!addByCode(code)) toast.error(`No product with barcode “${code}”.`, { position: "top-center" }); }} />

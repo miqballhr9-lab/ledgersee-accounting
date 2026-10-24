@@ -1208,6 +1208,8 @@ async function deleteRecord(kind: string, id: string): Promise<void> {
   if (!isRecordKind(kind)) throw new ActionError("That section isn’t available.");
   if (kind === "reconciliations") throw new ActionError("Completed reconciliations can’t be deleted.");
   if (kind === "team-members") throw new ActionError("Remove team members from Users & roles.");
+  // A sale (invoice or till receipt) is deleted only by the business's Admin, never by sales staff.
+  if (kind === "invoices" && me.role !== "Admin") throw new ActionError("Only an Admin of the business can delete a sale. Ask your Admin.");
   const [toDelete] = await db.select().from(bookkeepingRecord).where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, kind))).limit(1);
   await assertBooksOpen(me.id, documentDate(kind, toDelete?.data));
   if (kind === "deposits") throw new ActionError("Delete deposits from Bank deposits, so their payments go back to Undeposited funds.");
@@ -1430,6 +1432,8 @@ export async function undoInvoicePayments(id: string): Promise<void> {
   const me = await requireUser();
   await assertPaymentsOpen(me.id, "invoiceId", id);
   assertCanWrite(me, "invoices");
+  // Taking money off a sale is the Admin's call, like deleting it.
+  if (me.role !== "Admin") throw new ActionError("Only an Admin of the business can undo a payment. Ask your Admin.");
   await db.transaction(async (transaction) => {
     const [invoice] = await transaction
       .select()
