@@ -1,16 +1,16 @@
 "use server";
 
 import { and, eq, sql } from "drizzle-orm";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 
 import { db } from "@/db";
 import { bookkeepingRecord, session, user } from "@/db/schema";
 import { ActionError } from "@/lib/action-error";
-import { getUser, requireUser } from "@/lib/auth";
+import { auth, getUser, requireUser } from "@/lib/auth";
 import { subscriptionFor, saveSubscription } from "@/lib/billing";
 import { sendEmail } from "@/lib/email";
 import { businessRecords, type BusinessBackup } from "@/lib/backup";
-import { emailConfigured } from "@/lib/email";
+import { checkEmailSetup, emailConfigured } from "@/lib/email";
 import { PRIVATE_FILE_PREFIX, privateBlobToken } from "@/lib/storage";
 import { ADMIN_LOG_KIND, ANNOUNCEMENT_KIND, BUSINESS_FLAGS_KIND, FEEDBACK_KIND, isPlatformAdmin, isVerifiedPlatformAdmin } from "@/lib/platform";
 import { loadAdminData } from "@/lib/platform-data";
@@ -282,4 +282,19 @@ export async function moveFilesToPrivate(): Promise<{ moved: number; failed: num
   await logAdmin(admin, "Moved files to private storage", "All businesses", `${moved} moved${failed ? `, ${failed} failed` : ""}`);
   revalidatePath("/admin");
   return { moved, failed, remaining: Number(left?.count ?? 0) };
+}
+
+/**
+ * For a listed Super Admin whose email isn't confirmed yet: checks the mailbox
+ * settings first, so a wrong app password is reported here instead of a link
+ * that silently never arrives, then sends the confirmation link.
+ */
+export async function sendAdminConfirmLink(): Promise<{ ok: true } | { ok: false; reason: string }> {
+  const me = await getUser();
+  if (!me || !isPlatformAdmin(me.email)) throw new ActionError("Only the MIK LEDGER owner can do this.");
+  if (me.emailVerified) return { ok: true };
+  const problem = await checkEmailSetup();
+  if (problem) return { ok: false, reason: problem };
+  await auth.api.sendVerificationEmail({ body: { email: me.email, callbackURL: "/admin" }, headers: await headers() });
+  return { ok: true };
 }

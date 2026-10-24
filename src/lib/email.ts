@@ -140,6 +140,26 @@ export function emailConfigured() {
   return Boolean(smtpSettings() || (process.env.IMAGINE_SERVICES_URL && process.env.IMAGINE_APP_TOKEN));
 }
 
+/**
+ * Checks the mailbox settings by signing in to the mail server, without sending
+ * anything. Returns null when it works, or a plain reason to show the owner.
+ */
+export async function checkEmailSetup(): Promise<string | null> {
+  const settings = smtpSettings();
+  if (!settings) return emailConfigured() ? null : "Email isn't set up: GMAIL_USER and GMAIL_APP_PASSWORD aren't in this deployment. Add them in Vercel → Settings → Environment Variables (Production), then redeploy.";
+  const transport = nodemailer.createTransport({ host: settings.host, port: settings.port, secure: settings.port === 465, auth: { user: settings.user, pass: settings.pass }, connectionTimeout: 15_000, greetingTimeout: 10_000, socketTimeout: 20_000 });
+  try {
+    await transport.verify();
+    return null;
+  } catch (error) {
+    const code = (error as { code?: string })?.code ?? "";
+    console.error("[email] smtp check failed (%s)", code || "unknown");
+    if (code === "EAUTH") return `Gmail refused the sign-in for ${settings.user}. The app password is wrong or was deleted: make a new one at myaccount.google.com/apppasswords, put it in GMAIL_APP_PASSWORD, and redeploy. GMAIL_USER must be the same Gmail address the app password was made in.`;
+    if (["ETIMEDOUT", "ESOCKET", "ECONNECTION", "EDNS"].includes(code)) return "The mail server couldn't be reached. Try again in a minute.";
+    return `Email couldn't be sent (${code || "unknown error"}). Check GMAIL_USER and GMAIL_APP_PASSWORD in Vercel.`;
+  }
+}
+
 async function sendBySmtp(settings: SmtpSettings, { to, subject, html, replyTo, fromName }: SendEmail): Promise<boolean> {
   const transport = nodemailer.createTransport({ host: settings.host, port: settings.port, secure: settings.port === 465, auth: { user: settings.user, pass: settings.pass }, connectionTimeout: 15_000, greetingTimeout: 10_000, socketTimeout: 20_000 });
   const name = (fromName ?? process.env.NEXT_PUBLIC_APP_NAME ?? "MIK LEDGER").replace(/["<>]/g, "").trim() || "MIK LEDGER";
