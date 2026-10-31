@@ -1,5 +1,6 @@
 "use client";
 
+import { todayHere } from "@/lib/dates";
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -44,7 +45,7 @@ function cellText(value: unknown) {
 }
 
 function today() {
-  return new Date().toISOString().slice(0, 10);
+  return todayHere();
 }
 
 export default function InventoryBulkCount({ products, onHand = {} }: InventoryBulkCountProps) {

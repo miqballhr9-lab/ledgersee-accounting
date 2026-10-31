@@ -1,5 +1,6 @@
 "use server";
 
+import { effectiveTimeZone } from "@/lib/dates";
 import { listAllBookkeepingRecords } from "@/app/actions";
 import { AiError, chat, type AiMessage } from "@/lib/ai";
 import "@/lib/ai-capabilities";
@@ -21,7 +22,7 @@ async function brief() {
   const me = await requireUser();
   const records = await listAllBookkeepingRecords();
   const settings = records.find((record) => record.kind === "settings")?.data ?? {};
-  return { me, brief: buildAssistantBrief(records, businessToday(settings.timeZone), me.workspaceName) };
+  return { me, brief: buildAssistantBrief(records, businessToday(effectiveTimeZone(settings)), me.workspaceName) };
 }
 
 /** What the panel opens with: a greeting, a few insights and suggested questions. */

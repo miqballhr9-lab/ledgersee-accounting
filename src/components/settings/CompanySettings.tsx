@@ -1,5 +1,6 @@
 "use client";
 
+import { effectiveTimeZone } from "@/lib/dates";
 import { useState, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -62,7 +63,8 @@ function withDefaults(data: Data, workspaceName: string): Data {
   filled.invoiceTerms ||= "30 days";
   filled.billTerms ||= "30 days";
   filled.accountingMethod ||= "Accrual";
-  filled.timeZone ||= "Asia/Karachi";
+  // A zone that doesn't fit the tax country (New York left from an earlier setup) shows as the one in use.
+  filled.timeZone = effectiveTimeZone(filled);
   filled.legalNameSame ||= "true";
   filled.customerEmailSame ||= "true";
   filled.customerAddressSame ||= "true";
@@ -385,7 +387,7 @@ export default function CompanySettings({ settings, workspaceName }: CompanySett
                   <Row label="First month of fiscal year" value={saved.fiscalYear} />
                   <Row label="Accounting method" value={saved.accountingMethod} />
                   <Row label="Weekly days off" value={saved.weekendDays || "Sunday"} />
-                  <Row label="Time zone" value={saved.timeZone || "Asia/Karachi"} />
+                  <Row label="Time zone" value={effectiveTimeZone(saved).replace(/_/g, " ")} />
                   <Row label="Salary rules" value={saved.salaryRules ? `${saved.salaryRules.split("\n").filter(Boolean).length} rules` : "None"} />
                 </>,
                 <>
@@ -393,7 +395,7 @@ export default function CompanySettings({ settings, workspaceName }: CompanySett
                   {select("accountingMethod", "Accounting method", ["Accrual", "Cash"], "The basis reports open with; you can still switch on each report.")}
                   {text("standardDailyHours", "Working day (hours)", { type: "number", help: "Hours worked beyond this each day count as overtime. 8 when empty." })}
                   {select("weekendDays", "Weekly days off", ["Sunday", "Saturday, Sunday", "Friday", "Friday, Saturday"], "Time off and unpaid leave skip these days.")}
-                  {select("timeZone", "Time zone", timeZones.includes(draft.timeZone ?? "") || !draft.timeZone ? timeZones : [draft.timeZone, ...timeZones], "Check in and check out times, and “today” in HR, follow this zone.")}
+                  {select("timeZone", "Time zone", timeZones.includes(draft.timeZone ?? "") || !draft.timeZone ? timeZones : [draft.timeZone, ...timeZones], "Every date and time in the app follows this zone: new documents, check in and out, due dates and reports.")}
                   {textArea("salaryRules", "Salary rules", "One per line, filled in on new payroll lines: Medical = 10% of basic, Gym = 2000, EOBI / PF = 1% of basic for Sales. Columns: Incentive, Gym, Medical, Other allowance, Fine, EOBI / PF, Other adjustment.")}
                 </>,
               )}

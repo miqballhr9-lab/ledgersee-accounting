@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 
+import { myToday } from "@/lib/business-time";
 import { listBookkeepingRecordGroups } from "@/app/actions";
 import TaxReturnWorkspace from "@/components/tax/TaxReturnWorkspace";
 import { requireFeature } from "@/lib/plan-gate";
@@ -18,7 +19,7 @@ export default async function TaxReturnsPage() {
       settings={groups.settings?.[0]?.data ?? {}}
       filings={groups["tax-filings"] ?? []}
       accounts={groups.accounts ?? []}
-      asOfDate={new Date().toISOString().slice(0, 10)}
+      asOfDate={await myToday()}
     />
   );
 }

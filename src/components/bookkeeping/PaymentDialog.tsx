@@ -1,5 +1,6 @@
 "use client";
 
+import { todayHere } from "@/lib/dates";
 import { useState, type FormEvent } from "react";
 
 import NoAccountsNotice from "@/components/bookkeeping/NoAccountsNotice";
@@ -32,7 +33,7 @@ interface PaymentDialogProps {
 }
 
 function today() {
-  return new Date().toISOString().slice(0, 10);
+  return todayHere();
 }
 
 /** Asks for a date and the Cash, Bank or Credit card account a payment or refund went through. */

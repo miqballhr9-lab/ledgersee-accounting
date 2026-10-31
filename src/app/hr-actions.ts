@@ -1,5 +1,7 @@
 "use server";
 
+import { todayFor, zoneFor } from "@/lib/business-time";
+import { dateInZone, timeInZone } from "@/lib/dates";
 import { and, eq, inArray } from "drizzle-orm";
 
 import { db } from "@/db";
@@ -58,7 +60,7 @@ export async function markAttendance(date: string, entries: AttendanceRow[]): Pr
       checkOut: ["Absent", "On leave", "Holiday"].includes(entry.status) ? "" : entry.checkOut.trim(),
       ...(entry.notes !== undefined ? { notes: entry.notes.trim().slice(0, 500) } : {}),
     };
-    applyHrRules("hr-attendance", data, existing?.data, { byKind, actor: me.name }, existing?.id);
+    applyHrRules("hr-attendance", data, existing?.data, { byKind, actor: me.name, today: await todayFor(me.id) }, existing?.id);
     const [row] = existing
       ? await db.update(bookkeepingRecord).set({ data, updatedAt: new Date() }).where(eq(bookkeepingRecord.id, existing.id)).returning()
       : await db.insert(bookkeepingRecord).values({ userId: me.id, kind: "hr-attendance", data }).returning();
@@ -105,8 +107,7 @@ export interface MyPortal {
 export async function getMyPortal(): Promise<MyPortal> {
   const { me, employee } = await myEmployee();
   const { date: todayDate } = await nowTime(me.id);
-  const [settings] = await rows(me.id, ["settings"]);
-  const timeZone = settings?.data.timeZone || "Asia/Karachi";
+  const timeZone = await zoneFor(me.id);
   const empty: MyPortal = { employee: null, business: me.workspaceName, payslips: [], leaves: [], leaveTypes: [], attendance: [], loans: [], claims: [], documents: [], holidays: [], today: todayDate, timeZone, attendanceNow: { date: todayDate, open: false, since: "", sessions: [], hours: "" }, celebrations: [] };
   if (!employee) return empty;
   const all = await rows(me.id, ["payroll", "hr-leaves", "hr-leave-types", "hr-allocations", "hr-attendance", "hr-loans", "hr-claims", "hr-documents", "hr-holidays", "employees"]);
@@ -139,7 +140,7 @@ export async function getMyPortal(): Promise<MyPortal> {
     leaveTypes: all.filter((row) => row.kind === "hr-leave-types").map((type) => ({
       id: type.id,
       name: type.data.leaveName ?? "Leave",
-      allowance: timeOffAllowance({ byKind: (kind) => all.filter((row) => row.kind === kind), actor: "" }, { employeeId: employee.id, leaveTypeId: type.id }, year),
+      allowance: timeOffAllowance({ byKind: (kind) => all.filter((row) => row.kind === kind), actor: "", today: todayDate }, { employeeId: employee.id, leaveTypeId: type.id }, year),
       used: leaveUsed(leaves, { employeeId: employee.id, leaveTypeId: type.id }, year),
       pending: leaves.filter((leave) => leave.data.leaveTypeId === type.id && ["To Approve", "Second Approval"].includes(leave.data.status ?? "") && (leave.data.fromDate ?? "").startsWith(year)).reduce((sum, leave) => sum + (Number(leave.data.days) || 0), 0),
       paid: type.data.paid !== "false",
@@ -148,22 +149,15 @@ export async function getMyPortal(): Promise<MyPortal> {
     loans: mine("hr-loans").map(toRecord),
     claims: mine("hr-claims").sort((a, b) => (b.data.date ?? "").localeCompare(a.data.date ?? "")).map(toRecord),
     documents: mine("hr-documents").map(toRecord),
-    holidays: all.filter((row) => row.kind === "hr-holidays" && (row.data.date ?? "") >= new Date().toISOString().slice(0, 10)).sort((a, b) => (a.data.date ?? "").localeCompare(b.data.date ?? "")).slice(0, 10).map(toRecord),
+    holidays: all.filter((row) => row.kind === "hr-holidays" && (row.data.date ?? "") >= todayDate).sort((a, b) => (a.data.date ?? "").localeCompare(b.data.date ?? "")).slice(0, 10).map(toRecord),
   };
 }
 
 /** Today's date and the time now in the business's time zone (Settings), Pakistan time by default. */
 async function nowTime(userId: string) {
-  const [settings] = await rows(userId, ["settings"]);
-  const timeZone = settings?.data.timeZone || "Asia/Karachi";
-  let parts: Intl.DateTimeFormatPart[];
-  try {
-    parts = new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(new Date());
-  } catch {
-    parts = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Karachi", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(new Date());
-  }
-  const part = (type: string) => parts.find((item) => item.type === type)?.value ?? "";
-  return { date: `${part("year")}-${part("month")}-${part("day")}`, time: `${part("hour")}:${part("minute")}` };
+  const timeZone = await zoneFor(userId);
+  const at = new Date();
+  return { date: dateInZone(timeZone, at), time: timeInZone(timeZone, at) };
 }
 
 /** Checks an employee in or out for today, in the business's time zone. */
@@ -202,7 +196,7 @@ async function checkEmployee(me: Awaited<ReturnType<typeof requireUser>>, employ
     ...(location ? { [direction === "in" ? "checkInLocation" : "checkOutLocation"]: `${location.lat.toFixed(5)},${location.lng.toFixed(5)}${location.accuracy ? ` (±${Math.round(location.accuracy)} m)` : ""}` } : {}),
     ...(self ? { [direction === "in" ? "checkInSource" : "checkOutSource"]: "Employee app" } : {}),
   };
-  applyHrRules("hr-attendance", data, existing?.data, { byKind, actor: me.name }, existing?.id);
+  applyHrRules("hr-attendance", data, existing?.data, { byKind, actor: me.name, today: await todayFor(me.id) }, existing?.id);
   if (existing) await db.update(bookkeepingRecord).set({ data, updatedAt: new Date() }).where(eq(bookkeepingRecord.id, existing.id));
   else await db.insert(bookkeepingRecord).values({ userId: me.id, kind: "hr-attendance", data });
   revalidatePath("/app", "layout");
@@ -247,7 +241,7 @@ export async function selfRequest(kind: "hr-leaves" | "hr-loans" | "hr-claims", 
   values.employee = employee.data.name ?? "";
   // Time off follows its type's approval; the rest wait for HR.
   if (kind !== "hr-leaves") values.status = kind === "hr-loans" ? "To Approve" : "Submitted";
-  if (kind === "hr-loans") values.requestDate = new Date().toISOString().slice(0, 10);
+  if (kind === "hr-loans") values.requestDate = (await nowTime(employee.userId)).date;
   await saveAsEmployee(kind, values);
 }
 

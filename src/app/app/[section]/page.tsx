@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { myToday } from "@/lib/business-time";
 import { notFound } from "next/navigation";
 
 import { listAllBookkeepingRecords, listBookkeepingRecordGroups } from "@/app/actions";
@@ -78,14 +79,14 @@ export default async function SectionPage({ params, searchParams }: SectionPageP
     const groups = await listBookkeepingRecordGroups(["payroll", "employees", "accounts", "settings", "hr-leaves", "hr-loans", "hr-attendance", "hr-contracts", "hr-claims", "expenses"]);
     const settingsData = groups.settings?.[0]?.data;
     const pack = packFor(settingsData?.taxCountry);
-    return <PayrollWorkspace records={groups.payroll ?? []} accounts={groups.accounts ?? []} employees={groups.employees ?? []} hr={{ leaves: groups["hr-leaves"] ?? [], loans: groups["hr-loans"] ?? [], attendance: groups["hr-attendance"] ?? [], contracts: groups["hr-contracts"] ?? [], claims: groups["hr-claims"] ?? [], weekend: weekendDays(settingsData?.weekendDays), salaryRules: settingsData?.salaryRules ?? "" }} asOfDate={new Date().toISOString().slice(0, 10)} dateRange={{ startDate, endDate }} currency={settingsData?.currency || pack?.currency || "PKR"} taxRule={pack?.payroll.incomeTax ?? "pakistan-slabs"} liabilityPayments={(groups.expenses ?? []).filter((expense) => expense.data.payrollLiability)} />;
+    return <PayrollWorkspace records={groups.payroll ?? []} accounts={groups.accounts ?? []} employees={groups.employees ?? []} hr={{ leaves: groups["hr-leaves"] ?? [], loans: groups["hr-loans"] ?? [], attendance: groups["hr-attendance"] ?? [], contracts: groups["hr-contracts"] ?? [], claims: groups["hr-claims"] ?? [], weekend: weekendDays(settingsData?.weekendDays), salaryRules: settingsData?.salaryRules ?? "" }} asOfDate={await myToday()} dateRange={{ startDate, endDate }} currency={settingsData?.currency || pack?.currency || "PKR"} taxRule={pack?.payroll.incomeTax ?? "pakistan-slabs"} liabilityPayments={(groups.expenses ?? []).filter((expense) => expense.data.payrollLiability)} />;
   }
 
   if (section === "employees") {
     const relatedKinds = ["hr-leaves", "hr-attendance", "payroll", "hr-claims", "hr-appraisals", "hr-documents", "hr-loans", "hr-contracts"] as const;
     const groups = await listBookkeepingRecordGroups(["employees", "hr-departments", "accounts", ...relatedKinds]);
     const related = Object.fromEntries(relatedKinds.map((kind) => [kind, (groups[kind] ?? []).map((record) => ({ ...record, data: odooHrData(kind, record.data) }))]));
-    return <EmployeesWorkspace employees={groups.employees ?? []} departments={groups["hr-departments"] ?? []} accounts={groups.accounts ?? []} related={related} asOfDate={new Date().toISOString().slice(0, 10)} />;
+    return <EmployeesWorkspace employees={groups.employees ?? []} departments={groups["hr-departments"] ?? []} accounts={groups.accounts ?? []} related={related} asOfDate={await myToday()} />;
   }
 
   if (section === "budgets") {
@@ -99,7 +100,7 @@ export default async function SectionPage({ params, searchParams }: SectionPageP
         accountingMethod={groups.settings?.[0]?.data.accountingMethod}
         accounts={groups.accounts ?? []}
         currency={groups.settings?.[0]?.data.currency || "USD"}
-        asOfDate={new Date().toISOString().slice(0, 10)}
+        asOfDate={await myToday()}
         automationMode={groups["automation-settings"]?.[0]?.data.mode === "Automation"}
       />
     );
@@ -114,7 +115,7 @@ export default async function SectionPage({ params, searchParams }: SectionPageP
         vendors={groups.vendors ?? []}
         accounts={groups.accounts ?? []}
         currency={groups.settings?.[0]?.data.currency || "USD"}
-        asOfDate={new Date().toISOString().slice(0, 10)}
+        asOfDate={await myToday()}
         items={itemsWithStock(groups)}
         warehouses={warehouseNames(groups.warehouses)}
       />
@@ -132,7 +133,7 @@ export default async function SectionPage({ params, searchParams }: SectionPageP
         currency={groups.settings?.[0]?.data.currency || "USD"}
         billTerms={groups.settings?.[0]?.data.billTerms || "30 days"}
         items={itemsWithStock(groups)}
-        asOfDate={new Date().toISOString().slice(0, 10)}
+        asOfDate={await myToday()}
         warehouses={warehouseNames(groups.warehouses)}
       />
     );
@@ -147,7 +148,7 @@ export default async function SectionPage({ params, searchParams }: SectionPageP
         bills={groups.bills ?? []}
         accounts={groups.accounts ?? []}
         currency={groups.settings?.[0]?.data.currency || "USD"}
-        asOfDate={new Date().toISOString().slice(0, 10)}
+        asOfDate={await myToday()}
       />
     );
   }
@@ -162,7 +163,7 @@ export default async function SectionPage({ params, searchParams }: SectionPageP
     // Each account's balance today, from the books, as the Balance Sheet and Profit and Loss read it.
     const method = settings[0]?.data.accountingMethod === "Cash" ? "cash" : "accrual";
     const ledger = buildLedger(allRecords, method);
-    const today = new Date().toISOString().slice(0, 10);
+    const today = await myToday();
     const totals = new Map<string, number>();
     for (const posting of ledger.postings) if (posting.date <= today) totals.set(posting.account.trim().toLowerCase(), (totals.get(posting.account.trim().toLowerCase()) ?? 0) + posting.amount);
     const balances = Object.fromEntries(accounts.map((account) => {

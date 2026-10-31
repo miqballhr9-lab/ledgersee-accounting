@@ -1,5 +1,6 @@
 "use client";
 
+import { todayHere } from "@/lib/dates";
 import { useMemo, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -79,7 +80,7 @@ export default function InventoryWorkspace({ products: productRecords, stock: st
   const [movementType, setMovementType] = useState<MovementType>("Receipt");
   const [selectedItemId, setSelectedItemId] = useState("");
   const [quantity, setQuantity] = useState("");
-  const [movementDate, setMovementDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [movementDate, setMovementDate] = useState(() => todayHere());
   const [reference, setReference] = useState("");
   const [notes, setNotes] = useState("");
   const [warehouse, setWarehouse] = useState("");
@@ -100,7 +101,7 @@ export default function InventoryWorkspace({ products: productRecords, stock: st
     const url = URL.createObjectURL(new Blob([`\uFEFF${rows.map((row) => row.map(cell).join(",")).join("\r\n")}`], { type: "text/csv;charset=utf-8" }));
     const anchor = document.createElement("a");
     anchor.href = url;
-    anchor.download = `inventory-${new Date().toISOString().slice(0, 10)}.csv`;
+    anchor.download = `inventory-${todayHere()}.csv`;
     anchor.click();
     URL.revokeObjectURL(url);
   }
@@ -146,7 +147,7 @@ export default function InventoryWorkspace({ products: productRecords, stock: st
     setMovementType(type);
     setSelectedItemId(itemId || products[0]?.id || "");
     setQuantity("");
-    setMovementDate(new Date().toISOString().slice(0, 10));
+    setMovementDate(todayHere());
     setReference("");
     setNotes("");
     setUnitCost("");

@@ -1,5 +1,6 @@
 "use server";
 
+import { todayFor } from "@/lib/business-time";
 import { and, eq } from "drizzle-orm";
 
 import { db } from "@/db";
@@ -66,14 +67,14 @@ export async function sendInvoiceReminder(id: string): Promise<void> {
   if (!email) throw new ActionError("Add an email address to this customer to send a reminder.");
   const company = await companyName(me.id, me.workspaceName);
   const amount = `${invoice.data.currency || ""} ${balance.toFixed(2)}`.trim();
-  const overdue = invoice.data.dueDate && invoice.data.dueDate < new Date().toISOString().slice(0, 10);
+  const overdue = invoice.data.dueDate && invoice.data.dueDate < await todayFor(me.id);
   await sendEmailOrThrow({
     to: email,
     subject: `Reminder: invoice ${invoice.data.invoiceNumber || ""} from ${company}`,
     html: `<p>Hello ${escape(customer?.data.name || invoice.data.customer || "there")},</p><p>Just a reminder that invoice ${escape(invoice.data.invoiceNumber || "")} ${overdue ? `was due on ${escape(invoice.data.dueDate)}` : `is due on ${escape(invoice.data.dueDate || "")}`} and ${escape(amount)} is still open.</p><p>If you have already paid, please ignore this message. Thank you.</p><p>${escape(company)}</p>`,
     fromName: company,
   });
-  await db.update(bookkeepingRecord).set({ data: { ...invoice.data, reminderSentAt: new Date().toISOString().slice(0, 10) }, updatedAt: new Date() }).where(eq(bookkeepingRecord.id, invoice.id));
+  await db.update(bookkeepingRecord).set({ data: { ...invoice.data, reminderSentAt: await todayFor(me.id) }, updatedAt: new Date() }).where(eq(bookkeepingRecord.id, invoice.id));
   await recordAudit(me, "Reminder sent", "invoices", invoice.id, invoice.data);
   revalidatePath("/app", "layout");
 }
@@ -87,7 +88,7 @@ export async function sendCustomerStatement(customerId: string): Promise<{ invoi
   if (!customer) throw new ActionError("We couldn’t find that customer. Refresh and try again.");
   const email = customer.data.email?.trim();
   if (!email) throw new ActionError("Add an email address to this customer to send a statement.");
-  const today = new Date().toISOString().slice(0, 10);
+  const today = await todayFor(me.id);
   const open = (await rows(me.id, "invoices"))
     .filter((row) => customerFor([customer], row.data) && !["Draft", "Void", "Cancelled", "Paid"].includes(row.data.status ?? "") && balanceOf(row.data) > 0.004)
     .sort((a, b) => (a.data.issueDate ?? "").localeCompare(b.data.issueDate ?? ""));
@@ -124,7 +125,7 @@ export async function createInvoiceFromCharges(ids: string[]): Promise<{ id: str
   if (!charges.length) throw new ActionError("Add at least one charge; credits go on an invoice with charges.");
   const chargeTotal = charges.reduce((sum, row) => sum + (Number(row.data.amount) || 0), 0);
   if (credit > chargeTotal + 0.005) throw new ActionError("The credits are more than the charges. Pick more charges, or give the customer a credit note.");
-  const today = new Date().toISOString().slice(0, 10);
+  const today = await todayFor(me.id);
   const invoices = await rows(me.id, "invoices");
   const highest = invoices.reduce((max, row) => Math.max(max, Number(/^INV-(\d{1,6})$/.exec(row.data.invoiceNumber ?? "")?.[1] ?? 0)), 0);
   const number = `INV-${String(highest + 1).padStart(4, "0")}`;
@@ -164,7 +165,7 @@ export async function createInvoiceFromTime(ids: string[]): Promise<{ id: string
   const customers = [...new Set(entries.map((row) => (row.data.customer ?? "").trim()))];
   if (customers.length !== 1 || !customers[0]) throw new ActionError("Choose time for one customer at a time, and make sure each entry has a customer.");
   if (entries.some((row) => !(Number(row.data.rate) > 0))) throw new ActionError("Add a rate per hour to each entry before invoicing it.");
-  const today = new Date().toISOString().slice(0, 10);
+  const today = await todayFor(me.id);
   const invoices = await rows(me.id, "invoices");
   const highest = invoices.reduce((max, row) => Math.max(max, Number(/^INV-(\d{1,6})$/.exec(row.data.invoiceNumber ?? "")?.[1] ?? 0)), 0);
   const number = `INV-${String(highest + 1).padStart(4, "0")}`;

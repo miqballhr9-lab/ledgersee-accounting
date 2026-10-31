@@ -1,5 +1,6 @@
 "use client";
 
+import { todayHere } from "@/lib/dates";
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { BookOpenText, LockKeyhole, MoreHorizontal, Pencil, Plus, Search, Trash2, WalletCards } from "lucide-react";
@@ -56,7 +57,7 @@ function formatCurrency(amount: string | undefined, currency: string) {
 /** The account's transactions (its register), as the Transaction Report for that account. */
 function registerHref(account: BookkeepingRecord, cashBasis: boolean) {
   const name = account.data.name?.trim() || account.data.code?.trim() || "";
-  const query = new URLSearchParams({ z: JSON.stringify({ accounts: [name], from: "", to: new Date().toISOString().slice(0, 10) }), back: "/app/accounts", title: `Account register · ${name}` });
+  const query = new URLSearchParams({ z: JSON.stringify({ accounts: [name], from: "", to: todayHere() }), back: "/app/accounts", title: `Account register · ${name}` });
   if (cashBasis) query.set("method", "cash");
   return `/app/reports/transaction-report?${query.toString()}`;
 }

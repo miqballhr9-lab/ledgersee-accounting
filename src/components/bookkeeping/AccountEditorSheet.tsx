@@ -1,5 +1,6 @@
 "use client";
 
+import { todayHere } from "@/lib/dates";
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { ChevronDown, LockKeyhole } from "lucide-react";
 import { readableError } from "@/lib/action-error";
@@ -60,10 +61,7 @@ function getInitialValues(record: BookkeepingRecord | null): Record<string, stri
 }
 
 function localToday() {
-  const date = new Date();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${date.getFullYear()}-${month}-${day}`;
+  return todayHere();
 }
 
 function formatCurrency(amount: number, currency: string) {

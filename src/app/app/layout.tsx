@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { effectiveTimeZone } from "@/lib/dates";
 import { redirect } from "next/navigation";
 
 import AppFrame from "@/components/bookkeeping/AppFrame";
@@ -30,7 +31,7 @@ export default async function BookkeepingLayout({ children }: Readonly<{ childre
     : null;
 
   return (
-    <AppFrame userName={user.name} userEmail={user.email} role={user.role} workspaceName={user.workspaceName} companyName={company.companyName?.trim() ?? ""} companyLogo={/^https?:\/\//.test(company.logo ?? "") ? company.logo : ""} isOwner={user.isOwner} features={access.locked ? undefined : access.features} platformAdmin={isPlatformAdmin(user.email)}>
+    <AppFrame userName={user.name} userEmail={user.email} role={user.role} workspaceName={user.workspaceName} companyName={company.companyName?.trim() ?? ""} companyLogo={/^https?:\/\//.test(company.logo ?? "") ? company.logo : ""} isOwner={user.isOwner} features={access.locked ? undefined : access.features} platformAdmin={isPlatformAdmin(user.email)} timeZone={effectiveTimeZone(company)}>
       {user.viewingAs ? <ViewAsBar business={user.workspaceName} /> : null}
       {announcement ? <AnnouncementBar id={announcement.id} message={announcement.message} tone={announcement.tone} /> : null}
       {access.suspended && !user.viewingAs ? (

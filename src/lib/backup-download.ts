@@ -1,10 +1,11 @@
 "use client";
 
+import { todayHere } from "@/lib/dates";
 import type { BusinessBackup } from "@/lib/backup";
 
 /** Saves a backup in the browser: an Excel workbook with one sheet per kind of record, or the JSON copy. */
 export async function downloadBackup(data: BusinessBackup, format: "xlsx" | "json", name = "mikledger-backup") {
-  const stamp = new Date().toISOString().slice(0, 10);
+  const stamp = todayHere();
   if (format === "json") {
     const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }));
     const anchor = document.createElement("a");

@@ -1,5 +1,6 @@
 "use client";
 
+import { todayHere } from "@/lib/dates";
 import { useState, type FormEvent } from "react";
 import { toast } from "sonner";
 
@@ -32,7 +33,7 @@ export default function PayrollLiabilitiesDialog({ open, onOpenChange, owed, pay
   const [kind, setKind] = useState<PayrollLiabilityKind>("withheld");
   const [amount, setAmount] = useState("");
   const [payee, setPayee] = useState(defaultPayee.withheld);
-  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [date, setDate] = useState(() => todayHere());
   const [accountId, setAccountId] = useState("");
   const [memo, setMemo] = useState("");
   const [pending, setPending] = useState(false);

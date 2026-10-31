@@ -1,5 +1,6 @@
 "use client";
 
+import { todayHere, thisMonthHere } from "@/lib/dates";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { useAutoRefresh } from "@/components/hr/employee-app";
@@ -144,7 +145,7 @@ export default function CrmWorkspace({ page, initialStore, currency, me, owners,
   const mod = page === "accounts" ? null : withRecruitmentStages(crmModule(page === "activities" ? activityKey : page)!, recruitmentStages);
   const [sort, setSort] = useState<{ key: string; desc: boolean } | null>(null);
   const [pipeline, setPipeline] = useState("");
-  const [calendarMonth, setCalendarMonth] = useState(() => new Date().toISOString().slice(0, 7));
+  const [calendarMonth, setCalendarMonth] = useState(() => thisMonthHere());
   const [view, setView] = useState<"list" | "kanban" | "balances" | "calendar">(page === "deals" || page === "applications" || page === "job-positions" ? "kanban" : "list");
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<ViewFilter>("all");
@@ -209,7 +210,7 @@ export default function CrmWorkspace({ page, initialStore, currency, me, owners,
   useNewRecordParam(() => openNew(jobPreset));
 
   const records = useMemo(() => (mod ? store[mod.kind] ?? [] : store.customers ?? []), [mod, store]);
-  const todayText = new Date().toISOString().slice(0, 10);
+  const todayText = todayHere();
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
     return records.filter((record) => {

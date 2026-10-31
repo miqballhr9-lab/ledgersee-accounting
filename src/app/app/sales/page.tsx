@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 
+import { myToday } from "@/lib/business-time";
 import { listBookkeepingRecordGroups } from "@/app/actions";
 import SalesHub from "@/components/bookkeeping/SalesHub";
 import { buildInventory, inventoryKinds } from "@/lib/inventory";
@@ -25,7 +26,7 @@ export default async function SalesPage() {
       items={items}
       accounts={groups.accounts ?? []}
       currency={groups.settings?.[0]?.data.currency || "USD"}
-      asOfDate={new Date().toISOString().slice(0, 10)}
+      asOfDate={await myToday()}
       isAdmin={me.role === "Admin"}
     />
   );

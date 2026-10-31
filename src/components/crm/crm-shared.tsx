@@ -1,4 +1,5 @@
 import { readableError } from "@/lib/action-error";
+import { todayHere } from "@/lib/dates";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
 import { crmModuleByKind, crmTitle, statusTone, type CrmField, type CrmModule } from "@/lib/crm-config";
 import { readPriceBookEntries } from "@/lib/price-books";
@@ -39,9 +40,9 @@ export function formatDateTime(value: string | undefined) {
   return value.replace("T", " ").slice(0, 16);
 }
 
+/** Today where the business is. */
 export function today() {
-  const date = new Date();
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+  return todayHere();
 }
 
 /** The text a field shows in lists and on the detail page. */

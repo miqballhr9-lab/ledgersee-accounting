@@ -1,5 +1,6 @@
 import "server-only";
 
+import { serverToday } from "@/lib/business-time";
 import { and, eq, inArray } from "drizzle-orm";
 
 import { db } from "@/db";
@@ -22,8 +23,9 @@ interface RuleResult {
   summary: string;
 }
 
+/** Today where the business is (automation runs inside withBusinessZone). */
 function today() {
-  return new Date().toISOString().slice(0, 10);
+  return serverToday();
 }
 
 function daysAgo(days: number) {

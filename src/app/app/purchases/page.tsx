@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 
+import { myToday } from "@/lib/business-time";
 import { listBookkeepingRecordGroups } from "@/app/actions";
 import PurchasesHub from "@/components/bookkeeping/PurchasesHub";
 import { requireFeature } from "@/lib/plan-gate";
@@ -19,7 +20,7 @@ export default async function PurchasesPage() {
       vendors={groups.vendors ?? []}
       accounts={groups.accounts ?? []}
       currency={groups.settings?.[0]?.data.currency || "USD"}
-      asOfDate={new Date().toISOString().slice(0, 10)}
+      asOfDate={await myToday()}
     />
   );
 }

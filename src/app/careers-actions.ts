@@ -1,5 +1,6 @@
 "use server";
 
+import { todayFor } from "@/lib/business-time";
 import { and, eq, gt, sql } from "drizzle-orm";
 
 import { db } from "@/db";
@@ -55,7 +56,7 @@ export async function applyForJob(token: string, input: ApplicationInput): Promi
       stage: "New",
       source: "Website",
       notes: String(input.message ?? "").trim().slice(0, 4000),
-      appliedOn: new Date().toISOString().slice(0, 10),
+      appliedOn: await todayFor(userId),
     },
   });
 }

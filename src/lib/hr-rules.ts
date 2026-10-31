@@ -1,5 +1,7 @@
 import "server-only";
 
+import { todayFor } from "@/lib/business-time";
+import { dateInZone } from "@/lib/dates";
 import { and, eq, inArray } from "drizzle-orm";
 
 import { db } from "@/db";
@@ -20,6 +22,8 @@ type StoredRow = typeof bookkeepingRecord.$inferSelect;
 export interface HrContext {
   byKind: (kind: string) => StoredRow[];
   actor: string;
+  /** Today where the business is; Pakistan time when not given. */
+  today?: string;
 }
 
 function money(value: string | undefined) {
@@ -81,16 +85,16 @@ export function timeOffAllowance(context: HrContext, data: Record<string, string
   if (!type) return null;
   const allocations = context.byKind("hr-allocations").filter((row) => row.data.status === "Approved" && sameEmployee(row.data, data) && row.data.leaveTypeId === data.leaveTypeId
     && (row.data.validFrom ?? "") <= `${year}-12-31` && (!row.data.validTo || row.data.validTo >= `${year}-01-01`));
-  if (allocations.length) return allocations.reduce((sum, row) => sum + allocationDays(row.data, year), 0);
+  if (allocations.length) return allocations.reduce((sum, row) => sum + allocationDays(row.data, year, context.today), 0);
   if (type.data.requiresAllocation === "No limit") return null;
   return money(type.data.daysPerYear);
 }
 
 /** An allocation's days for the year; an accrual earns its monthly days so far, up to the allocation. */
-function allocationDays(data: Record<string, string>, year: string) {
+function allocationDays(data: Record<string, string>, year: string, asOf?: string) {
   const total = money(data.days);
   if (data.allocationType !== "Accrual" || !money(data.accrualPerMonth)) return total;
-  const today = new Date().toISOString().slice(0, 10);
+  const today = asOf ?? dateInZone(undefined);
   const start = (data.validFrom ?? "") > `${year}-01-01` ? data.validFrom : `${year}-01-01`;
   const end = today < `${year}-12-31` ? today : `${year}-12-31`;
   if (end < start) return 0;
@@ -164,7 +168,7 @@ export function applyHrRules(kind: string, data: Record<string, string>, existin
           : `${data.employee} has no ${type.data.leaveName} allocation. Add one in Allocations first.`);
       }
       data.approvedBy = context.actor;
-      data.approvedOn = new Date().toISOString().slice(0, 10);
+      data.approvedOn = (context.today ?? dateInZone(undefined));
       data.paid = type?.data.paid === "false" ? "false" : "true";
     }
     if (data.status !== "Approved") data.approvedBy = data.status === "Refused" ? `Refused by ${context.actor}` : data.status === "Second Approval" ? `First approval: ${data.firstApprovedBy || context.actor}` : "";
@@ -238,7 +242,7 @@ export function applyHrRules(kind: string, data: Record<string, string>, existin
     if (data.status === "Completed" || money(data.progress) >= 100) {
       data.status = "Completed";
       data.progress = "100";
-      if (!data.completedOn) data.completedOn = new Date().toISOString().slice(0, 10);
+      if (!data.completedOn) data.completedOn = (context.today ?? dateInZone(undefined));
     } else {
       data.status = money(data.progress) > 0 ? "In progress" : data.status || "Not started";
       data.completedOn = "";
@@ -259,7 +263,7 @@ export function applyHrRules(kind: string, data: Record<string, string>, existin
   if (kind === "hr-claims") {
     if (!data.status) data.status = "To Submit";
     if (!data.paidBy) data.paidBy = "Employee (to reimburse)";
-    if (data.status === "Paid" && existingData?.status !== "Paid") data.paidDate = new Date().toISOString().slice(0, 10);
+    if (data.status === "Paid" && existingData?.status !== "Paid") data.paidDate = (context.today ?? dateInZone(undefined));
     if (data.status !== "Paid") data.paidDate = "";
   }
 
@@ -284,7 +288,7 @@ export function applyHrRules(kind: string, data: Record<string, string>, existin
     }
     if (!data.gratuityDaysPerYear) data.gratuityDaysPerYear = "30";
     // Paid time off left in the departure year: each limited paid type's allowance less what was taken.
-    const year = (data.lastWorkingDay || new Date().toISOString().slice(0, 10)).slice(0, 4);
+    const year = (data.lastWorkingDay || (context.today ?? dateInZone(undefined))).slice(0, 4);
     const unused = context.byKind("hr-leave-types")
       .filter((type) => type.data.paid !== "false")
       .reduce((sum, type) => {
@@ -312,7 +316,7 @@ export function applyHrRules(kind: string, data: Record<string, string>, existin
     data.grossPayable = fixed(gross);
     data.netPayable = fixed(gross - money(data.loanRecovery) - money(data.otherDeductions));
     if (!data.status) data.status = "Draft";
-    if (data.status === "Paid" && existingData?.status !== "Paid") data.paidDate = new Date().toISOString().slice(0, 10);
+    if (data.status === "Paid" && existingData?.status !== "Paid") data.paidDate = (context.today ?? dateInZone(undefined));
     if (data.status !== "Paid") data.paidDate = "";
   }
 }
@@ -399,7 +403,7 @@ export async function afterHrSave(userId: string, kind: string, before: Record<s
   if (kind === "hr-loans") await syncAttachmentRepayments(userId);
   if (kind === "hr-candidates" && isHiredStage(data.stage) && !isHiredStage(before?.stage) && !data.hiredEmployeeId) {
     const employeeId = await nextEmployeeId(userId);
-    const today = new Date().toISOString().slice(0, 10);
+    const today = await todayFor(userId);
     const [employee] = await db.insert(bookkeepingRecord).values({
       userId,
       kind: "employees",

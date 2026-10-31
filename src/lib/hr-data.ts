@@ -1,5 +1,6 @@
 import "server-only";
 
+import { dateInZone, effectiveTimeZone } from "@/lib/dates";
 import { listBookkeepingRecordGroups } from "@/app/actions";
 import { and, eq } from "drizzle-orm";
 
@@ -39,8 +40,8 @@ export async function loadHrData() {
     currency: groups.settings?.[0]?.data.currency || "USD",
     recruitmentStages: groups.settings?.[0]?.data.recruitmentStages ?? "",
     weekend: weekendDays(groups.settings?.[0]?.data.weekendDays),
-    today: businessToday(groups.settings?.[0]?.data.timeZone),
-    timeZone: groups.settings?.[0]?.data.timeZone || "Asia/Karachi",
+    today: businessToday(effectiveTimeZone(groups.settings?.[0]?.data)),
+    timeZone: effectiveTimeZone(groups.settings?.[0]?.data),
   };
 }
 
@@ -58,11 +59,7 @@ export async function ensurePaymentAccounts(me: WorkspaceUser) {
   if (rows.length) await db.insert(bookkeepingRecord).values(rows);
 }
 
-/** Today's date in the business's time zone (Settings), Pakistan time by default. */
+/** Today's date in a time zone (the business's, from effectiveTimeZone), Pakistan time by default. */
 export function businessToday(timeZone: string | undefined) {
-  try {
-    return new Intl.DateTimeFormat("en-CA", { timeZone: timeZone || "Asia/Karachi", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
-  } catch {
-    return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Karachi", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
-  }
+  return dateInZone(timeZone);
 }

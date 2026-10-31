@@ -1,5 +1,6 @@
 import "server-only";
 
+import { todayFor } from "@/lib/business-time";
 import { notFound } from "next/navigation";
 
 import { listAllBookkeepingRecords } from "@/app/actions";
@@ -21,7 +22,7 @@ export async function PartyLedgerPage({ party, id, from, to }: { party: "custome
   const record = records.find((row) => row.kind === kind && row.id === id);
   if (!record) notFound();
   const settings = records.find((row) => row.kind === "settings")?.data ?? {};
-  const today = new Date().toISOString().slice(0, 10);
+  const today = await todayFor(me.id);
   const isDate = (value: string | undefined) => /^\d{4}-\d{2}-\d{2}$/.test(value ?? "");
   const end = isDate(to) ? to! : today;
   const start = isDate(from) ? from! : "";
@@ -68,7 +69,7 @@ export async function AllPartiesLedgerPage({ party, from, to, show }: { party: "
   await assignMissingPartyNumbers(me.id, kind);
   const records = await listAllBookkeepingRecords();
   const settings = records.find((row) => row.kind === "settings")?.data ?? {};
-  const today = new Date().toISOString().slice(0, 10);
+  const today = await todayFor(me.id);
   const isDate = (value: string | undefined) => /^\d{4}-\d{2}-\d{2}$/.test(value ?? "");
   const end = isDate(to) ? to! : today;
   const start = isDate(from) ? from! : "";

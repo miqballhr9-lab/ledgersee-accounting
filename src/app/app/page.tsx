@@ -1,4 +1,5 @@
 import { listBookkeepingRecordGroups } from "@/app/actions";
+import { myToday } from "@/lib/business-time";
 import Dashboard from "@/components/bookkeeping/Dashboard";
 import type { SetupProgress } from "@/components/bookkeeping/SetupChecklist";
 import { requireAccountingHome } from "@/lib/plan-gate";
@@ -21,5 +22,5 @@ export default async function DashboardPage() {
     invoice: invoices.length > 0,
     payment: invoices.some((invoice) => Number(invoice.data.paidAmount) > 0 || invoice.data.status === "Paid"),
   };
-  return <Dashboard records={records} setup={setup} asOfDate={new Date().toISOString().slice(0, 10)} />;
+  return <Dashboard records={records} setup={setup} asOfDate={await myToday()} />;
 }

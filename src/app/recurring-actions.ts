@@ -1,5 +1,6 @@
 "use server";
 
+import { todayFor } from "@/lib/business-time";
 import { and, eq } from "drizzle-orm";
 
 import { recordExpensePayment, saveBookkeepingRecord } from "@/app/actions";
@@ -79,7 +80,7 @@ export async function createFromRecurringTemplate(id: string): Promise<{ kind: s
   const template = await findTemplate(me.id, id);
   assertCanWrite(me, template.data.rtKind);
   if (template.data.rtStatus === "Ended") throw new ActionError("This schedule has ended. Edit it to start again.");
-  const today = new Date().toISOString().slice(0, 10);
+  const today = await todayFor(me.id);
   // A due scheduled or reminder template is used for the date it was due; otherwise for today.
   const date = template.data.rtType !== "Unscheduled" && template.data.rtNext && template.data.rtNext <= today ? template.data.rtNext : today;
   const saved = await createFromTemplate(me.id, template, date);
@@ -106,7 +107,7 @@ export async function setRecurringTemplateStatus(id: string, status: "Active" | 
  */
 export async function runDueRecurringTransactions(): Promise<{ created: Array<{ kind: string; id: string; label: string }>; errors: string[] }> {
   const me = await requireUser();
-  const today = new Date().toISOString().slice(0, 10);
+  const today = await todayFor(me.id);
   const templates = (await rows(me.id, "recurring-transactions")).filter((row) => row.data.rtType === "Scheduled" && row.data.rtStatus === "Active" && row.data.rtNext && row.data.rtNext <= today);
   const created: Array<{ kind: string; id: string; label: string }> = [];
   const errors: string[] = [];

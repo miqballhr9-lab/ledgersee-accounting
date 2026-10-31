@@ -1,4 +1,5 @@
 import { Suspense } from "react";
+import { myToday } from "@/lib/business-time";
 import type { Metadata } from "next";
 
 import { listAllBookkeepingRecords } from "@/app/actions";
@@ -20,10 +21,10 @@ export default async function ReportPage({ params }: ReportPageProps) {
   const { report } = await params;
   await requireFeature(reportCategoryFeature(reportCategoryKey(report)));
   const records = await listAllBookkeepingRecords();
-  if (report === "management-report") return <ManagementReport records={records} today={new Date().toISOString().slice(0, 10)} />;
+  if (report === "management-report") return <ManagementReport records={records} today={await myToday()} />;
   return (
     <Suspense>
-      <ReportViewer reportKey={report} records={records} today={new Date().toISOString().slice(0, 10)} />
+      <ReportViewer reportKey={report} records={records} today={await myToday()} />
     </Suspense>
   );
 }

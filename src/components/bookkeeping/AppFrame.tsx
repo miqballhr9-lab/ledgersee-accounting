@@ -1,5 +1,6 @@
 "use client";
 
+import { setBrowserTimeZone } from "@/lib/dates";
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
@@ -117,6 +118,8 @@ interface AppFrameProps {
   /** The MIK LEDGER owner, who also sees the Super Admin panel. */
   platformAdmin?: boolean;
   children: React.ReactNode;
+  /** The business's time zone (Settings, else its tax country). */
+  timeZone?: string;
 }
 
 /** Which app each menu group belongs to; groups not listed (Organization) are for everyone. */
@@ -240,7 +243,9 @@ function initials(name: string) {
   return name.trim().split(/\s+/).slice(0, 2).map((part) => part[0]?.toUpperCase() ?? "").join("") || "LL";
 }
 
-export default function AppFrame({ userName, userEmail, role, workspaceName, companyName = "", companyLogo = "", isOwner, features, platformAdmin = false, children }: AppFrameProps) {
+export default function AppFrame({ userName, userEmail, role, workspaceName, companyName = "", companyLogo = "", isOwner, features, platformAdmin = false, timeZone, children }: AppFrameProps) {
+  // Every screen's "today" is the business's, whatever zone this browser is in.
+  if (typeof window !== "undefined") setBrowserTimeZone(timeZone);
   const pathname = usePathname();
   const router = useRouter();
   const allowed = (href: string) => {

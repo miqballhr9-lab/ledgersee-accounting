@@ -1,5 +1,7 @@
 "use server";
 
+import { serverToday, withBusinessZone } from "@/lib/business-time";
+import { effectiveTimeZone } from "@/lib/dates";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { revalidatePath, withoutRevalidation } from "@/lib/revalidate";
 
@@ -35,8 +37,9 @@ function toRecord(row: StoredRow): BookkeepingRecord {
   return { id: row.id, kind: row.kind as BookkeepingRecord["kind"], data: row.data, createdAt: row.createdAt.toISOString(), updatedAt: row.updatedAt.toISOString() };
 }
 
+/** Today where the business is (automation runs inside withBusinessZone). */
 function today() {
-  return new Date().toISOString().slice(0, 10);
+  return serverToday();
 }
 
 async function rowsOfKind(userId: string, kind: string) {
@@ -119,9 +122,9 @@ export async function saveAutomationRule(input: AutomationRuleInput, id?: string
   if (id) {
     const [existing] = await db.select().from(bookkeepingRecord).where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "automation-rules"))).limit(1);
     if (!existing) throw new ActionError("We couldn’t find that rule. Refresh and try again.");
-    await db.update(bookkeepingRecord).set({ data: ruleData(input, existing.data), updatedAt: new Date() }).where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id)));
+    await db.update(bookkeepingRecord).set({ data: await withBusinessZone(me.id, async () => ruleData(input, existing.data)), updatedAt: new Date() }).where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id)));
   } else {
-    await db.insert(bookkeepingRecord).values({ userId: me.id, kind: "automation-rules", data: ruleData(input) });
+    await db.insert(bookkeepingRecord).values({ userId: me.id, kind: "automation-rules", data: await withBusinessZone(me.id, async () => ruleData(input)) });
   }
   revalidatePath("/app/automation");
 }
@@ -144,7 +147,7 @@ export async function addRecommendedRules(): Promise<void> {
     await db.insert(bookkeepingRecord).values({
       userId: me.id,
       kind: "automation-rules",
-      data: ruleData({ name: details.name, action: details.action, trigger: details.trigger, dayOfMonth: details.dayOfMonth, requireApproval: true, active: true }),
+      data: await withBusinessZone(me.id, async () => ruleData({ name: details.name, action: details.action, trigger: details.trigger, dayOfMonth: details.dayOfMonth, requireApproval: true, active: true })),
     });
   }
   revalidatePath("/app/automation");
@@ -448,7 +451,7 @@ export async function runAutomationRule(id: string): Promise<void> {
   assertAdmin(me);
   const [rule] = await db.select().from(bookkeepingRecord).where(and(eq(bookkeepingRecord.id, id), eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "automation-rules"))).limit(1);
   if (!rule) throw new ActionError("We couldn’t find that rule. Refresh and try again.");
-  await executeRule(me.id, rule, "Run now");
+  await withBusinessZone(me.id, () => executeRule(me.id, rule, "Run now"));
   revalidatePath("/app", "layout");
 }
 
@@ -463,15 +466,18 @@ export async function runDueAutomations(): Promise<void> {
   // A business whose trial or plan ended, or that is paused, changes nothing on its own either.
   if (me.role !== "Admin" || me.viewingAs || me.access.locked || me.access.suspended) return;
   // Reminders people set on their own tasks go out whatever the automation mode.
-  await sendDueTaskReminders(me.id, me.name, me.email).catch(() => undefined);
-  if ((await currentMode(me.id)) !== "Automation") return;
-  await withoutRevalidation(() => runDueRules(me.id));
+  await withBusinessZone(me.id, async () => {
+    await sendDueTaskReminders(me.id, me.name, me.email).catch(() => undefined);
+    if ((await currentMode(me.id)) !== "Automation") return;
+    await withoutRevalidation(() => runDueRules(me.id));
+  });
 }
 
 /** The current date and time where the business is (Settings time zone, Pakistan by default), as YYYY-MM-DDTHH:MM. */
-function businessNow(timeZone: string | undefined) {
+function businessNow(settings: Record<string, string>) {
+  const timeZone = effectiveTimeZone(settings);
   try {
-    const parts = Object.fromEntries(new Intl.DateTimeFormat("en-CA", { timeZone: timeZone || "Asia/Karachi", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(new Date()).map((part) => [part.type, part.value]));
+    const parts = Object.fromEntries(new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(new Date()).map((part) => [part.type, part.value]));
     return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`;
   } catch {
     return new Date().toISOString().slice(0, 16);
@@ -482,7 +488,7 @@ function businessNow(timeZone: string | undefined) {
 async function sendDueTaskReminders(userId: string, ownerName: string, ownerEmail: string) {
   const [tasks, members, settingsRows] = await Promise.all([rowsOfKind(userId, "crm-tasks"), rowsOfKind(userId, "team-members"), rowsOfKind(userId, "settings")]);
   const settings = settingsRows[0]?.data ?? {};
-  const now = businessNow(settings.timeZone);
+  const now = businessNow(settings);
   for (const task of tasks) {
     const reminder = (task.data.reminder ?? "").replace(" ", "T");
     if (!reminder || reminder > now || task.data.reminderSentAt || task.data.status === "Completed") continue;

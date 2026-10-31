@@ -1,5 +1,6 @@
 "use client";
 
+import { todayHere } from "@/lib/dates";
 import { Fragment, useEffect, useRef, useState, type FormEvent } from "react";
 import { toast } from "sonner";
 import Link from "next/link";
@@ -578,7 +579,7 @@ export default function RecordEditor({ module, record, customers, vendors, items
       let saved = await saveBookkeepingRecord(module.kind, record ? { ...record.data, ...valuesToSave } : valuesToSave, savedRecordId ?? undefined);
       if (module.kind === "expenses" && firstSave && payNowAccountId) {
         // Like a QuickBooks expense: paid from the chosen account on the expense date.
-        await recordExpensePayment(saved.id, saved.data.expenseDate || new Date().toISOString().slice(0, 10), payNowAccountId);
+        await recordExpensePayment(saved.id, saved.data.expenseDate || todayHere(), payNowAccountId);
         saved = { ...saved, data: { ...saved.data, status: "Paid", paidAmount: saved.data.amount ?? "0", paymentAccountId: payNowAccountId } };
       }
       setSavedRecordId(saved.id);

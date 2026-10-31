@@ -1,5 +1,6 @@
 "use client";
 
+import { todayHere, thisMonthHere } from "@/lib/dates";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -197,7 +198,8 @@ function dateString(date: Date) {
 
 function createDefaults(module: ModuleDefinition, records: BookkeepingRecord[], defaultCurrency: string) {
   const values = Object.fromEntries(module.fields.map((field) => [field.key, field.type === "checkbox" ? "false" : ""]));
-  const today = new Date();
+  // New documents are dated today where the business is, not in the browser's or server's zone.
+  const today = new Date(`${todayHere()}T12:00:00`);
   const dueDate = new Date(today);
   dueDate.setDate(today.getDate() + 30);
   const settings = records.find((record) => record.kind === "settings")?.data;
@@ -310,7 +312,7 @@ function partyCentre(kind: "customers" | "vendors", party: BookkeepingRecord, re
     const value = (kind === "customers" ? data.customer : data.vendor || data.payee) ?? "";
     return data.customerId === party.id || data.vendorId === party.id || data.openingBalanceFor === party.id || (Boolean(name) && value.trim().toLowerCase() === name);
   };
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayHere();
   const docs = related.filter((record) => record.kind !== "payments" && isTheirs(record.data));
   const docIds = new Set(docs.map((doc) => doc.id));
   const payments = related.filter((record) => record.kind === "payments" && docIds.has(record.data.invoiceId || record.data.billId || record.data.expenseId || ""));
@@ -450,13 +452,13 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
     const money = (value: number) => formatCurrency(value, currency);
     const total = (list: BookkeepingRecord[]) => list.reduce((sum, record) => sum + Number(record.data.amount || 0) * homeRate(record.data, currency), 0);
     const balanceOf = (record: BookkeepingRecord) => Math.max(0, Number(record.data.amount || 0) - Number(record.data.paidAmount || 0) - Number(record.data.creditApplied || 0)) * homeRate(record.data, currency);
-    const thisMonth = new Date().toISOString().slice(0, 7);
+    const thisMonth = thisMonthHere();
     const withStatus = (...statuses: string[]) => records.filter((record) => statuses.includes(record.data.status ?? ""));
     const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
     type Card = { label: string; value: string; note?: string; tone?: "bad" };
     if (module.kind === "invoices" || module.kind === "bills") {
       const open = records.filter((record) => !["Paid", "Cancelled", "Draft"].includes(record.data.status ?? "") && balanceOf(record) > 0);
-      const overdue = records.filter((record) => record.data.status === "Overdue" || (record.data.dueDate && record.data.dueDate < new Date().toISOString().slice(0, 10) && open.includes(record)));
+      const overdue = records.filter((record) => record.data.status === "Overdue" || (record.data.dueDate && record.data.dueDate < todayHere() && open.includes(record)));
       const paidThisMonth = records.filter((record) => record.data.status === "Paid" && (record.data.paidDate || record.data.issueDate || record.data.billDate || "").startsWith(thisMonth));
       return [
         { label: module.kind === "invoices" ? "Open balance" : "Outstanding", value: money(open.reduce((sum, record) => sum + balanceOf(record), 0)), note: count(open.length, "unpaid", "unpaid") },
@@ -506,7 +508,7 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
       return [
         { label: "Active schedules", value: String(active.length) },
         { label: "Billed each cycle", value: money(total(active)) },
-        { label: "Due now", value: String(active.filter((record) => record.data.nextDate && record.data.nextDate <= new Date().toISOString().slice(0, 10)).length) },
+        { label: "Due now", value: String(active.filter((record) => record.data.nextDate && record.data.nextDate <= todayHere()).length) },
         { label: "Paused", value: String(withStatus("Paused").length) },
       ] satisfies Card[];
     }
@@ -691,7 +693,7 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
     Math.max(0, Number(record.data.amount || 0) - Number(record.data.paidAmount || 0) - Number(record.data.creditApplied || 0));
 
   function openBulkPayment() {
-    setBulkPaymentDate(dateString(new Date()));
+    setBulkPaymentDate(todayHere());
     setBulkPaymentAccount(paymentAccounts[0]?.id ?? "");
     setBulkPaymentOpen(true);
   }
@@ -831,7 +833,7 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
       const remaining = Math.max(0, Number(record.data.amount || 0) - Number(record.data.paidAmount || 0) - Number(record.data.creditApplied || 0));
       setPaymentRecord(record);
       setPaymentAmount(remaining.toFixed(2));
-      setPaymentDate(dateString(new Date()));
+      setPaymentDate(todayHere());
       setPaymentMethod(paymentAccounts[0]?.id ?? "");
       setPaymentRate(record.data.exchangeRate || "1");
       setPaymentError("");

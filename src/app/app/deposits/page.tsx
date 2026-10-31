@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 
+import { myToday } from "@/lib/business-time";
 import { listBookkeepingRecordGroups } from "@/app/actions";
 import BankDepositsWorkspace from "@/components/bookkeeping/BankDepositsWorkspace";
 import { requireFeature } from "@/lib/plan-gate";
@@ -16,7 +17,7 @@ export default async function DepositsPage() {
       accounts={groups.accounts ?? []}
       bankAccounts={groups["bank-accounts"] ?? []}
       currency={groups.settings?.[0]?.data.currency || "USD"}
-      today={new Date().toISOString().slice(0, 10)}
+      today={await myToday()}
     />
   );
 }

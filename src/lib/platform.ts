@@ -1,5 +1,6 @@
 import "server-only";
 
+import { dateInZone } from "@/lib/dates";
 import { and, desc, eq } from "drizzle-orm";
 import { cache } from "react";
 
@@ -82,7 +83,7 @@ export interface Announcement {
 /** The announcement everyone sees now, if any. */
 export const activeAnnouncement = cache(async function activeAnnouncement(): Promise<Announcement | null> {
   const rows = await db.select().from(bookkeepingRecord).where(eq(bookkeepingRecord.kind, ANNOUNCEMENT_KIND)).orderBy(desc(bookkeepingRecord.updatedAt)).limit(5);
-  const today = new Date().toISOString().slice(0, 10);
+  const today = dateInZone(undefined);
   const row = rows.find((item) => item.data.active === "true" && item.data.message?.trim() && (!item.data.until || item.data.until >= today));
   return row ? { id: row.id, message: row.data.message, tone: row.data.tone === "warning" ? "warning" : "info", until: row.data.until ?? "" } : null;
 });

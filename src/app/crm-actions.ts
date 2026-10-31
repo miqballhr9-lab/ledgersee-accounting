@@ -1,5 +1,6 @@
 "use server";
 
+import { todayFor } from "@/lib/business-time";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { revalidatePath } from "@/lib/revalidate";
 
@@ -71,7 +72,7 @@ async function lookupContext(userId: string) {
       "employees", "hr-departments", "hr-leave-types", "hr-jobs", "hr-leaves", "hr-allocations", "hr-holidays", "hr-loans", "hr-attendance", "hr-contracts", "hr-shifts", "accounts", "settings", "items", "crm-price-books",
     ])));
   const byKind = (kind: string) => rows.filter((row) => row.kind === kind);
-  return { rows, byKind };
+  return { rows, byKind, today: await todayFor(userId) };
 }
 type LookupContext = Awaited<ReturnType<typeof lookupContext>>;
 
@@ -236,7 +237,7 @@ function buildData(mod: CrmModule, input: Record<string, string>, context: Looku
       data.probability = String(stageProbability(data.stage) ?? 0);
     }
     data.expectedRevenue = ((money(data.amount) * money(data.probability)) / 100).toFixed(2);
-    if (isClosedStage(data.stage) && !isClosedStage(existing?.stage)) data.closedOn = new Date().toISOString().slice(0, 10);
+    if (isClosedStage(data.stage) && !isClosedStage(existing?.stage)) data.closedOn = context.today;
     if (!isClosedStage(data.stage)) data.closedOn = "";
   }
   if (mod.kind === "crm-deals") dealRules(mod, data, existing, context.byKind("settings")[0]?.data ?? {}, ownerName);
@@ -273,10 +274,10 @@ function buildData(mod: CrmModule, input: Record<string, string>, context: Looku
   if (mod.kind === "crm-leads") data.leadScore = String(leadScore(data));
   if (mod.kind === "crm-workflows" && !data.active) data.active = "Active";
   if (mod.kind === "crm-deals" && !data.pipeline) data.pipeline = "Standard";
-  if ((mod.kind === "crm-tasks") && data.status === "Completed" && existing?.status !== "Completed") data.completedOn = new Date().toISOString().slice(0, 10);
+  if ((mod.kind === "crm-tasks") && data.status === "Completed" && existing?.status !== "Completed") data.completedOn = context.today;
   // A changed reminder is sent again at its new time.
   if (mod.kind === "crm-tasks" && existing && (existing.reminder ?? "") !== (data.reminder ?? "")) data.reminderSentAt = "";
-  if (mod.section === "hr") applyHrRules(mod.kind, data, existing, { byKind: context.byKind, actor: ownerName }, id);
+  if (mod.section === "hr") applyHrRules(mod.kind, data, existing, { byKind: context.byKind, actor: ownerName, today: context.today }, id);
   return data;
 }
 
@@ -731,7 +732,7 @@ export async function convertLead(leadId: string, input: ConvertLeadInput): Prom
         convertedAccount: accountName,
         convertedContactId: contact.id,
         convertedDealId: dealId,
-        convertedOn: new Date().toISOString().slice(0, 10),
+        convertedOn: await todayFor(me.id),
       }, [{ at: nowStamp(), by, text: `Converted to account ${accountName}${dealId ? " with a deal" : ""}` }]),
       updatedAt: new Date(),
     }).where(eq(bookkeepingRecord.id, lead.id));
@@ -757,7 +758,7 @@ export async function createDocumentFromDeal(dealId: string, target: "estimates"
     .where(and(eq(bookkeepingRecord.userId, me.id), inArray(bookkeepingRecord.kind, [target, "settings", "customers"])));
   const settings = rows.find((row) => row.kind === "settings")?.data;
   const customer = rows.find((row) => row.kind === "customers" && row.id === deal.data.accountId);
-  const today = new Date().toISOString().slice(0, 10);
+  const today = await todayFor(me.id);
   // The deal's products become the document's lines, matched to Items & services by name.
   const products = await db.select().from(bookkeepingRecord).where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "crm-deal-products"), sql`${bookkeepingRecord.data}->>'dealId' = ${deal.id}`));
   const items = products.length ? await db.select().from(bookkeepingRecord).where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "items"))) : [];

@@ -1,5 +1,6 @@
 "use client";
 
+import { todayHere } from "@/lib/dates";
 import { useState } from "react";
 import { toast } from "sonner";
 
@@ -33,7 +34,7 @@ const typeHelp: Record<string, string> = {
 
 /** "Make recurring", as in QuickBooks: saves a transaction as a template that repeats on a schedule. */
 export default function MakeRecurringDialog({ open, onOpenChange, kind, payload, template, defaultName = "", onSaved }: MakeRecurringDialogProps) {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayHere();
   const saved = template?.data ?? {};
   const [name, setName] = useState(saved.rtName || defaultName);
   const [type, setType] = useState(saved.rtType || "Scheduled");

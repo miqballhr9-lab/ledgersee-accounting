@@ -1,5 +1,7 @@
 "use server";
 
+import { todayFor } from "@/lib/business-time";
+import { dateInZone } from "@/lib/dates";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { randomBytes } from "node:crypto";
 import { recordAudit } from "@/lib/audit";
@@ -108,7 +110,7 @@ type StoredRow = typeof bookkeepingRecord.$inferSelect;
 
 function serializeRow(row: StoredRow): BookkeepingRecord {
   let data = row.data;
-  const today = new Date().toISOString().slice(0, 10);
+  const today = dateInZone(undefined);
   if (
     row.kind === "invoices" &&
     data.dueDate &&
@@ -383,7 +385,7 @@ async function syncOpeningBalance(userId: string, kind: "customers" | "vendors",
     if (existing) await db.delete(bookkeepingRecord).where(eq(bookkeepingRecord.id, existing.id));
     return;
   }
-  const date = party.data.openingBalanceDate || new Date().toISOString().slice(0, 10);
+  const date = party.data.openingBalanceDate || await todayFor(userId);
   const name = party.data.name || party.data.company || (kind === "customers" ? "Customer" : "Supplier");
   const line = JSON.stringify([{ itemId: "", name: "Opening balance", description: `Opening balance as of ${date}`, quantity: "1", rate: amount.toFixed(2) }]);
   const common = { docType: "Opening balance", openingBalanceFor: party.id, amount: amount.toFixed(2), subtotal: amount.toFixed(2), taxAmount: "0", taxRate: "", lineItems: line, paidAmount: "0", memo: "Opening balance" };
@@ -815,7 +817,7 @@ async function saveRecord(
         billNumber: data.billNumber ?? "Bill",
         vendor: data.vendor ?? "",
         amount: data.paidAmount ?? "0",
-        paymentDate: data.billDate || new Date().toISOString().slice(0, 10),
+        paymentDate: data.billDate || await todayFor(me.id),
         method: data.paymentMethod,
         paymentAccountId: data.paymentAccountId ?? "",
         paymentAccountName: data.paymentAccountName ?? "",
@@ -832,7 +834,7 @@ async function saveRecord(
         invoiceNumber: data.invoiceNumber ?? "Invoice",
         customer: data.customer ?? "",
         amount: data.paidAmount ?? data.amount ?? "0",
-        paymentDate: data.issueDate || new Date().toISOString().slice(0, 10),
+        paymentDate: data.issueDate || await todayFor(me.id),
         method: data.paymentMethod,
         paymentAccountId: data.paymentAccountId ?? "",
         paymentAccountName: data.paymentAccountName ?? "",
@@ -1870,7 +1872,7 @@ export async function voidBookkeepingRecord(kind: string, id: string): Promise<v
   if ((Number(row.data.paidAmount) || 0) > 0) throw new ActionError("Undo its payments first, then void it.");
   if ((Number(row.data.creditApplied) || 0) > 0) throw new ActionError("A credit is applied to it. Delete or unapply the credit first.");
   if (["Applied", "Refunded"].includes(row.data.status ?? "")) throw new ActionError(`This credit has been ${row.data.status?.toLowerCase()}, so it can’t be voided.`);
-  const data = { ...row.data, status: "Void", statusBeforeVoid: row.data.status ?? "", voidedAt: new Date().toISOString().slice(0, 10), voidedBy: me.name ?? "" };
+  const data = { ...row.data, status: "Void", statusBeforeVoid: row.data.status ?? "", voidedAt: await todayFor(me.id), voidedBy: me.name ?? "" };
   await db.update(bookkeepingRecord).set({ data, updatedAt: new Date() }).where(eq(bookkeepingRecord.id, row.id));
   await recordAudit(me, "Voided", kind, row.id, data);
   revalidatePath("/app", "layout");
@@ -1898,7 +1900,7 @@ export async function approveBill(id: string): Promise<void> {
   if (!bill) throw new ActionError("We couldn’t find that bill. Refresh and try again.");
   if (bill.data.status !== "Pending approval") throw new ActionError("This bill isn’t waiting for approval.");
   await assertBooksOpen(me.id, bill.data.billDate);
-  const data = { ...bill.data, status: "Open", approvedBy: me.name ?? "", approvedAt: new Date().toISOString().slice(0, 10) };
+  const data = { ...bill.data, status: "Open", approvedBy: me.name ?? "", approvedAt: await todayFor(me.id) };
   await db.update(bookkeepingRecord).set({ data, updatedAt: new Date() }).where(eq(bookkeepingRecord.id, bill.id));
   await recordAudit(me, "Approved", "bills", bill.id, data);
   revalidatePath("/app", "layout");
@@ -1954,7 +1956,7 @@ export async function convertBookkeepingRecord(id: string, target?: string, perc
       }
     }
 
-    const today = new Date().toISOString().slice(0, 10);
+    const today = await todayFor(me.id);
     // The customer's or supplier's own payment terms, not always 30 days.
     const terms = targetKind === "invoices" ? await termsFor(me.id, "customers", source.data.customer) : sourceKind === "purchase-orders" ? await termsFor(me.id, "vendors", source.data.vendor) : "30 days";
     const sourceData = progress
@@ -2106,7 +2108,7 @@ export async function convertPurchaseOrderToExpense(
       .map((line) => [line.name, line.description].filter(Boolean).join(" — "))
       .join(", ")
       .slice(0, 240);
-    const today = new Date().toISOString().slice(0, 10);
+    const today = await todayFor(me.id);
     const expenseData = amountFromLineItems({
       payee: order.data.vendor || "",
       expenseDate: order.data.date || today,
@@ -2672,7 +2674,7 @@ export async function generateRecurringInvoice(id: string): Promise<void> {
     .limit(1);
   const sequence = Math.max(1, Number(settings?.data.nextInvoiceNumber) || 1);
   const prefix = settings?.data.invoicePrefix || "INV-";
-  const today = new Date().toISOString().slice(0, 10);
+  const today = await todayFor(me.id);
   // The schedule's own terms, else the customer's.
   const terms = paymentTermOptions.includes(schedule.data.paymentTerms ?? "") ? schedule.data.paymentTerms : await termsFor(me.id, "customers", schedule.data.customer);
   const invoiceData = amountFromLineItems({
@@ -2883,7 +2885,7 @@ export async function duplicateCustomerDocumentRecord(id: string, kind: Customer
     return Number.isFinite(suffix) ? Math.max(highest, suffix) : highest;
   }, 0) + 1;
   const nextNumber = `${prefix}-${String(sequence).padStart(4, "0")}`;
-  const today = new Date().toISOString().slice(0, 10);
+  const today = await todayFor(me.id);
   const duplicateData: Record<string, string> = {
     ...document.data,
     [details.numberKey]: nextNumber,
@@ -2927,7 +2929,7 @@ export async function duplicateInvoiceRecord(id: string): Promise<BookkeepingRec
   const sequence = Math.max(1, Number(settings?.data.nextInvoiceNumber) || invoices.length + 1);
   const prefix = settings?.data.invoicePrefix || "INV-";
   const invoiceNumber = `${prefix}${String(sequence).padStart(4, "0")}`;
-  const issueDate = new Date().toISOString().slice(0, 10);
+  const issueDate = await todayFor(me.id);
   const paymentTerms = invoice.data.paymentTerms || "30 days";
   const duplicateData: Record<string, string> = { ...invoice.data, invoiceNumber, issueDate, dueDate: dueDateForTerms(issueDate, paymentTerms), paymentTerms, status: "Draft", paidAmount: "0", creditApplied: "0" };
   delete duplicateData.shareToken;
