@@ -95,6 +95,14 @@ function keepServerOwned(kind: string, data: Record<string, string>, current: Re
       delete next[key];
     }
   }
+  if (kind === "credit-notes" || kind === "supplier-credits") {
+    // "Applied" and "Refunded" come from actually applying or refunding the credit, never from
+    // the status box: otherwise a credit shows as applied while its invoice or bill still owes it all.
+    const wanted = next.status ?? "";
+    if (["Applied", "Refunded"].includes(wanted) && current?.status !== wanted) {
+      next.status = current?.status && !["Applied", "Refunded"].includes(current.status) ? current.status : "Open";
+    }
+  }
   if (kind === "settings") {
     // Public form and jobs-page addresses are made here, never taken from the browser,
     // so one business can't claim another's address and receive its leads.
@@ -361,7 +369,22 @@ async function auditRecord(me: Awaited<ReturnType<typeof requireUser>>, action: 
 }
 
 export async function saveBookkeepingRecord(kind: string, input: Record<string, string>, id?: string): Promise<BookkeepingRecord> {
-  const saved = await saveRecord(kind, input, id);
+  let saved = await saveRecord(kind, input, id);
+  // Choosing "Applied" on a credit note applies it now: the invoice or bill balance goes down with it.
+  const linked = kind === "credit-notes" ? saved.data.invoiceNumber : kind === "supplier-credits" ? saved.data.billNumber : "";
+  if ((kind === "credit-notes" && input.status === "Applied") || (kind === "supplier-credits" && linked?.trim() && !["Applied", "Refunded"].includes(saved.data.status ?? ""))) {
+    if (saved.data.status !== "Applied") {
+      if (!linked?.trim()) throw new ActionError("Saved as Open. Add the invoice number it applies to, then choose Applied.");
+      try {
+        if (kind === "credit-notes") await applyCreditNote(saved.id);
+        else await applySupplierCredit(saved.id);
+      } catch (error) {
+        throw new ActionError(`Saved as Open, but not applied: ${error instanceof Error ? error.message : "it couldn’t be applied."}`);
+      }
+      const [fresh] = await db.select().from(bookkeepingRecord).where(eq(bookkeepingRecord.id, saved.id)).limit(1);
+      if (fresh) saved = serializeRow(fresh);
+    }
+  }
   const me = await requireUser();
   await recordAudit(me, id ? "Edited" : "Added", kind, saved.id, saved.data);
   if (kind === "customers" || kind === "vendors") await syncOpeningBalance(me.id, kind, saved);
@@ -1489,6 +1512,14 @@ function paymentAmount(input: string | undefined, remaining: number, label: stri
 }
 
 /** Quantity on hand for every inventory item, worked out from the documents that move stock. */
+/** What one warehouse holds of an item now. */
+async function warehouseStock(userId: string, itemId: string, warehouse: string) {
+  const rows = await db.select().from(bookkeepingRecord).where(and(eq(bookkeepingRecord.userId, userId), inArray(bookkeepingRecord.kind, [...inventoryKinds, "warehouses", "stock-transfers"])));
+  const places = stockByWarehouse(rows.map(serializeRow)).get(itemId);
+  const wanted = warehouse.toLowerCase();
+  return [...(places ?? new Map<string, number>())].find(([name]) => name.toLowerCase() === wanted)?.[1] ?? 0;
+}
+
 async function stockOnHand(userId: string) {
   const rows = await db.select().from(bookkeepingRecord).where(and(eq(bookkeepingRecord.userId, userId), inArray(bookkeepingRecord.kind, [...inventoryKinds])));
   const summaries = buildInventory(rows.map(serializeRow));
@@ -1736,7 +1767,9 @@ export async function recordPayrollPayment(id: string, paymentDate: string, acco
 }
 
 const payrollLiabilityAccounts: Record<PayrollLiabilityKind, { test: RegExp; name: string; label: string }> = {
-  withheld: { test: /payroll/i, name: "Payroll liabilities", label: "Tax and deductions withheld from salaries" },
+  incomeTax: { test: /withholding (income )?tax|wht payable|income tax payable|tax withheld/i, name: "Withholding income tax payable", label: "Income tax withheld from salaries" },
+  social: { test: /eobi|social security payable|provident fund payable/i, name: "EOBI payable", label: "EOBI / social security withheld from salaries" },
+  withheld: { test: /payroll/i, name: "Payroll liabilities", label: "Other deductions withheld from salaries" },
   employer: { test: /employer contributions owed/i, name: "Payroll liabilities", label: "Employer contributions" },
   attachments: { test: /attachment|garnish|child support/i, name: "Salary attachments payable", label: "Salary attachments kept back for creditors" },
 };
@@ -1762,8 +1795,10 @@ export async function payPayrollLiabilities(input: { kind: PayrollLiabilityKind;
   const rows = await db.select().from(bookkeepingRecord).where(and(eq(bookkeepingRecord.userId, me.id), inArray(bookkeepingRecord.kind, ["accounts", "settings"])));
   const liabilities = rows.filter((row) => row.kind === "accounts" && /^liability$/i.test(row.data.type ?? ""));
   // The same account the books keep the amount in until it is paid.
-  const payrollAccount = liabilities.find((row) => /payroll/i.test(`${row.data.name} ${row.data.detailType}`));
-  const found = input.kind === "withheld" ? payrollAccount : liabilities.find((row) => target.test.test(row.data.name ?? "")) ?? (input.kind === "employer" ? payrollAccount : undefined);
+  const payrollAccount = liabilities.find((row) => /salar(y|ies) payable|wages payable|payroll liabilit|payroll payable/i.test(row.data.name ?? "") && !/eobi|withholding|income tax/i.test(row.data.name ?? ""))
+    ?? liabilities.find((row) => /payroll|salar/i.test(row.data.name ?? "") && !/eobi|withholding|income tax|sales tax/i.test(row.data.name ?? ""));
+  // The same account the books keep each part in (see the ledger): income tax and EOBI have their own when the chart does.
+  const found = input.kind === "withheld" ? payrollAccount : liabilities.find((row) => target.test.test(row.data.name ?? "")) ?? (input.kind === "employer" || input.kind === "incomeTax" || input.kind === "social" ? payrollAccount : undefined);
   let liability = found?.data.name?.trim() || found?.data.code?.trim() || "";
   if (!liability) {
     liability = target.name;
@@ -2186,7 +2221,11 @@ export async function createInventoryMovement(input: {
       .limit(1);
 
     if (!item || !isInventoryItem(item)) throw new ActionError("Choose a saved inventory item from Items & services.");
-    const previousStock = onHandByItem.get(item.id) ?? 0;
+    const totalStock = onHandByItem.get(item.id) ?? 0;
+    // A count in one warehouse is compared with that warehouse's stock, not the item's total,
+    // so counting 6 of 7 in Lahore writes off 1, not everything held elsewhere.
+    const place = input.warehouse?.trim() ?? "";
+    const previousStock = input.movementType === "Adjustment" && place ? await warehouseStock(me.id, item.id, place) : totalStock;
     const unitCost = input.unitCost?.trim() ? Number(input.unitCost) : NaN;
     if (input.unitCost?.trim() && (!Number.isFinite(unitCost) || unitCost < 0)) throw new ActionError("Enter a unit cost of zero or more.");
 
@@ -2196,7 +2235,7 @@ export async function createInventoryMovement(input: {
         ? -quantity
         : quantity - previousStock;
     const nextStock = previousStock + change;
-    if (input.movementType === "Delivery" && nextStock < 0) throw new ActionError("There isn’t enough stock for this delivery.");
+    if (input.movementType === "Delivery" && totalStock + change < 0) throw new ActionError("There isn’t enough stock for this delivery.");
     if (input.movementType === "Adjustment" && change === 0) throw new ActionError("The counted stock matches the current balance.");
 
     const updatedAt = new Date();

@@ -6,10 +6,12 @@
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
 import { deductionLog, isGarnishment } from "@/lib/ledger";
 
-export type PayrollLiabilityKind = "withheld" | "employer" | "attachments";
+export type PayrollLiabilityKind = "incomeTax" | "social" | "withheld" | "employer" | "attachments";
 
 export const payrollLiabilityLabels: Record<PayrollLiabilityKind, string> = {
-  withheld: "Tax and deductions withheld",
+  incomeTax: "Income tax withheld from salaries",
+  social: "EOBI / social security withheld",
+  withheld: "Other deductions withheld",
   employer: "Employer contributions",
   attachments: "Salary attachments (creditors, courts)",
 };
@@ -17,11 +19,16 @@ export const payrollLiabilityLabels: Record<PayrollLiabilityKind, string> = {
 const money = (value: string | undefined) => Number(value) || 0;
 
 export function payrollLiabilitiesOwed(payrolls: BookkeepingRecord[], loans: BookkeepingRecord[], payments: BookkeepingRecord[]): Record<PayrollLiabilityKind, number> {
-  const owed: Record<PayrollLiabilityKind, number> = { withheld: 0, employer: 0, attachments: 0 };
+  const owed: Record<PayrollLiabilityKind, number> = { incomeTax: 0, social: 0, withheld: 0, employer: 0, attachments: 0 };
   for (const pay of payrolls) {
     const data = pay.data;
     if (!money(data.grossSalary) || /draft|cancel/i.test(data.status ?? "")) continue;
-    owed.withheld += Math.max(0, money(data.grossSalary) - money(data.payableSalary) - money(data.loanDeduction) - money(data.advanceDeduction) - money(data.fineDeduction));
+    const kept = Math.max(0, money(data.grossSalary) + money(data.reimbursement) - money(data.payableSalary) - money(data.loanDeduction) - money(data.advanceDeduction) - money(data.fineDeduction));
+    const tax = Math.min(Math.max(0, money(data.taxDeduction)), kept);
+    const social = Math.min(Math.max(0, money(data.socialDeduction)), kept - tax);
+    owed.incomeTax += tax;
+    owed.social += social;
+    owed.withheld += kept - tax - social;
     owed.employer += money(data.employerContribution);
   }
   for (const loan of loans) {
@@ -31,5 +38,6 @@ export function payrollLiabilitiesOwed(payrolls: BookkeepingRecord[], loans: Boo
     const kind = payment.data.payrollLiability as PayrollLiabilityKind;
     if (kind in owed && !/void|cancel/i.test(payment.data.status ?? "")) owed[kind] -= money(payment.data.amount);
   }
-  return { withheld: Math.round(owed.withheld * 100) / 100, employer: Math.round(owed.employer * 100) / 100, attachments: Math.round(owed.attachments * 100) / 100 };
+  const round = (value: number) => Math.round(value * 100) / 100;
+  return { incomeTax: round(owed.incomeTax), social: round(owed.social), withheld: round(owed.withheld), employer: round(owed.employer), attachments: round(owed.attachments) };
 }

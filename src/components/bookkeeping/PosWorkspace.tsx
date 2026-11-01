@@ -248,7 +248,8 @@ export default function PosWorkspace({ items, customers, priceBooks = [], accoun
   function startPayment(method: "cash" | "card") {
     if (!cart.length) return;
     // Cash goes to a cash account; card to a bank account, as the money lands there.
-    const preferred = payAccounts.find((account) => (method === "cash" ? /cash/i : /bank|card|stripe|pos/i).test(`${account.data.name} ${account.data.detailType}`) && !/undeposited/i.test(account.data.name ?? ""));
+    const preferred = payAccounts.find((account) => (method === "cash" ? /cash/i : /clearing|merchant|stripe|pos/i).test(`${account.data.name} ${account.data.detailType}`) && !/undeposited/i.test(account.data.name ?? ""))
+      ?? (method === "card" ? payAccounts.find((account) => /bank/i.test(`${account.data.name} ${account.data.detailType}`) && !/cash on hand|undeposited/i.test(account.data.name ?? "")) : undefined);
     setAccountId(preferred?.id ?? payAccounts[0]?.id ?? "");
     setTendered(method === "cash" ? "" : total.toFixed(2));
     setPaying(method);

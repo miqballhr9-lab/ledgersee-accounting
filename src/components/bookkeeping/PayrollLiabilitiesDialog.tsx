@@ -26,13 +26,13 @@ interface PayrollLiabilitiesDialogProps {
 }
 
 const kinds = Object.keys(payrollLiabilityLabels) as PayrollLiabilityKind[];
-const defaultPayee: Record<PayrollLiabilityKind, string> = { withheld: "Tax authority", employer: "Tax authority", attachments: "" };
+const defaultPayee: Record<PayrollLiabilityKind, string> = { incomeTax: "Tax authority", social: "EOBI", withheld: "Tax authority", employer: "Tax authority", attachments: "" };
 
 /** Pays over salary tax, employer contributions or salary attachments to whoever they are owed to. */
 export default function PayrollLiabilitiesDialog({ open, onOpenChange, owed, paymentAccounts, format, onPaid }: PayrollLiabilitiesDialogProps) {
-  const [kind, setKind] = useState<PayrollLiabilityKind>("withheld");
+  const [kind, setKind] = useState<PayrollLiabilityKind>("incomeTax");
   const [amount, setAmount] = useState("");
-  const [payee, setPayee] = useState(defaultPayee.withheld);
+  const [payee, setPayee] = useState(defaultPayee.incomeTax);
   const [date, setDate] = useState(() => todayHere());
   const [accountId, setAccountId] = useState("");
   const [memo, setMemo] = useState("");
@@ -45,11 +45,11 @@ export default function PayrollLiabilitiesDialog({ open, onOpenChange, owed, pay
     setAmount(owed[next] > 0 ? owed[next].toFixed(2) : "");
     setPayee(defaultPayee[next]);
   }
-  // Each time it opens, start from what is owed for tax withheld.
+  // Each time it opens, start from the first thing owed (income tax withheld, then EOBI, ...).
   if (open !== openedFor) {
     setOpenedFor(open);
     if (open) {
-      choose("withheld");
+      choose(kinds.find((item) => owed[item] > 0) ?? "incomeTax");
       setMemo("");
     }
   }
@@ -79,7 +79,7 @@ export default function PayrollLiabilitiesDialog({ open, onOpenChange, owed, pay
         <form id="payroll-liabilities-form" onSubmit={(event) => void submit(event)} className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="liability-kind">What you are paying</Label>
-            <Select value={kind} onValueChange={(value) => choose((value ?? "withheld") as PayrollLiabilityKind)}>
+            <Select value={kind} onValueChange={(value) => choose((value ?? "incomeTax") as PayrollLiabilityKind)}>
               <SelectTrigger id="liability-kind" className="w-full"><SelectValue /></SelectTrigger>
               <SelectContent>{kinds.map((item) => <SelectItem key={item} value={item}>{payrollLiabilityLabels[item]} · {format(Math.max(0, owed[item]))} owed</SelectItem>)}</SelectContent>
             </Select>

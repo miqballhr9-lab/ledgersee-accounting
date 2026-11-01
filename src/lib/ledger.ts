@@ -171,11 +171,23 @@ export function buildLedger(allRecords: BookkeepingRecord[], method: AccountingM
 
   const ar = find((account) => account.accountType === "Accounts receivable (A/R)") ?? ensure("Accounts receivable (A/R)", "Asset", "Accounts receivable (A/R)");
   const ap = find((account) => account.accountType === "Accounts payable (A/P)") ?? ensure("Accounts payable (A/P)", "Liability", "Accounts payable (A/P)");
-  const salesTax = find((account) => /sales tax|tax payable|vat|gst/i.test(`${account.name} ${account.detailType}`) && account.category === "Liability") ?? ensure("Sales tax payable", "Liability", "Current liabilities");
+  // Each liability by its own name first: a payroll or EOBI account whose detail type says "tax payable"
+  // must never collect the sales tax, and sales tax never the salaries.
+  const notSalesTax = /provincial|withholding|wht|income tax|eobi|social|provident|payroll|salar|wages|input/i;
+  const salesTax = find((account) => account.category === "Liability" && /sales tax payable|output tax|gst payable|vat payable/i.test(account.name) && !notSalesTax.test(account.name))
+    ?? find((account) => account.category === "Liability" && /sales tax payable/i.test(account.detailType) && !notSalesTax.test(account.name))
+    ?? find((account) => account.category === "Liability" && /sales tax|vat|gst/i.test(account.name) && !notSalesTax.test(account.name))
+    ?? ensure("Sales tax payable", "Liability", "Current liabilities");
   const sales = find((account) => account.category === "Income" && /sales/i.test(`${account.name} ${account.detailType}`)) ?? find((account) => account.accountType === "Income") ?? ensure("Sales", "Income", "Income");
   const openingEquity = find((account) => /opening balance/i.test(`${account.name} ${account.detailType}`)) ?? ensure("Opening balance equity", "Equity", "Owner's equity");
   const retainedEarnings = find((account) => /retained earnings/i.test(`${account.name} ${account.detailType}`)) ?? ensure("Retained earnings", "Equity", "Owner's equity");
-  const payrollLiabilities = find((account) => /payroll/i.test(`${account.name} ${account.detailType}`) && account.category === "Liability") ?? ensure("Payroll liabilities", "Liability", "Current liabilities");
+  const notNetPay = /eobi|social|provident|withholding|wht|income tax|sales tax|employer contributions|attachment/i;
+  const payrollLiabilities = find((account) => account.category === "Liability" && /salar(y|ies) payable|wages payable|net (pay|salar)|payroll liabilit|payroll payable/i.test(account.name) && !notNetPay.test(account.name))
+    ?? find((account) => account.category === "Liability" && /payroll|salar/i.test(account.name) && !notNetPay.test(account.name))
+    ?? ensure("Payroll liabilities", "Liability", "Current liabilities");
+  // Income tax and social security (EOBI) kept back from salaries go to their own payable accounts when the chart has them.
+  const taxWithheldPayable = find((account) => account.category === "Liability" && /withholding (income )?tax|wht payable|income tax payable|tax withheld/i.test(account.name)) ?? payrollLiabilities;
+  const socialPayable = find((account) => account.category === "Liability" && /eobi|social security payable|provident fund payable/i.test(account.name)) ?? payrollLiabilities;
   const salaries = find((account) => /salar|wages|payroll expense/i.test(`${account.name} ${account.detailType}`) && account.category === "Expense" && !/employer/i.test(account.name)) ?? ensure("Salaries and wages", "Expense", "Expenses");
   const undeposited = find((account) => /undeposited/i.test(`${account.name} ${account.detailType}`)) ?? "Undeposited funds";
   // Tax paid on purchases goes to the input tax account a tax pack adds (GST/VAT you can claim back);
@@ -538,7 +550,16 @@ export function buildLedger(allRecords: BookkeepingRecord[], method: AccountingM
       const owed = gross + reimbursed - net - repaid - fines;
       const claimsBack = (share: number): Array<[string, number]> => (reimbursed ? [[reimbursements(), reimbursed * share]] : []);
       const recovered = (share: number): Array<[string, number]> => [...(repaid ? [[employeeLoans(), -repaid * share] as [string, number]] : []), ...(fines ? [[employeeRecoveries(), -fines * share] as [string, number]] : [])];
-      const withheld = (share: number): Array<[string, number]> => [...recovered(share), [payrollLiabilities, -owed * share]];
+      // What was withheld, split by where it is owed: income tax, social security (EOBI), anything else.
+      const taxPart = Math.min(Math.max(0, num(data.taxDeduction)), Math.max(0, owed));
+      const socialPart = Math.min(Math.max(0, num(data.socialDeduction)), Math.max(0, owed - taxPart));
+      const otherPart = owed - taxPart - socialPart;
+      const owedParts = (share: number): Array<[string, number]> => [
+        ...(taxPart ? [[taxWithheldPayable, -taxPart * share] as [string, number]] : []),
+        ...(socialPart ? [[socialPayable, -socialPart * share] as [string, number]] : []),
+        ...(Math.abs(otherPart) > 0.000001 ? [[payrollLiabilities, -otherPart * share] as [string, number]] : []),
+      ];
+      const withheld = (share: number): Array<[string, number]> => [...recovered(share), ...owedParts(share)];
       const base = { number: data.reference ?? "", name: data.employeeName ?? "", customer: "", supplier: "", memo: data.month ? `Salary ${data.month}` : "Salary", sourceKind: "payroll", sourceId: record.id };
       const month = /^\d{4}-\d{2}$/.test(data.month ?? "") ? `${data.month}-28` : "";
       // The employer's contributions on this salary are a cost of the month, owed to the tax authority.
@@ -550,7 +571,7 @@ export function buildLedger(allRecords: BookkeepingRecord[], method: AccountingM
       if (paymentsFor.has(record.id) || num(data.paidAmount) > 0) {
         const payments = docPayments(record, month || record.createdAt.slice(0, 10));
         if (method === "accrual") {
-          post({ ...base, type: "Payroll", txnId: `pr-${record.id}`, date: month || record.createdAt.slice(0, 10) }, [[salaries, gross], ...claimsBack(1), ...recovered(1), [payrollLiabilities, -(gross + reimbursed - repaid - fines)]]);
+          post({ ...base, type: "Payroll", txnId: `pr-${record.id}`, date: month || record.createdAt.slice(0, 10) }, [[salaries, gross], ...claimsBack(1), ...recovered(1), ...owedParts(1), [payrollLiabilities, -net]]);
           for (const payment of payments) post({ ...base, type: "Salary payment", txnId: `sp-${payment.id}-${record.id}`, date: payment.date }, [[payrollLiabilities, payment.amount], [payment.account, -payment.amount]]);
         } else if (net > 0) {
           for (const payment of payments) {

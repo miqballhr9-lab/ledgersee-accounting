@@ -24,7 +24,13 @@ export function isUndepositedFunds(account: Pick<BookkeepingRecord, "kind" | "da
   return account.kind === "accounts" && account.data.locked !== "true" && account.data.type === "Asset" && /undeposited/i.test(`${account.data.detailType ?? ""} ${account.data.name ?? ""}`);
 }
 
-/** Where money received from a customer can go: a cash, bank or card account, or Undeposited funds. */
+/**
+ * Where money received (from a customer, or a supplier's refund) can go: a cash or bank account, or
+ * Undeposited funds. Never the business's own credit card: that is money the business owes, and a
+ * customer paying by card is paid into the bank (or a clearing account), not onto the company card.
+ */
 export function receivingAccountType(account: Pick<BookkeepingRecord, "kind" | "data">): PaymentAccountType | "Undeposited funds" | null {
-  return paymentAccountType(account) ?? (isUndepositedFunds(account) ? "Undeposited funds" : null);
+  const type = paymentAccountType(account);
+  if (type === "Credit card") return null;
+  return type ?? (isUndepositedFunds(account) ? "Undeposited funds" : null);
 }

@@ -338,7 +338,7 @@ export default function InventoryWorkspace({ products: productRecords, stock: st
         <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-xl">
           <DialogHeader>
             <DialogTitle>{movementType === "Receipt" ? "Receive stock" : movementType === "Delivery" ? "Record delivery" : "Inventory quantity adjustment"}</DialogTitle>
-            <DialogDescription>{movementType === "Receipt" ? "For stock that arrived without a bill or purchase order. Bought stock is better entered as a bill with the item on it." : movementType === "Delivery" ? "For stock that left without an invoice (samples, own use). Invoices take stock out on their own." : "Enter the quantity you counted. The difference is booked to Inventory Shrinkage."}</DialogDescription>
+            <DialogDescription>{movementType === "Receipt" ? "For stock that arrived without a bill or purchase order. Bought stock is better entered as a bill with the item on it." : movementType === "Delivery" ? "For stock that left without an invoice (samples, own use). Invoices take stock out on their own." : warehouses.length ? "Enter the quantity you counted in the chosen warehouse. Only the difference there is booked to Inventory Shrinkage." : "Enter the quantity you counted. The difference is booked to Inventory Shrinkage."}</DialogDescription>
           </DialogHeader>
           <form className="space-y-4" onSubmit={(event) => void handleSubmit(event)}>
             <div className="space-y-2">
@@ -349,7 +349,7 @@ export default function InventoryWorkspace({ products: productRecords, stock: st
                   {products.map((product) => <SelectItem key={product.id} value={product.id}>{product.data.name || "Unnamed product"}{product.data.sku ? ` · ${product.data.sku}` : ""}</SelectItem>)}
                 </SelectContent>
               </Select>
-              {selectedProduct ? <p className="text-xs text-muted-foreground">Quantity on hand: {formatQuantity(stockById[selectedProduct.id]?.onHand ?? 0, selectedProduct.data.unit)}</p> : null}
+              {selectedProduct ? <p className="text-xs text-muted-foreground">{warehouses.length && warehouse ? <>In {warehouse}: {formatQuantity(Object.entries(byWarehouse[selectedProduct.id] ?? {}).find(([place]) => place.toLowerCase() === warehouse.toLowerCase())?.[1] ?? 0, selectedProduct.data.unit)} · all warehouses: {formatQuantity(stockById[selectedProduct.id]?.onHand ?? 0, selectedProduct.data.unit)}</> : <>Quantity on hand: {formatQuantity(stockById[selectedProduct.id]?.onHand ?? 0, selectedProduct.data.unit)}</>}</p> : null}
             </div>
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-2">

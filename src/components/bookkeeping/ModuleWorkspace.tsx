@@ -389,7 +389,7 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
   const [expensePaymentAccountId, setExpensePaymentAccountId] = useState("");
   const [expenseConversionError, setExpenseConversionError] = useState("");
   // Money received from customers can also go to Undeposited funds, banked later with a bank deposit.
-  const paymentAccounts = accounts.filter((account) => (module.kind === "invoices" ? receivingAccountType(account) : paymentAccountType(account)));
+  const paymentAccounts = accounts.filter((account) => (module.kind === "invoices" || module.kind === "supplier-credits" ? receivingAccountType(account) : paymentAccountType(account)));
   const expenseAccounts = accounts.filter((account) => account.kind === "accounts" && account.data.type === "Expense" && account.data.locked !== "true");
   const customization = LIST_CUSTOMIZATIONS[module.kind];
   const listPreferences = customization ? storedListPreferences ?? { columns: [...customization.defaultColumns], pageSize: customization.defaultPageSize } : null;
@@ -635,7 +635,7 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
           : module.kind === "time-activities" || module.kind === "delayed-charges"
             ? { label: "Actions", items: [{ action: "invoice-time", label: "Create invoice" }] }
           : module.kind === "supplier-credits"
-            ? { label: "Actions", items: [{ action: "refund", label: "Record refund" }] }
+            ? { label: "Actions", items: [{ action: "apply-credit", label: "Apply to bill" }, { action: "refund", label: "Record refund" }] }
             : module.kind === "journals"
               ? { label: "Actions", items: [{ action: "open", label: "Open" }] }
               // Every other list can still select records, to delete several at once.

@@ -220,7 +220,7 @@ export const modules: readonly ModuleDefinition[] = [
     fields: [
       { key: "creditNumber", label: "Credit note number", required: true },
       { key: "invoiceNumber", label: "Invoice number" },
-      { key: "customer", label: "Customer" },
+      { key: "customer", label: "Customer", required: true },
       { key: "date", label: "Date", type: "date" },
       { key: "currency", label: "Currency", type: "currency" },
       { key: "exchangeRate", label: "Exchange rate", type: "number", placeholder: "1" },
@@ -229,7 +229,7 @@ export const modules: readonly ModuleDefinition[] = [
       { key: "discount", label: "Discount amount", type: "number" },
       { key: "amount", label: "Credit amount", type: "number", required: true },
       { key: "reason", label: "Reason", type: "textarea" },
-      { key: "status", label: "Status", type: "select", options: ["Draft", "Applied", "Refunded"] },
+      { key: "status", label: "Status", type: "select", options: ["Draft", "Open", "Applied"], help: "Applied takes the credit off its invoice when you save. To pay it back instead, use Refund to customer from the list." },
       { key: "className", label: "Class", help: "A class, e.g. a department or line of business. Reports can split by it." },
       { key: "location", label: "Location", help: "Branch or location, e.g. Lahore or Karachi. Reports can split by it." },
       { key: "warehouse", label: "Warehouse", type: "select", options: [], help: "Where the stock on this document comes from or goes to. Empty uses the first warehouse." },
@@ -304,7 +304,7 @@ export const modules: readonly ModuleDefinition[] = [
     columns: ["creditNumber", "vendor", "date", "billNumber", "amount", "refundAccountName", "status"],
     fields: [
       { key: "vendor", label: "Supplier", required: true },
-      { key: "billNumber", label: "Apply to bill no.", help: "The supplier bill this credit reduces. Apply it from the list once saved." },
+      { key: "billNumber", label: "Apply to bill no.", help: "The supplier bill this credit reduces. It is taken off the bill when you save; or apply it later from the list." },
       { key: "date", label: "Credit date", type: "date", required: true },
       { key: "creditNumber", label: "Credit no.", required: true },
       { key: "currency", label: "Currency", type: "currency" },
