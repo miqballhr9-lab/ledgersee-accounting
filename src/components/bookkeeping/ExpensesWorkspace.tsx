@@ -173,7 +173,8 @@ export default function ExpensesWorkspace({ expenses: initialExpenses, bills: in
     .reduce((total, record) => total + Math.max(0, Number(record.data.amount || 0) - Number(record.data.paidAmount || 0) - Number(record.data.creditApplied || 0)) * homeRate(record.data, currency), 0);
   const expensesTotal = records
     .filter((record) => record.kind === "expenses")
-    .reduce((total, record) => total + (Number(record.data.amount) || 0) * homeRate(record.data, currency), 0);
+    // A credit card credit is money back, so it lowers the total.
+    .reduce((total, record) => total + (record.data.docType === "Credit card credit" ? -1 : 1) * (Number(record.data.amount) || 0) * homeRate(record.data, currency), 0);
 
   useEffect(() => setPage(1), [categoryFilter, customEnd, customStart, datePreset, search, statusFilter, typeFilter]);
 
@@ -522,8 +523,8 @@ export default function ExpensesWorkspace({ expenses: initialExpenses, bills: in
                     <TableCell className="max-w-[180px] text-[13px]"><span className="block truncate" title={purchaseItemSummary(record.data).names}>{purchaseItemSummary(record.data).names || "—"}</span></TableCell>
                     <TableCell className="text-right text-[13px] tabular-nums">{purchaseItemSummary(record.data).quantity ? purchaseItemSummary(record.data).quantity.toLocaleString(undefined, { maximumFractionDigits: 3 }) : "—"}</TableCell>
                     <TableCell className="max-w-[200px] text-[13px]"><span className="block truncate" title={payment || ""}>{payment || "—"}</span></TableCell>
-                    <TableCell className="text-right text-[13px] tabular-nums">{formatMoney(record.data.amount || "", record.data.currency || currency)}</TableCell>
-                    <TableCell className="text-right text-[13px] font-medium tabular-nums">{formatMoney(String((Number(record.data.amount) || 0) * homeRate(record.data, currency)), currency)}</TableCell>
+                    <TableCell className="text-right text-[13px] tabular-nums">{formatMoney(String((record.data.docType === "Credit card credit" ? -1 : 1) * (Number(record.data.amount) || 0)), record.data.currency || currency)}</TableCell>
+                    <TableCell className="text-right text-[13px] font-medium tabular-nums">{formatMoney(String((record.data.docType === "Credit card credit" ? -1 : 1) * (Number(record.data.amount) || 0) * homeRate(record.data, currency)), currency)}</TableCell>
                     <TableCell className="text-[13px]">
                       <StatusBadge value={record.data.status || (isUnpaid(record) ? "Unpaid" : "Paid")} />
                     </TableCell>

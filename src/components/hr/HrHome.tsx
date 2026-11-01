@@ -15,9 +15,9 @@ interface App {
 }
 
 /** HRM home in Odoo's style: the apps menu, one tile per HR app. */
-export default function HrHome({ store, children }: { store: CrmStore; currency?: string; asOfDate?: string; children?: React.ReactNode }) {
-  // Contracts and documents ending within 30 days need attention, as Odoo's activity warnings show.
-  const soonDate = new Date();
+export default function HrHome({ store, asOfDate, children }: { store: CrmStore; currency?: string; asOfDate?: string; children?: React.ReactNode }) {
+  // Contracts and documents ending within 30 days (or already ended) need attention.
+  const soonDate = asOfDate ? new Date(`${asOfDate}T12:00:00Z`) : new Date();
   soonDate.setUTCDate(soonDate.getUTCDate() + 30);
   const soon = soonDate.toISOString().slice(0, 10);
   const count = (kind: string, test: (data: Record<string, string>) => boolean) => (store[kind] ?? []).filter((record) => test(record.data)).length;

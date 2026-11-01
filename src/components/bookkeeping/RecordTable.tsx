@@ -163,10 +163,14 @@ function displayValue(record: BookkeepingRecord, key: string, homeCurrency = "")
     const tone = onHand <= 0 ? "text-destructive" : reorder > 0 && onHand <= reorder ? "text-amber-600 dark:text-amber-400" : "";
     return <span className={`tabular-nums ${tone}`}>{onHand.toLocaleString(undefined, { maximumFractionDigits: 3 })}{onHand <= 0 ? " · Out of stock" : reorder > 0 && onHand <= reorder ? " · Low" : ""}</span>;
   }
+  // A tax rate is a percentage, not money.
+  if (key === "rate" && record.kind === "taxes") return <span className="tabular-nums">{Number(value) || 0}%</span>;
   if (["amount", "balance", "paidAmount", "openingBalance", "rate", "baseSalary", "cost"].includes(key)) {
-    const number = Number(value);
+    // A delayed credit lowers the invoice it goes on, so it shows as a minus.
+    const number = Number(value) * (key === "amount" && record.kind === "delayed-charges" && record.data.chargeType === "Credit" ? -1 : 1);
     if (Number.isFinite(number)) {
-      const currency = record.data.currency || "USD";
+      // Money is shown in the document's own currency, else the business's home currency.
+      const currency = record.data.currency || homeCurrency || "USD";
       try {
         return <span className="tabular-nums">{new Intl.NumberFormat(undefined, { style: "currency", currency, maximumFractionDigits: 2 }).format(number)}</span>;
       } catch {
@@ -221,6 +225,7 @@ export function recordActions(
   }
   const openBalance = Number(record.data.amount || 0) - Number(record.data.paidAmount || 0) - Number(record.data.creditApplied || 0);
   if (module.kind === "invoices" && openBalance > 0.004 && !["Draft", "Void", "Cancelled", "Paid"].includes(record.data.status ?? "")) add("remind", "Send reminder", Mail);
+  if ((module.kind === "estimates" || module.kind === "sales-orders") && !["Converted", "Declined", "Cancelled", "Expired"].includes(record.data.status ?? "")) add("convert", "Convert to invoice", ArrowRightLeft, true);
   if (module.kind === "estimates" && !["Converted", "Declined"].includes(record.data.status ?? "")) add("progress", "Progress invoice (part)", ArrowRightLeft);
   if (module.kind === "customers") add("ledger", "Ledger", BookOpenText, true);
   if (module.kind === "customers") add("statement", "Send statement", Mail);

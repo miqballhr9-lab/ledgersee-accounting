@@ -9,6 +9,8 @@ import { assertBooksOpen, documentDate } from "@/lib/closing";
 import { revalidatePath } from "@/lib/revalidate";
 
 import { db } from "@/db";
+import { assertDateOrder } from "@/lib/date-order";
+import { invoiceSequence, nextInvoiceNumber } from "@/lib/invoice-number";
 import { ActionError } from "@/lib/action-error";
 import { bookkeepingRecord, user } from "@/db/schema";
 import { assertCanRead, assertCanWrite, assertNotViewing, requireUser } from "@/lib/auth";
@@ -17,7 +19,7 @@ import { canReadKind } from "@/lib/permissions";
 import { syncAttachmentRepayments } from "@/lib/hr-rules";
 import { sendEmailOrThrow } from "@/lib/email";
 import { blobConfigured, blobUploadToken, createUploadUrl, privateBlobToken } from "@/lib/storage";
-import { dueDateForTerms, invoiceTax, parseInvoiceLines, serialList } from "@/lib/invoice-utils";
+import { dueDateForTerms, invoiceTax, taxAfterDiscount, parseInvoiceLines, serialList } from "@/lib/invoice-utils";
 import { defaultWarehouse, lotRegister, stockByWarehouse } from "@/lib/warehouses";
 import { reconcileItems, type ReconcileItem } from "@/lib/reconciliation";
 import { buildInventory, inventoryKinds, isInventoryItem } from "@/lib/inventory";
@@ -228,7 +230,7 @@ function amountFromLineItems(data: Record<string, string>, kind: string): Record
   if (taxRate > 100) throw new ActionError("Tax rate can’t be greater than 100%.");
   if (Number(data.taxRate) < 0 || Number(data.discount) < 0) throw new ActionError("Tax and discount values can’t be negative.");
   if (lines.some((line) => line.taxRate && (Number(line.taxRate) < 0 || Number(line.taxRate) > 100))) throw new ActionError("Each line’s tax rate must be between 0 and 100%.");
-  const taxAmount = invoiceTax(lines, taxRate);
+  const taxAmount = taxAfterDiscount(invoiceTax(lines, taxRate), subtotal, discount);
 
   return {
     ...data,
@@ -472,6 +474,13 @@ export async function saveBookkeepingRecord(kind: string, input: Record<string, 
   const me = await requireUser();
   await recordAudit(me, id ? "Edited" : "Added", kind, saved.id, saved.data);
   if (kind === "customers" || kind === "vendors") await syncOpeningBalance(me.id, kind, saved);
+  // A department typed on an employee joins the Departments list, so it can be picked and reported on.
+  if (kind === "employees" && saved.data.department?.trim()) {
+    const name = saved.data.department.trim();
+    const [known] = await db.select({ id: bookkeepingRecord.id }).from(bookkeepingRecord)
+      .where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "hr-departments"), sql`lower(trim(${bookkeepingRecord.data}->>'departmentName')) = ${name.toLowerCase()}`)).limit(1);
+    if (!known) await db.insert(bookkeepingRecord).values({ userId: me.id, kind: "hr-departments", data: { departmentName: name } });
+  }
   // Loan and advance deductions on a salary pay down the employee's salary attachments.
   if (kind === "payroll") await syncAttachmentRepayments(me.id);
   return saved;
@@ -483,22 +492,29 @@ export async function saveBookkeepingRecord(kind: string, input: Record<string, 
  * Once anything is paid on it, it is left as it is.
  */
 async function syncOpeningBalance(userId: string, kind: "customers" | "vendors", party: BookkeepingRecord) {
-  const docKind = kind === "customers" ? "invoices" : "bills";
   const amount = Math.round((Number(party.data.openingBalance) || 0) * 100) / 100;
-  const [existing] = await db.select().from(bookkeepingRecord)
-    .where(and(eq(bookkeepingRecord.userId, userId), eq(bookkeepingRecord.kind, docKind), sql`${bookkeepingRecord.data}->>'openingBalanceFor' = ${party.id}`)).limit(1);
-  if (existing && (Number(existing.data.paidAmount) || 0) > 0) return;
-  if (amount <= 0) {
-    if (existing) await db.delete(bookkeepingRecord).where(eq(bookkeepingRecord.id, existing.id));
-    return;
-  }
+  // What a supplier owes back (an advance paid to them) is a negative balance: a supplier credit.
+  const docKind = kind === "customers" ? "invoices" : amount < 0 ? "supplier-credits" : "bills";
+  const linked = await db.select().from(bookkeepingRecord)
+    .where(and(eq(bookkeepingRecord.userId, userId), inArray(bookkeepingRecord.kind, kind === "customers" ? ["invoices"] : ["bills", "supplier-credits"]), sql`${bookkeepingRecord.data}->>'openingBalanceFor' = ${party.id}`));
+  if (linked.some((row) => (Number(row.data.paidAmount) || 0) > 0 || (Number(row.data.appliedAmount) || 0) > 0)) return;
+  // One opening document of the right kind; one of the other kind (the sign changed) goes.
+  const stale = linked.filter((row) => row.kind !== docKind || amount === 0 || (kind === "customers" && amount < 0));
+  if (stale.length) await db.delete(bookkeepingRecord).where(inArray(bookkeepingRecord.id, stale.map((row) => row.id)));
+  const existing = linked.find((row) => !stale.includes(row));
+  if (amount === 0 || (kind === "customers" && amount < 0)) return;
+  const value = Math.abs(amount);
   const date = party.data.openingBalanceDate || await todayFor(userId);
+  // An opening balance falls due on the party's own terms, like any invoice or bill.
+  const dueDate = (party.data.paymentTerms && dueDateForTerms(date, party.data.paymentTerms)) || date;
   const name = party.data.name || party.data.company || (kind === "customers" ? "Customer" : "Supplier");
-  const line = JSON.stringify([{ itemId: "", name: "Opening balance", description: `Opening balance as of ${date}`, quantity: "1", rate: amount.toFixed(2) }]);
-  const common = { docType: "Opening balance", openingBalanceFor: party.id, amount: amount.toFixed(2), subtotal: amount.toFixed(2), taxAmount: "0", taxRate: "", lineItems: line, paidAmount: "0", memo: "Opening balance" };
+  const line = JSON.stringify([{ itemId: "", name: kind === "vendors" ? "Opening balance equity" : "Opening balance", description: `Opening balance as of ${date}`, quantity: "1", rate: value.toFixed(2) }]);
+  const common = { docType: "Opening balance", openingBalanceFor: party.id, amount: value.toFixed(2), subtotal: value.toFixed(2), taxAmount: "0", taxRate: "", lineItems: line, paidAmount: "0", memo: "Opening balance" };
   const data: Record<string, string> = kind === "customers"
-    ? { ...(existing?.data ?? {}), ...common, customer: name, customerId: party.id, invoiceNumber: "Opening balance", issueDate: date, dueDate: date, status: "Sent", paymentMethod: "Credit" }
-    : { ...(existing?.data ?? {}), ...common, vendor: name, billNumber: "Opening balance", billDate: date, dueDate: date, status: "Open", category: "Opening balance equity", paymentMethod: "Credit" };
+    ? { ...(existing?.data ?? {}), ...common, customer: name, customerId: party.id, invoiceNumber: "Opening balance", issueDate: date, dueDate, status: "Sent", paymentMethod: "Credit" }
+    : docKind === "supplier-credits"
+    ? { ...(existing?.data ?? {}), ...common, vendor: name, vendorId: party.id, creditNumber: "Opening balance", date, status: "Open", category: "Opening balance equity" }
+    : { ...(existing?.data ?? {}), ...common, vendor: name, vendorId: party.id, billNumber: "Opening balance", billDate: date, dueDate, status: "Open", category: "Opening balance equity", paymentMethod: "Credit" };
   if (existing) await db.update(bookkeepingRecord).set({ data, updatedAt: new Date() }).where(eq(bookkeepingRecord.id, existing.id));
   else await db.insert(bookkeepingRecord).values({ userId, kind: docKind, data });
 }
@@ -525,13 +541,20 @@ async function saveRecord(
   }
   let data = amountFromLineItems(payload, kind);
   data = keepServerOwned(kind, data, current?.data);
+  assertDateOrder(kind, data);
   await assertNotDuplicate(me.id, kind, data, id);
   if (kind === "purchase-orders" && !id) data = { ...data, status: "Draft" };
   if (kind === "mileage") {
     const distance = Number(data.distance);
     if (!Number.isFinite(distance) || distance <= 0) throw new ActionError("Enter the distance in km.");
-    const rate = Number(data.rate) || 0;
-    data = { ...data, tripType: data.tripType || "Business", amount: (distance * Math.max(0, rate)).toFixed(2) };
+    // A trip without a rate takes the rate of the last trip that had one.
+    let rate = Number(data.rate) || 0;
+    if (!(rate > 0)) {
+      const trips = await db.select().from(bookkeepingRecord).where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "mileage"))).orderBy(desc(bookkeepingRecord.createdAt));
+      rate = Number(trips.find((trip) => trip.id !== id && Number(trip.data.rate) > 0)?.data.rate) || 0;
+      if (!(rate > 0)) throw new ActionError("Enter the rate per km, e.g. your fuel allowance rate. Later trips start from it.");
+    }
+    data = { ...data, rate: String(rate), tripType: data.tripType || "Business", amount: (distance * Math.max(0, rate)).toFixed(2) };
   }
   if (kind === "time-activities") {
     const hours = Number(data.hours);
@@ -555,6 +578,8 @@ async function saveRecord(
   if (kind === "items") {
     if (data.itemType === "Product") data.itemType = "Inventory";
     if (!["Inventory", "Non-inventory", "Service", "Bundle"].includes(data.itemType || "Inventory")) throw new ActionError("Choose Inventory, Non-inventory, Service or Bundle.");
+    // Opening stock needs its cost, or the stock is worth nothing and its sales cost nothing.
+    if ((data.itemType || "Inventory") === "Inventory" && Number(data.openingQty) > 0 && !(Number(data.cost) > 0) && (!current || current.data.openingQty !== data.openingQty)) throw new ActionError("Enter the purchase cost for the initial quantity on hand, so the stock has a value and its sales have a cost.");
     // Item accounts must be accounts in this chart of accounts.
     const accountIds = [data.incomeAccountId, data.expenseAccountId, data.assetAccountId].filter(Boolean) as string[];
     if (accountIds.length) {
@@ -702,6 +727,17 @@ async function saveRecord(
     const { amountPaid: _amountPaid, ...withoutAmountPaid } = data;
     data = withoutAmountPaid;
   }
+  if (kind === "invoices" || kind === "bills") {
+    // Paid and part paid come from money actually received or paid, and overdue from the due
+    // date, never from the status box: an invoice can't be marked paid with nothing received.
+    const settled = (Number(data.paidAmount) || 0) + (Number(data.creditApplied) || 0);
+    const total = Number(data.amount) || 0;
+    const truth = settled <= 0.005 ? "" : settled >= total - 0.005 ? "Paid" : "Partially Paid";
+    const open = kind === "invoices" ? (current?.data.status && !["Paid", "Partially Paid", "Overdue"].includes(current.data.status) ? current.data.status : "Sent") : "Open";
+    if (["Paid", "Partially Paid", "Overdue"].includes(data.status ?? "") || truth) {
+      if (data.docType !== "Opening balance" && data.status !== "Cancelled") data = { ...data, status: truth || open };
+    }
+  }
   if (kind === "accounts") {
     const accountRows = await db
       .select()
@@ -749,6 +785,11 @@ async function saveRecord(
   }
   if (["invoices", "estimates", "sales-orders", "credit-notes", "recurring-invoices", "purchase-orders"].includes(kind) && !data.lineItems?.trim()) {
     throw new ActionError("Add at least one item or service before saving.");
+  }
+  if (kind === "recurring-invoices") {
+    // A schedule needs a date to run on, and is active until someone pauses it.
+    if (!isIsoDate(data.nextDate)) throw new ActionError("Choose the next invoice date for this schedule.");
+    data = { ...data, status: data.status === "Paused" ? "Paused" : "Active", frequency: ["Weekly", "Monthly", "Quarterly", "Yearly"].includes(data.frequency ?? "") ? data.frequency : "Monthly" };
   }
   if (kind === "journals" && data.lines) {
     if (!data.date || !data.reference) throw new ActionError("Enter the journal date and number.");
@@ -963,11 +1004,12 @@ async function saveRecord(
       .orderBy(desc(bookkeepingRecord.updatedAt))
       .limit(1);
     if (settings) {
-      const invoiceSequence = Number(data.invoiceNumber.replace(/\D/g, ""));
-      if (Number.isFinite(invoiceSequence) && invoiceSequence >= Number(settings.data.nextInvoiceNumber || 1)) {
+      // Only a number in the series moves it on: a stray long number never makes a gap.
+      const sequenceNumber = invoiceSequence(data.invoiceNumber, settings.data.invoicePrefix || "INV-");
+      if (sequenceNumber > 0 && sequenceNumber >= Number(settings.data.nextInvoiceNumber || 1)) {
         await db
           .update(bookkeepingRecord)
-          .set({ data: { ...settings.data, nextInvoiceNumber: String(invoiceSequence + 1) }, updatedAt: new Date() })
+          .set({ data: { ...settings.data, nextInvoiceNumber: String(sequenceNumber + 1) }, updatedAt: new Date() })
           .where(and(eq(bookkeepingRecord.id, settings.id), eq(bookkeepingRecord.userId, me.id)));
       }
     }
@@ -2098,7 +2140,7 @@ export async function convertBookkeepingRecord(id: string, target?: string, perc
       ...sourceData,
       ...(targetKind === "invoices"
         ? {
-            invoiceNumber: await nextDocumentNumber(transaction, me.id, "invoices", "invoiceNumber", "INV-"),
+            invoiceNumber: await nextInvoiceNumber(me.id),
             issueDate: today,
             paymentTerms: terms,
             dueDate: dueDateForTerms(today, terms),
@@ -2795,14 +2837,15 @@ export async function generateRecurringInvoice(id: string): Promise<void> {
     .where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "settings")))
     .orderBy(desc(bookkeepingRecord.updatedAt))
     .limit(1);
-  const sequence = Math.max(1, Number(settings?.data.nextInvoiceNumber) || 1);
   const prefix = settings?.data.invoicePrefix || "INV-";
+  const generatedNumber = await nextInvoiceNumber(me.id);
+  const sequence = invoiceSequence(generatedNumber, prefix) || 1;
   const today = await todayFor(me.id);
   // The schedule's own terms, else the customer's.
   const terms = paymentTermOptions.includes(schedule.data.paymentTerms ?? "") ? schedule.data.paymentTerms : await termsFor(me.id, "customers", schedule.data.customer);
   const invoiceData = amountFromLineItems({
     ...schedule.data,
-    invoiceNumber: `${prefix}${String(sequence).padStart(4, "0")}`,
+    invoiceNumber: generatedNumber,
     issueDate: today,
     paymentTerms: terms,
     dueDate: dueDateForTerms(today, terms),
@@ -3045,13 +3088,8 @@ export async function duplicateInvoiceRecord(id: string): Promise<BookkeepingRec
     .where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "settings")))
     .orderBy(desc(bookkeepingRecord.updatedAt))
     .limit(1);
-  const invoices = settings ? [] : await db
-    .select()
-    .from(bookkeepingRecord)
-    .where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "invoices")));
-  const sequence = Math.max(1, Number(settings?.data.nextInvoiceNumber) || invoices.length + 1);
-  const prefix = settings?.data.invoicePrefix || "INV-";
-  const invoiceNumber = `${prefix}${String(sequence).padStart(4, "0")}`;
+  const invoiceNumber = await nextInvoiceNumber(me.id);
+  const sequence = invoiceSequence(invoiceNumber, settings?.data.invoicePrefix || "INV-") || 1;
   const issueDate = await todayFor(me.id);
   const paymentTerms = invoice.data.paymentTerms || "30 days";
   const duplicateData: Record<string, string> = { ...invoice.data, invoiceNumber, issueDate, dueDate: dueDateForTerms(issueDate, paymentTerms), paymentTerms, status: "Draft", paidAmount: "0", creditApplied: "0" };

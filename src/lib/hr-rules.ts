@@ -147,8 +147,9 @@ export function applyHrRules(kind: string, data: Record<string, string>, existin
     if (!days) throw new ActionError("Those dates are all Sundays or public holidays, so no time off is needed.");
     data.days = String(days);
     const type = context.byKind("hr-leave-types").find((row) => row.id === data.leaveTypeId);
-    // As in Odoo, a type with no validation is approved as soon as it is asked for.
-    if (!data.status) data.status = !existing && type?.data.approval === "No validation" ? "Approved" : "To Approve";
+    // A type with no validation is approved as soon as it is asked for, whatever the form's status box said.
+    if (!existing && type?.data.approval === "No validation" && !["Refused", "Cancelled"].includes(data.status ?? "")) data.status = "Approved";
+    if (!data.status) data.status = "To Approve";
     const overlapping = context.byKind("hr-leaves").find((row) => row.id !== id && (isToApprove(row.data.status) || row.data.status === "Approved") && sameEmployee(row.data, data) && row.data.fromDate <= data.toDate && row.data.toDate >= data.fromDate);
     if (overlapping && data.status !== "Refused" && data.status !== "Cancelled") throw new ActionError(`${data.employee} already has time off from ${overlapping.data.fromDate} to ${overlapping.data.toDate}.`);
     // Two-step approval: the first approval moves the request to Second Approval; another person approves it.
@@ -236,7 +237,7 @@ export function applyHrRules(kind: string, data: Record<string, string>, existin
   if (kind === "hr-lunch-orders" && !data.status) data.status = "Ordered";
   if (kind === "hr-vehicles" && !data.status) data.status = "Registered";
   if (kind === "hr-vehicle-services" && !data.status) data.status = "Done";
-  if (kind === "hr-courses" && !data.status) data.status = "Published";
+  if (kind === "hr-courses" && !data.status) data.status = "Draft";
 
   if (kind === "hr-enrolments") {
     // Progress and status move together: 100% is completed, and completing sets 100%.
@@ -417,6 +418,9 @@ export async function afterHrSave(userId: string, kind: string, before: Record<s
   if (kind === "hr-candidates" && isHiredStage(data.stage) && !isHiredStage(before?.stage) && !data.hiredEmployeeId) {
     const employeeId = await nextEmployeeId(userId);
     const today = await todayFor(userId);
+    // The job position the candidate applied for brings its department, as a hire made by hand would have.
+    const jobTitle = (data.job ?? "").trim().toLowerCase();
+    const position = jobTitle ? (await db.select().from(bookkeepingRecord).where(and(eq(bookkeepingRecord.userId, userId), eq(bookkeepingRecord.kind, "hr-jobs")))).find((row) => row.id === data.jobId || (row.data.jobTitle ?? "").trim().toLowerCase() === jobTitle) : undefined;
     const [employee] = await db.insert(bookkeepingRecord).values({
       userId,
       kind: "employees",
@@ -426,7 +430,8 @@ export async function afterHrSave(userId: string, kind: string, before: Record<s
         email: data.email ?? "",
         mobile: data.phone ?? "",
         designation: data.job ?? "",
-        joiningDate: today,
+        department: position?.data.department ?? "",
+        joiningDate: data.joiningDate || today,
         baseSalary: data.proposedSalary || data.expectedSalary || "0",
         status: "Active",
         cnic: "",
@@ -434,7 +439,7 @@ export async function afterHrSave(userId: string, kind: string, before: Record<s
       },
     }).returning();
     for (const [index, task] of (await planFor(userId, "onboardingPlan", onboardingChecklist)).entries()) {
-      const due = new Date();
+      const due = new Date(`${today}T12:00:00Z`);
       due.setUTCDate(due.getUTCDate() + (index < 3 ? 0 : 7));
       await db.insert(bookkeepingRecord).values({
         userId,

@@ -7,6 +7,7 @@ import { revalidatePath } from "@/lib/revalidate";
 import { db } from "@/db";
 import { bookkeepingRecord } from "@/db/schema";
 import { saveBookkeepingRecord } from "@/app/actions";
+import { assertDateOrder } from "@/lib/date-order";
 import { ActionError } from "@/lib/action-error";
 import { assertCanWrite, requireUser } from "@/lib/auth";
 import type { BookkeepingRecord, RecordKind } from "@/lib/bookkeeping-types";
@@ -466,6 +467,7 @@ export async function saveCrmRecord(kind: string, input: Record<string, string>,
     if (!existing) throw new ActionError(`We couldn’t find that ${mod.label.toLowerCase()}. Refresh and try again.`);
   }
   let data = buildData(mod, input, context, existing?.data, me.name, existing?.id);
+  assertDateOrder(kind, data);
   // One vehicle per registration number.
   if (kind === "hr-vehicles" && data.plate?.trim()) {
     const plate = data.plate.replace(/[\s-]/g, "").toLowerCase();

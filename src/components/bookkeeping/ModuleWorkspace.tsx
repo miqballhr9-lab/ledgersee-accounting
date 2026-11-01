@@ -203,8 +203,12 @@ function createDefaults(module: ModuleDefinition, records: BookkeepingRecord[], 
   const dueDate = new Date(today);
   dueDate.setDate(today.getDate() + 30);
   const settings = records.find((record) => record.kind === "settings")?.data;
-  const sequence = Math.max(1, Number(settings?.nextInvoiceNumber) || records.filter((record) => record.kind === "invoices").length + 1);
   const prefix = settings?.invoicePrefix || "INV-";
+  // As the server numbers them: one after the highest in the series, or Settings' next number when further on.
+  const seriesPattern = new RegExp(`^${prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(\\d{1,6})$`);
+  const highestInvoice = records.reduce((max, record) => record.kind === "invoices" ? Math.max(max, Number(seriesPattern.exec(record.data.invoiceNumber ?? "")?.[1] ?? 0)) : max, 0);
+  const configuredNext = Number(settings?.nextInvoiceNumber) || 1;
+  const sequence = Math.max(highestInvoice + 1, configuredNext > 999_999 ? 1 : configuredNext);
 
   if (module.kind === "items") values.itemType = "Inventory";
   if (module.kind === "customers") values.customerNumber = nextPartyNumber("customers", records);
@@ -225,6 +229,16 @@ function createDefaults(module: ModuleDefinition, records: BookkeepingRecord[], 
     values.currency = defaultCurrency;
     values.exchangeRate = "1";
     values.status = "Draft";
+  }
+  if (module.kind === "mileage") {
+    values.date = dateString(today);
+    values.tripType = "Business";
+    values.rate = [...records].filter((record) => record.kind === "mileage" && Number(record.data.rate) > 0).sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0]?.data.rate ?? "";
+  }
+  if (module.kind === "recurring-invoices") {
+    values.status = "Active";
+    values.frequency = "Monthly";
+    values.nextDate = dateString(today);
   }
   if (module.kind === "sales-orders") {
     values.orderNumber = `SO-${String(records.filter((record) => record.kind === "sales-orders").length + 1).padStart(4, "0")}`;
@@ -281,10 +295,10 @@ function createDefaults(module: ModuleDefinition, records: BookkeepingRecord[], 
   }
   if (module.kind === "bank-rules" || module.kind === "taxes" || module.kind === "team-members") values.enabled = "true";
   if (module.kind === "team-members") values.canApprove = "false";
-  if (module.kind === "bank-accounts") values.currency = settings?.currency || "USD";
+  if (module.kind === "bank-accounts") values.currency = settings?.currency || defaultCurrency || "USD";
   if (module.kind === "settings") {
     values.companyName = settings?.companyName || "";
-    values.currency = settings?.currency || "USD";
+    values.currency = settings?.currency || defaultCurrency || "USD";
     values.fiscalYear = settings?.fiscalYear || "January";
     values.invoicePrefix = settings?.invoicePrefix || "INV-";
     values.nextInvoiceNumber = settings?.nextInvoiceNumber || "1";
@@ -471,11 +485,14 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
       ] satisfies Card[];
     }
     if (module.kind === "estimates") {
-      const open = withStatus("Draft", "Sent");
+      // A quote past its expiry date is no longer open.
+      const expired = (record: BookkeepingRecord) => record.data.status === "Expired" || (["Draft", "Sent"].includes(record.data.status ?? "") && Boolean(record.data.expiryDate) && (record.data.expiryDate ?? "") < todayHere());
+      const open = withStatus("Draft", "Sent").filter((record) => !expired(record));
       return [
         { label: "Open quotes", value: money(total(open)), note: count(open.length, "estimate", "estimates") },
         { label: "Accepted", value: money(total(withStatus("Accepted"))), note: count(withStatus("Accepted").length, "estimate", "estimates") },
         { label: "Converted", value: String(withStatus("Converted").length), note: "Turned into invoices or orders" },
+        { label: "Expired", value: String(records.filter(expired).length), note: "Past their expiry date", tone: records.some(expired) ? "bad" : undefined },
         { label: "Declined", value: String(withStatus("Declined").length), tone: withStatus("Declined").length ? "bad" : undefined },
       ] satisfies Card[];
     }
@@ -501,7 +518,7 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
       const withEmail = records.filter((record) => record.data.email).length;
       return [
         { label: "Customers", value: String(records.length) },
-        { label: "Businesses", value: String(records.filter((record) => record.data.customerType === "Business").length) },
+        { label: "Businesses", value: String(records.filter((record) => record.data.customerType === "Business" || (record.data.customerType !== "Individual" && Boolean(record.data.company?.trim()))).length) },
         { label: "With email", value: String(withEmail), note: "Can be emailed invoices" },
         { label: "Opening balances", value: money(records.reduce((sum, record) => sum + Number(record.data.openingBalance || 0), 0)) },
       ] satisfies Card[];

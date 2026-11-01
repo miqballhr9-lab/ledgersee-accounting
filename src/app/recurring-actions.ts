@@ -6,6 +6,7 @@ import { and, eq } from "drizzle-orm";
 import { recordExpensePayment, saveBookkeepingRecord } from "@/app/actions";
 import { db } from "@/db";
 import { bookkeepingRecord } from "@/db/schema";
+import { nextInvoiceNumber } from "@/lib/invoice-number";
 import { ActionError } from "@/lib/action-error";
 import { assertCanWrite, requireUser } from "@/lib/auth";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
@@ -24,7 +25,7 @@ async function rows(userId: string, kind: string) {
 
 /** The next number after the highest one using this prefix, e.g. INV-0012 → INV-0013. */
 function nextNumber(existing: StoredRow[], key: string, prefix: string) {
-  const pattern = new RegExp(`^${prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(\\d+)$`);
+  const pattern = new RegExp(`^${prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(\\d{1,6})$`);
   const highest = existing.reduce((max, row) => Math.max(max, Number(pattern.exec(row.data[key] ?? "")?.[1] ?? 0)), 0);
   return `${prefix}${String(highest + 1).padStart(4, "0")}`;
 }
@@ -33,10 +34,8 @@ function nextNumber(existing: StoredRow[], key: string, prefix: string) {
 async function transactionFor(userId: string, kind: RecurringKind, payload: Record<string, string>, date: string) {
   const data = Object.fromEntries(Object.entries(payload).filter(([key]) => !perTransactionKeys.includes(key)));
   if (kind === "invoices") {
-    const [settings] = await rows(userId, "settings");
-    const prefix = settings?.data.invoicePrefix || "INV-";
     const status = ["Paid", "Partially Paid", "Void"].includes(data.status ?? "") ? "Sent" : data.status || "Sent";
-    return { ...data, invoiceNumber: nextNumber(await rows(userId, "invoices"), "invoiceNumber", prefix), issueDate: date, paymentMethod: "Credit", status };
+    return { ...data, invoiceNumber: await nextInvoiceNumber(userId), issueDate: date, paymentMethod: "Credit", status };
   }
   if (kind === "bills") {
     return { ...data, billNumber: nextNumber(await rows(userId, "bills"), "billNumber", "BILL-"), billDate: date, dueDate: dueDateForTerms(date, data.paymentTerms || "") || date, paymentMethod: "Credit", status: "Open" };

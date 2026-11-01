@@ -166,7 +166,7 @@ export default function PurchasesHub({ bills, expenses, purchaseOrders, supplier
       key: `order-${order.id}`, kind: "purchase-orders", id: order.id, type: "Purchase order",
       date: order.data.date || order.createdAt.slice(0, 10), number: order.data.poNumber || "", payee: order.data.vendor || "", dueDate: order.data.expectedDate || "",
       balance: 0, total: entered * homeRate(order.data, currency), docTotal: entered, docCurrency: order.data.currency || currency,
-      status: order.data.status || "Draft", href: `/app/purchase-orders?open=${order.id}`, printHref: "", payable: false,
+      status: order.data.convertedKind ? "Billed" : order.data.status || "Draft", href: `/app/purchase-orders?open=${order.id}`, printHref: "", payable: false,
     });
   }
   for (const credit of supplierCredits) {
@@ -183,7 +183,7 @@ export default function PurchasesHub({ bills, expenses, purchaseOrders, supplier
   // The money bar, over the last 365 days.
   const yearAgo = shiftDate(asOfDate, 365);
   const monthAgo = shiftDate(asOfDate, 30);
-  const openOrders = rows.filter((row) => row.type === "Purchase order" && ["Purchase Order", "Partially received"].includes(row.status) && row.date >= yearAgo);
+  const openOrders = rows.filter((row) => row.type === "Purchase order" && !["Received", "Closed", "Cancelled", "Converted", "Billed"].includes(row.status) && row.date >= yearAgo);
   const openOrdersTotal = openOrders.reduce((sum, row) => sum + row.total, 0);
   const openBills = rows.filter((row) => row.type === "Bill" && row.payable && row.date >= yearAgo);
   const overdueBills = openBills.filter((row) => row.status === "Overdue");

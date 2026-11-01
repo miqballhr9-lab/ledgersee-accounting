@@ -1,6 +1,6 @@
 "use server";
 
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 
 import { db } from "@/db";
 import { bookkeepingRecord } from "@/db/schema";
@@ -97,6 +97,18 @@ export async function applyCountryPack(code: CountryCode, options: ApplyPackOpti
       return { userId: me.id, kind: "accounts", data: { code: accountCode, name: account.name, description: account.description, ...chartAccount(account) } };
     });
     if (newAccounts.length) await transaction.insert(bookkeepingRecord).values(newAccounts);
+
+    // Accounts only another country's set uses (a US unemployment tax account in a Pakistan business,
+    // left from an earlier choice of country) go, as long as nothing was ever posted to them.
+    const ownNames = new Set(pack.accounts.map((account) => account.name.toLowerCase()));
+    const foreignNames = new Set(Object.values(countryPacks).flatMap((other) => other.accounts.map((account) => account.name.toLowerCase())).filter((name) => !ownNames.has(name)));
+    for (const account of accounts) {
+      const name = account.data.name?.trim() ?? "";
+      if (!foreignNames.has(name.toLowerCase()) || Number(account.data.openingBalance)) continue;
+      const [used] = await transaction.select({ id: bookkeepingRecord.id }).from(bookkeepingRecord)
+        .where(and(eq(bookkeepingRecord.userId, me.id), sql`${bookkeepingRecord.kind} <> 'accounts'`, sql`${bookkeepingRecord.data}::text ilike ${`%${name.replace(/[\\%_]/g, "\\$&")}%`}`)).limit(1);
+      if (!used) await transaction.delete(bookkeepingRecord).where(eq(bookkeepingRecord.id, account.id));
+    }
 
     const settings = existing.find((row) => row.kind === "settings");
     const settingsData: Record<string, string> = {

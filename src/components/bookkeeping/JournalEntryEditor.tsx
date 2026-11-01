@@ -239,7 +239,8 @@ export default function JournalEntryEditor({ accounts, record, defaults, currenc
   const formRef = useRef<HTMLFormElement>(null);
   const attachmentInputRef = useRef<HTMLInputElement>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
-  const accountOptions = accounts.filter((account) => account.data.name?.trim());
+  // In name order, so an account is found by typing its first letters in the open list.
+  const accountOptions = accounts.filter((account) => account.data.name?.trim()).sort((a, b) => (a.data.name ?? "").localeCompare(b.data.name ?? ""));
   const displayCurrency = record?.data.currency || currency;
   const customerNames = useMemo(() => contactNames(customers), [customers]);
   const supplierNames = useMemo(() => contactNames(vendors), [vendors]);
@@ -556,10 +557,10 @@ export default function JournalEntryEditor({ accounts, record, defaults, currenc
                         </Select>
                       </td>
                       <td className={`p-0 ${cellBorder}`}>
-                        <Input aria-label={`Debit for line ${index + 1}`} type="number" min="0" step="0.01" inputMode="decimal" value={line.debit} onChange={(event) => updateLine(line.id, "debit", event.target.value)} className={`${cellInput} text-right tabular-nums`} />
+                        <Input aria-label={`Debit for line ${index + 1}`} type="number" min="0" step="0.01" inputMode="decimal" value={line.debit} onChange={(event) => updateLine(line.id, "debit", event.target.value)} onFocus={(event) => event.currentTarget.select()} className={`${cellInput} text-right tabular-nums`} />
                       </td>
                       <td className={`p-0 ${cellBorder}`}>
-                        <Input aria-label={`Credit for line ${index + 1}`} type="number" min="0" step="0.01" inputMode="decimal" value={line.credit} onChange={(event) => updateLine(line.id, "credit", event.target.value)} className={`${cellInput} text-right tabular-nums`} />
+                        <Input aria-label={`Credit for line ${index + 1}`} type="number" min="0" step="0.01" inputMode="decimal" value={line.credit} onChange={(event) => updateLine(line.id, "credit", event.target.value)} onFocus={(event) => event.currentTarget.select()} className={`${cellInput} text-right tabular-nums`} />
                       </td>
                       <td className={`p-0 ${cellBorder}`}>
                         <Input aria-label={`Description for line ${index + 1}`} value={line.description} onChange={(event) => updateLine(line.id, "description", event.target.value)} maxLength={300} className={cellInput} />

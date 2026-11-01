@@ -136,7 +136,7 @@ export default function AutomationWorkspace({ mode: initialMode, rules, log }: A
         <div className="min-w-0">
           <p className="text-xs font-medium uppercase tracking-[0.12em] text-primary">Organization / Automation</p>
           <h1 className="mt-1 text-[26px] font-semibold tracking-tight sm:text-3xl">Automation</h1>
-          <p className="mt-1.5 max-w-2xl text-sm text-muted-foreground">Automation rules and scheduled actions, as in Odoo. Switch to Automation mode to let due rules run on their own; Manual mode keeps everything in your hands.</p>
+          <p className="mt-1.5 max-w-2xl text-sm text-muted-foreground">Automation rules and scheduled actions. Switch to Automation mode to let due rules run on their own; Manual mode keeps everything in your hands.</p>
         </div>
         <Button type="button" className="gap-2" onClick={newRule}><Plus size={15} />New rule</Button>
       </header>

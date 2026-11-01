@@ -45,6 +45,7 @@ export default async function HrHomePage() {
         celebrations={upcomingCelebrations(employees, today)}
         missingLeaveTypes={standardTypes.filter((name) => !typeNames.has(name.toLowerCase()))}
         canManage={canWriteKind(me.role, "hr-leave-types")}
+        expiredDocuments={(store["hr-documents"] ?? []).filter((doc) => doc.data.expiryDate && doc.data.expiryDate < today && doc.data.status !== "Archived").map((doc) => ({ id: doc.id, name: doc.data.documentName || doc.data.documentType || "Document", employee: doc.data.employee || "Employee", expiry: doc.data.expiryDate ?? "" }))}
       />
     </HrHome>
   );

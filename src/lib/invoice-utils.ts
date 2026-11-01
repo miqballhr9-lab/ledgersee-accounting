@@ -77,6 +77,15 @@ export function invoiceTax(lines: Array<Pick<InvoiceLineData, "quantity" | "rate
   }, 0);
 }
 
+/**
+ * A discount comes off before tax, so tax is charged on what the customer actually pays for
+ * (a trade discount lowers the taxable value): the tax shrinks in step with the discount.
+ */
+export function taxAfterDiscount(tax: number, subtotal: number, discount: number): number {
+  if (!(subtotal > 0) || !(discount > 0)) return tax;
+  return tax * (1 - Math.min(discount, subtotal) / subtotal);
+}
+
 export function dueDateForTerms(issueDate: string, terms: string): string {
   if (!issueDate) return "";
   const dueDate = new Date(`${issueDate}T12:00:00.000Z`);

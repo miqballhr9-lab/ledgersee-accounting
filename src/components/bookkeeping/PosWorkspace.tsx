@@ -18,7 +18,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { readableError } from "@/lib/action-error";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
 import { isInventoryItem } from "@/lib/inventory";
-import { currencyAmount, invoiceTax } from "@/lib/invoice-utils";
+import { currencyAmount, invoiceTax, taxAfterDiscount } from "@/lib/invoice-utils";
 import { receivingAccountType } from "@/lib/payment-accounts";
 import { customerPriceBook, priceBookPrice } from "@/lib/price-books";
 import { useHeldSales, type HeldSale } from "@/lib/pos-held";
@@ -140,12 +140,20 @@ export default function PosWorkspace({ items, customers, priceBooks = [], accoun
   const taxRate = tax ? num(tax.data.rate) : 0;
   const subtotal = cart.reduce((sum, line) => sum + line.price * line.quantity, 0);
   const discountValue = Math.min(Math.max(0, num(discount)), subtotal);
-  const taxValue = invoiceTax(cart.map((line) => ({ quantity: String(line.quantity), rate: String(line.price) })), taxRate);
+  const taxValue = taxAfterDiscount(invoiceTax(cart.map((line) => ({ quantity: String(line.quantity), rate: String(line.price) })), taxRate), subtotal, discountValue);
   const total = Math.max(0, subtotal + taxValue - discountValue);
   const cashGiven = num(tendered);
   const change = Math.max(0, cashGiven - total);
 
-  // Today's takings at the till.
+  // Two customers with the same name are told apart by their number, phone or email.
+  const customerLabel = (entry: BookkeepingRecord) => {
+    const name = entry.data.name?.trim() ?? "";
+    const twins = customers.filter((other) => other.data.name?.trim().toLowerCase() === name.toLowerCase()).length > 1;
+    const detail = entry.data.customerNumber || entry.data.phone || entry.data.mobile || entry.data.email || "";
+    return twins && detail ? `${name} · ${detail}` : name;
+  };
+
+  // Today's takings at the till, less what was refunded today.
   const todays = receipts.filter((receipt) => receipt.data.posSale === "true" && receipt.data.issueDate === today);
   const takings = todays.reduce((sum, receipt) => sum + num(receipt.data.amount), 0);
   const byMethod = (method: string) => todays.filter((receipt) => receipt.data.posPayment === method).reduce((sum, receipt) => sum + num(receipt.data.amount), 0);
@@ -410,7 +418,7 @@ export default function PosWorkspace({ items, customers, priceBooks = [], accoun
           <Button type="button" variant="outline" className="h-auto gap-2 self-stretch" onClick={() => setHeldOpen(true)} disabled={!held.length}><PauseCircle size={15} />Held{held.length ? <span className="rounded-full bg-primary px-1.5 text-[11px] font-semibold text-primary-foreground">{held.length}</span> : null}</Button>
           <Button type="button" variant="outline" className="h-auto gap-2 self-stretch" onClick={() => setSalesOpen(true)}><ReceiptText size={15} />Sales</Button>
           <Button type="button" variant="outline" className="h-auto gap-2 self-stretch" onClick={() => setReturning(true)} disabled={!receipts.length}><Undo2 size={15} />Return / refund</Button>
-          {[["Today's sales", String(todays.length)], ["Takings", money(takings)], ["Cash", money(byMethod("Cash"))], ["Card", money(byMethod("Card"))], ...(todaysReturns ? [["Refunds", `−${money(todaysReturns)}`]] : [])].map(([label, value]) => (
+          {[["Today's sales", String(todays.length)], ["Takings", money(takings - todaysReturns)], ["Cash", money(byMethod("Cash"))], ["Card", money(byMethod("Card"))], ...(todaysReturns ? [["Refunds", `−${money(todaysReturns)}`]] : [])].map(([label, value]) => (
             <div key={label} className="rounded-lg border border-border bg-card px-3 py-2">
               <p className="text-[11px] text-muted-foreground">{label}</p>
               <p className="font-semibold tabular-nums">{value}</p>
@@ -455,14 +463,14 @@ export default function PosWorkspace({ items, customers, priceBooks = [], accoun
                   const out = stocked && left <= 0;
                   return (
                     <button key={item.id} type="button" onClick={() => add(item)} disabled={out}
-                      className="flex min-h-28 flex-col justify-between rounded-lg border border-border bg-background p-3 text-left transition-colors hover:border-primary hover:bg-primary/5 disabled:cursor-not-allowed disabled:opacity-50">
+                      className="flex min-h-28 min-w-0 flex-col justify-between overflow-hidden rounded-lg border border-border bg-background p-3 text-left transition-colors hover:border-primary hover:bg-primary/5 disabled:cursor-not-allowed disabled:opacity-50">
                       <span className="flex items-start gap-2">
                         <span className="grid size-8 shrink-0 place-items-center rounded-md bg-primary/10 text-primary"><Package size={16} /></span>
                         <span className="line-clamp-2 text-sm font-medium leading-snug">{item.data.name}</span>
                       </span>
-                      <span className="mt-2 flex items-end justify-between gap-2">
-                        <span className="font-semibold tabular-nums">{money(num(item.data.rate))}</span>
-                        <span className={`text-[11px] ${out ? "text-destructive" : "text-muted-foreground"}`}>{stocked ? (out ? "Out of stock" : `${left} left`) : item.data.itemType === "Non-inventory" ? "Non-stock" : "Service"}</span>
+                      <span className="mt-2 flex min-w-0 flex-wrap items-end justify-between gap-x-2 gap-y-0.5">
+                        <span className="min-w-0 truncate font-semibold tabular-nums">{money(num(item.data.rate))}</span>
+                        <span className={`shrink-0 whitespace-nowrap text-[11px] ${out ? "text-destructive" : "text-muted-foreground"}`}>{stocked ? (out ? "Out of stock" : `${left} left`) : item.data.itemType === "Non-inventory" ? "Non-stock" : "Service"}</span>
                       </span>
                     </button>
                   );
@@ -492,10 +500,10 @@ export default function PosWorkspace({ items, customers, priceBooks = [], accoun
           <div className="space-y-2 border-b border-border p-3">
             <Label htmlFor="pos-customer" className="text-xs text-muted-foreground">Customer</Label>
             <Select value={customer} onValueChange={(value) => setCustomer(value ?? WALK_IN)}>
-              <SelectTrigger id="pos-customer" className="w-full"><SelectValue>{customers.find((entry) => entry.id === customer)?.data.name ?? WALK_IN}</SelectValue></SelectTrigger>
+              <SelectTrigger id="pos-customer" className="w-full"><SelectValue>{(() => { const chosen = customers.find((entry) => entry.id === customer); return chosen ? customerLabel(chosen) : WALK_IN; })()}</SelectValue></SelectTrigger>
               <SelectContent>
                 <SelectItem value={WALK_IN}>{WALK_IN}</SelectItem>
-                {customers.filter((entry) => entry.data.name?.trim()).map((entry) => <SelectItem key={entry.id} value={entry.id}>{entry.data.name}</SelectItem>)}
+                {customers.filter((entry) => entry.data.name?.trim()).map((entry) => <SelectItem key={entry.id} value={entry.id}>{customerLabel(entry)}</SelectItem>)}
               </SelectContent>
             </Select>
           </div>

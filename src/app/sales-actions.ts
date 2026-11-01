@@ -5,6 +5,7 @@ import { and, eq } from "drizzle-orm";
 
 import { db } from "@/db";
 import { bookkeepingRecord } from "@/db/schema";
+import { nextInvoiceNumber } from "@/lib/invoice-number";
 import { ActionError } from "@/lib/action-error";
 import { recordAudit } from "@/lib/audit";
 import { assertCanWrite, requireUser } from "@/lib/auth";
@@ -109,6 +110,13 @@ export async function sendCustomerStatement(customerId: string): Promise<{ invoi
   return { invoices: open.length, balance: Math.round(total * 100) / 100 };
 }
 
+/** The business's default sales tax, which a new invoice starts with, as the invoice form does. */
+async function defaultSalesTax(userId: string): Promise<Record<string, string>> {
+  const taxes = (await rows(userId, "taxes")).filter((row) => row.data.enabled !== "false" && (row.data.appliesTo || "Both") !== "Purchases");
+  const tax = taxes.find((row) => row.data.isDefault === "true");
+  return tax ? { taxRate: tax.data.rate ?? "", taxName: tax.data.name ?? "" } : {};
+}
+
 /** Open delayed charges and credits for one customer become one draft invoice: charges as lines, credits as its discount. */
 export async function createInvoiceFromCharges(ids: string[]): Promise<{ id: string; number: string }> {
   const me = await requireUser();
@@ -126,9 +134,8 @@ export async function createInvoiceFromCharges(ids: string[]): Promise<{ id: str
   const chargeTotal = charges.reduce((sum, row) => sum + (Number(row.data.amount) || 0), 0);
   if (credit > chargeTotal + 0.005) throw new ActionError("The credits are more than the charges. Pick more charges, or give the customer a credit note.");
   const today = await todayFor(me.id);
-  const invoices = await rows(me.id, "invoices");
-  const highest = invoices.reduce((max, row) => Math.max(max, Number(/^INV-(\d{1,6})$/.exec(row.data.invoiceNumber ?? "")?.[1] ?? 0)), 0);
-  const number = `INV-${String(highest + 1).padStart(4, "0")}`;
+  const number = await nextInvoiceNumber(me.id);
+  const salesTax = await defaultSalesTax(me.id);
   const lines = charges
     .sort((a, b) => (a.data.date ?? "").localeCompare(b.data.date ?? ""))
     .map((row) => ({ itemId: "", name: row.data.service || "Charge", description: [row.data.date, row.data.description].filter(Boolean).join(" · ").slice(0, 300), quantity: row.data.quantity || "1", rate: Number(row.data.rate).toFixed(2) }));
@@ -142,6 +149,7 @@ export async function createInvoiceFromCharges(ids: string[]): Promise<{ id: str
     dueDate: dueDateForTerms(today, terms),
     lineItems: JSON.stringify(lines),
     ...(credit > 0 ? { discount: credit.toFixed(2) } : {}),
+    ...salesTax,
     status: "Draft",
     paymentMethod: "Credit",
     memo: "Delayed charges",
@@ -166,9 +174,8 @@ export async function createInvoiceFromTime(ids: string[]): Promise<{ id: string
   if (customers.length !== 1 || !customers[0]) throw new ActionError("Choose time for one customer at a time, and make sure each entry has a customer.");
   if (entries.some((row) => !(Number(row.data.rate) > 0))) throw new ActionError("Add a rate per hour to each entry before invoicing it.");
   const today = await todayFor(me.id);
-  const invoices = await rows(me.id, "invoices");
-  const highest = invoices.reduce((max, row) => Math.max(max, Number(/^INV-(\d{1,6})$/.exec(row.data.invoiceNumber ?? "")?.[1] ?? 0)), 0);
-  const number = `INV-${String(highest + 1).padStart(4, "0")}`;
+  const number = await nextInvoiceNumber(me.id);
+  const salesTax = await defaultSalesTax(me.id);
   const lines = entries
     .sort((a, b) => (a.data.date ?? "").localeCompare(b.data.date ?? ""))
     .map((row) => ({ itemId: "", name: row.data.service || "Services", description: [row.data.date, row.data.employee, row.data.description].filter(Boolean).join(" · ").slice(0, 300), quantity: String(Number(row.data.hours)), rate: Number(row.data.rate).toFixed(2) }));
@@ -181,6 +188,7 @@ export async function createInvoiceFromTime(ids: string[]): Promise<{ id: string
     paymentTerms: terms,
     dueDate: dueDateForTerms(today, terms),
     lineItems: JSON.stringify(lines),
+    ...salesTax,
     status: "Draft",
     paymentMethod: "Credit",
     memo: "Billable time",

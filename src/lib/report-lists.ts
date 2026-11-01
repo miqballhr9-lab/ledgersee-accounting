@@ -779,11 +779,12 @@ export function buildListReport(key: string, records: BookkeepingRecord[], ledge
     }
 
     case "payroll-summary": {
-      const columns = [count("staff", "Employees"), amount("gross", "Gross pay"), amount("tax", "Tax withheld"), amount("other", "Other deductions"), amount("net", "Net pay"), amount("paid", "Paid"), amount("employer", "Employer contributions"), amount("cost", "Total cost")];
+      // Gross − tax − other deductions + expense claims paid back with the salary = net pay.
+      const columns = [count("staff", "Employees"), amount("gross", "Gross pay"), amount("tax", "Tax withheld"), amount("other", "Other deductions"), amount("claims", "Expense claims"), amount("net", "Net pay"), amount("paid", "Paid"), amount("employer", "Employer contributions"), amount("cost", "Total cost")];
       const months = groupBy(payrollInPeriod(records, options), (entry) => entry.data.month || "");
       const lines: ReportLine[] = months.map(([month, entries]) => {
         const sum = (key: string) => entries.reduce((total, entry) => total + num(entry.data[key]), 0);
-        return { id: month, label: monthLabel(month), kind: "account" as const, depth: 0, values: [entries.length, sum("grossSalary"), sum("taxDeduction"), sum("totalDeductions") - sum("taxDeduction"), sum("payableSalary"), sum("paidAmount"), sum("employerContribution"), sum("grossSalary") + sum("employerContribution")] };
+        return { id: month, label: monthLabel(month), kind: "account" as const, depth: 0, values: [entries.length, sum("grossSalary"), sum("taxDeduction"), sum("totalDeductions") - sum("taxDeduction"), sum("reimbursement"), sum("payableSalary"), sum("paidAmount"), sum("employerContribution"), sum("grossSalary") + sum("employerContribution") + sum("reimbursement")] };
       });
       if (lines.length) lines.push({ id: "total", label: "TOTAL", kind: "grand", depth: 0, values: columns.map((_, index) => lines.reduce((total, line) => total + ((line.values[index] as number) || 0), 0)) });
       return periodResult(columns, lines, options, "No salaries in this period.");

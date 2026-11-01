@@ -35,7 +35,7 @@ import { formatCustomerAddress } from "@/lib/customer-utils";
 import { expenseCategoryLabel, expenseLinesFromData } from "@/lib/expense-utils";
 import { categoryLines, lastPurchase, possibleDuplicates, supplierNamed, supplierOf, supplierSuggestion, type SuggestedLine } from "@/lib/supplier-memory";
 import { marketExchangeRate } from "@/app/fx-actions";
-import { creditFromInvoice, currencyAmount, dueDateForTerms, invoiceSubtotal, invoiceTax, parseInvoiceLines } from "@/lib/invoice-utils";
+import { creditFromInvoice, currencyAmount, taxAfterDiscount, dueDateForTerms, invoiceSubtotal, invoiceTax, parseInvoiceLines } from "@/lib/invoice-utils";
 import { accountCategoryForType } from "@/lib/account-types";
 import { paymentAccountLabel, paymentAccountType, receivingAccountType } from "@/lib/payment-accounts";
 import { customerPriceBook, priceBookPrice } from "@/lib/price-books";
@@ -263,6 +263,15 @@ function catalogItemLabel(item: BookkeepingRecord, currency: string): string {
   return `${itemName} · ${itemType} · ${currencyAmount(rate, currency)}${unit ? ` / ${unit}` : ""}`;
 }
 
+/** Keeps an unsaved form on this device; storage may be off (private window), and then the form alone holds it. */
+function writeDraft(key: string, content: Record<string, unknown>) {
+  try {
+    localStorage.setItem(key, JSON.stringify({ at: Date.now(), ...content }));
+  } catch {
+    // Nothing kept.
+  }
+}
+
 export default function RecordEditor({ module, record, customers, vendors, items, accounts, defaultCurrency, defaults, open, onOpenChange, onSaved, onSaveComplete, history = [] }: RecordEditorProps) {
   const [values, setValues] = useState<Record<string, string>>(() => getInitialValues(module, record, defaults, customers));
   // Tax rates from Taxes (installed by Tax setup), offered on documents with a tax rate field.
@@ -302,6 +311,51 @@ export default function RecordEditor({ module, record, customers, vendors, items
   const [invoiceLines, setInvoiceLines] = useState<InvoiceLine[]>(() => readInvoiceLines(record?.data.lineItems ?? defaults.lineItems ?? "", items));
   const [expenseLines, setExpenseLines] = useState<ExpenseEntryLine[]>(() => readExpenseEditorLines(record));
   const [purchaseItems, setPurchaseItems] = useState<PurchaseItemLine[]>(() => readPurchaseItemLines(record));
+  // What was typed is kept on this device when a save fails (a session that ran out, a dropped
+  // connection), so signing in again and reopening the form brings it back instead of losing it.
+  const draftKey = `mik-draft:${module.kind}:${record?.id ?? "new"}`;
+  const [draft, setDraft] = useState<{ at: number; values: Record<string, string>; invoiceLines: InvoiceLine[]; expenseLines: ExpenseEntryLine[]; purchaseItems: PurchaseItemLine[] } | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    const timer = setTimeout(() => {
+      try {
+        const saved = JSON.parse(localStorage.getItem(draftKey) || "null");
+        if (saved && typeof saved.at === "number" && Date.now() - saved.at < 7 * 86_400_000 && saved.values) setDraft(saved);
+        else setDraft(null);
+      } catch {
+        setDraft(null);
+      }
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [draftKey, open]);
+  function stashDraft() {
+    writeDraft(draftKey, { values, invoiceLines, expenseLines, purchaseItems });
+  }
+  function dropDraft() {
+    try {
+      localStorage.removeItem(draftKey);
+    } catch {
+      // Nothing kept.
+    }
+    setDraft(null);
+  }
+  function restoreDraft() {
+    if (!draft) return;
+    setValues(draft.values);
+    if (Array.isArray(draft.invoiceLines)) setInvoiceLines(draft.invoiceLines);
+    if (Array.isArray(draft.expenseLines)) setExpenseLines(draft.expenseLines);
+    if (Array.isArray(draft.purchaseItems)) setPurchaseItems(draft.purchaseItems);
+    dropDraft();
+  }
+  const draftBanner = draft ? (
+    <div role="status" className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2.5 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-100">
+      <span>An entry that wasn&apos;t saved ({new Date(draft.at).toLocaleString()}) is kept on this device.</span>
+      <span className="flex gap-2">
+        <Button type="button" size="sm" onClick={restoreDraft}>Restore it</Button>
+        <Button type="button" size="sm" variant="ghost" onClick={dropDraft}>Discard</Button>
+      </span>
+    </div>
+  ) : null;
   const availableItems = items.filter((item) => item.data.name?.trim());
   // A warehouse picker only shows once the business has warehouses to pick from.
   const visibleFields = (module.kind === "items" ? module.fields.filter((field) => itemFieldVisible(field.key, values.itemType ?? "")) : module.fields)
@@ -647,6 +701,7 @@ export default function RecordEditor({ module, record, customers, vendors, items
           return;
         }
       }
+      dropDraft();
       // The full-page form keeps its save buttons at the bottom right, so its messages show at the top.
       toast.success(shouldSend ? `${documentLabel} saved and emailed to the customer.` : `${documentLabel} ${record ? "updated" : "saved"}.`, isTransactionForm ? { position: "top-center" } : undefined);
       if (intent === "save-and-new" || intent === "save-and-copy") {
@@ -657,22 +712,25 @@ export default function RecordEditor({ module, record, customers, vendors, items
         onOpenChange(false);
       }
     } catch (saveError) {
-      setError(saveError instanceof Error ? readableError(saveError) : "We couldn’t save this record. Please try again.");
+      const message = saveError instanceof Error ? readableError(saveError) : "We couldn’t save this record. Please try again.";
+      // Kept only when the save couldn't reach the books (signed out, offline), not for a mistake to correct.
+      if (/sign in|network|fetch|connection|offline|try again/i.test(message)) stashDraft();
+      setError(/sign in/i.test(message) ? `${message} What you typed is kept on this device: sign in again and open this form to restore it.` : message);
     } finally {
       setPending(false);
     }
   }
 
   const subtotal = invoiceSubtotal(invoiceLines);
-  const taxAmount = invoiceTax(invoiceLines, values.taxRate);
   const discount = Math.max(0, Number(values.discount) || 0);
+  const taxAmount = taxAfterDiscount(invoiceTax(invoiceLines, values.taxRate), subtotal, discount);
   const invoiceTotal = Math.max(0, subtotal + taxAmount - discount);
   const expenseTotal = expenseLines.reduce((sum, line) => sum + (Number(line.amount) || 0), 0)
     + purchaseItems.reduce((sum, line) => sum + (line.itemId ? (Number(line.quantity) || 0) * (Number(line.rate) || 0) : 0), 0);
-  const expenseTaxAmount = invoiceTax([
+  const expenseTaxAmount = taxAfterDiscount(invoiceTax([
     ...expenseLines.map((line) => ({ quantity: "1", rate: line.amount, taxRate: line.taxRate })),
     ...purchaseItems.filter((line) => line.itemId).map((line) => ({ quantity: line.quantity, rate: line.rate, taxRate: line.taxRate })),
-  ], values.taxRate);
+  ], values.taxRate), expenseTotal, discount);
   const expenseGrandTotal = Math.max(0, expenseTotal + expenseTaxAmount - discount);
   // Purchases only: the supplier's last bill or expense, and any that look like this one entered again.
   const isPurchase = module.kind === "bills" || module.kind === "expenses";
@@ -1162,7 +1220,7 @@ export default function RecordEditor({ module, record, customers, vendors, items
                         <SelectContent className="min-w-72">
                           {availableItems.filter((item) => module.kind !== "purchase-orders" || item.data.itemType !== "Bundle").map((item) => (
                             <SelectItem value={item.id} key={item.id}>
-                              {catalogItemLabel(item, values.currency || "USD")}
+                              {catalogItemLabel(item, defaultCurrency || values.currency || "USD")}
                               {isInventoryItem(item) && item.data.qtyOnHand !== undefined ? <span className="ml-1 text-xs text-muted-foreground">· {Number(item.data.qtyOnHand).toLocaleString()} on hand</span> : null}
                             </SelectItem>
                           ))}
@@ -1433,6 +1491,7 @@ export default function RecordEditor({ module, record, customers, vendors, items
                 </div>
               </section>
 
+              {draftBanner}
               {error ? <p role="alert" className="rounded-md border border-destructive/20 bg-destructive/5 px-3 py-2.5 text-sm text-destructive">{error}</p> : null}
               {notice ? (
                 <div role="status" className="rounded-md border border-primary/20 bg-primary/5 px-3 py-2.5 text-sm text-primary">
@@ -1518,7 +1577,8 @@ export default function RecordEditor({ module, record, customers, vendors, items
             })}
           </div>
 
-          {error ? <p role="alert" className="rounded-md border border-destructive/20 bg-destructive/5 px-3 py-2.5 text-sm text-destructive">{error}</p> : null}
+          {draftBanner}
+              {error ? <p role="alert" className="rounded-md border border-destructive/20 bg-destructive/5 px-3 py-2.5 text-sm text-destructive">{error}</p> : null}
           {notice ? (
             <div role="status" className="rounded-md border border-primary/20 bg-primary/5 px-3 py-2.5 text-sm text-primary">
               <p>{notice}</p>

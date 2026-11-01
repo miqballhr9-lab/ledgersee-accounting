@@ -54,6 +54,8 @@ export function displayValue(field: CrmField | undefined, data: Record<string, s
   if (field.type === "currency") return formatMoney(value, currency);
   if (field.type === "percent") return `${value}%`;
   if (field.type === "datetime") return formatDateTime(value);
+  // An ID card, passport, insurance or registration past its expiry date says so in the list.
+  if (field.type === "date" && /expir/i.test(key) && value < todayHere()) return `${value} · Expired`;
   if (field.type === "related") return data.related ? `${data.relatedType}: ${data.related}` : "";
   if (field.type === "file") return data[`${key}Name`] || "File";
   if (field.type === "priceList") {

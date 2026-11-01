@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { MoreHorizontal, Pause, Pencil, Play, Repeat, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -20,6 +21,8 @@ import { intervalLabel, recurringKindLabels, type RecurringKind } from "@/lib/re
 
 interface RecurringWorkspaceProps {
   templates: BookkeepingRecord[];
+  /** Recurring invoice schedules from Sales, listed here too so every repeating transaction is in one place. */
+  schedules?: BookkeepingRecord[];
   currency: string;
   asOfDate: string;
 }
@@ -43,7 +46,7 @@ function formatDate(value: string | undefined) {
 }
 
 /** Recurring transactions: the templates saved with "Make recurring", as in QuickBooks. */
-export default function RecurringWorkspace({ templates, currency, asOfDate }: RecurringWorkspaceProps) {
+export default function RecurringWorkspace({ templates, schedules = [], currency, asOfDate }: RecurringWorkspaceProps) {
   const router = useRouter();
   const [kindFilter, setKindFilter] = useState("all");
   const [editing, setEditing] = useState<BookkeepingRecord | null>(null);
@@ -178,6 +181,26 @@ export default function RecurringWorkspace({ templates, currency, asOfDate }: Re
           </Table>
         </div>
       </section>
+
+      {schedules.length ? (
+        <section className="mt-6 overflow-hidden rounded-lg border border-border bg-card">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3.5 sm:px-5">
+            <div>
+              <h2 className="text-base font-semibold">Recurring invoice schedules</h2>
+              <p className="mt-0.5 text-xs text-muted-foreground">Set up under Sales › Recurring invoices; each generates an invoice on its next date.</p>
+            </div>
+            <Button variant="outline" size="sm" nativeButton={false} render={<Link href="/app/recurring-invoices" />}>Open recurring invoices</Button>
+          </div>
+          <ul className="divide-y divide-border">
+            {schedules.map((schedule) => (
+              <li key={schedule.id} className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 text-sm sm:px-5">
+                <Link href={`/app/recurring-invoices?open=${schedule.id}`} className="font-medium text-primary hover:underline">{schedule.data.name || "Schedule"}</Link>
+                <span className="text-muted-foreground">{schedule.data.customer || "—"} · {schedule.data.frequency || "Monthly"} · next {schedule.data.nextDate || "—"} · {schedule.data.status || "Active"} · {currencyAmount(Number(schedule.data.amount) || 0, currency)}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
 
       {editing ? (
         <MakeRecurringDialog

@@ -21,10 +21,12 @@ export interface HrTodayProps {
   /** Standard time off types (maternity, paternity…) the business hasn't added yet. */
   missingLeaveTypes: string[];
   canManage: boolean;
+  /** Employee documents (CNIC, passport…) past their expiry date. */
+  expiredDocuments?: Array<{ id: string; name: string; employee: string; expiry: string }>;
 }
 
 /** HR's live view of today: who is in, who is off, and birthdays and anniversaries coming up. */
-export default function HrToday({ today, checkedIn, employeeCount, onLeave, celebrations, missingLeaveTypes, canManage }: HrTodayProps) {
+export default function HrToday({ today, checkedIn, employeeCount, onLeave, celebrations, missingLeaveTypes, canManage, expiredDocuments = [] }: HrTodayProps) {
   const router = useRouter();
   const [adding, setAdding] = useState(false);
   // Check ins and requests from the employee app appear without reloading.
@@ -50,6 +52,15 @@ export default function HrToday({ today, checkedIn, employeeCount, onLeave, cele
         <div className={`${panel} flex flex-wrap items-center justify-between gap-3 px-4 py-3`}>
           <p className="text-sm"><span className="font-medium">Set up time off types:</span> <span className="text-muted-foreground">{missingLeaveTypes.join(", ")}.</span></p>
           <Button size="sm" disabled={adding} onClick={() => void addTypes()}>{adding ? "Adding…" : "Add standard types"}</Button>
+        </div>
+      ) : null}
+      {expiredDocuments.length ? (
+        <div className={`${panel} border-destructive/40 px-4 py-3`} role="alert">
+          <p className="text-sm font-medium text-destructive">{expiredDocuments.length === 1 ? "1 employee document has expired" : `${expiredDocuments.length} employee documents have expired`}</p>
+          <ul className="mt-1 space-y-0.5 text-sm text-muted-foreground">
+            {expiredDocuments.slice(0, 5).map((doc) => <li key={doc.id}>{doc.employee}: {doc.name} · expired {doc.expiry}</li>)}
+          </ul>
+          <Link href="/app/hr/documents" className="mt-1 inline-block text-xs font-medium text-primary hover:underline">Renew in Documents</Link>
         </div>
       ) : null}
       <div className="grid gap-3 md:grid-cols-3">

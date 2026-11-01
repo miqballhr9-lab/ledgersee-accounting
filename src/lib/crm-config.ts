@@ -388,7 +388,7 @@ export const crmModules: readonly CrmModule[] = [
   },
   {
     key: "workflows", kind: "crm-workflows", label: "Workflow rule", plural: "Workflow rules",
-    description: "Zoho-style rules: when a record is created or edited and meets a condition, update a field, create a task or send an email.",
+    description: "Rules: when a record is created or edited and meets a condition, update a field, create a task or send an email.",
     titleKey: "ruleName", statusKey: "active",
     columns: ["ruleName", "module", "trigger", "action", "active"],
     fields: [

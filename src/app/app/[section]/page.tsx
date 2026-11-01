@@ -150,6 +150,7 @@ export default async function SectionPage({ params, searchParams }: SectionPageP
         accounts={groups.accounts ?? []}
         currency={groups.settings?.[0]?.data.currency || "USD"}
         asOfDate={await myToday()}
+        taxCountry={groups.settings?.[0]?.data.taxCountry ?? ""}
       />
     );
   }

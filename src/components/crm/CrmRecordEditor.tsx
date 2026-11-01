@@ -98,6 +98,8 @@ function startValues(module: CrmModule, record: BookkeepingRecord | null, preset
   if (module.kind === "hr-onboarding") Object.assign(values, { status: "To Do", dueDate: today() });
   if (module.kind === "hr-appraisals") Object.assign(values, { status: "To Confirm", period: String(new Date().getFullYear()), reviewDate: today() });
   if (module.kind === "hr-settlements") Object.assign(values, { status: "Draft", reason: "Resigned", lastWorkingDay: today(), gratuityDaysPerYear: "30" });
+  if (module.kind === "hr-goals") Object.assign(values, { status: "In progress", progress: "0" });
+  if (module.kind === "hr-courses") Object.assign(values, { status: "Draft" });
   if (module.kind === "hr-leave-types") Object.assign(values, { paid: "true", daysPerYear: "14", approval: "By time off officer", requiresAllocation: "Yes" });
   if (!module.fields.some((field) => field.type === "owner")) delete values.owner;
   return { ...values, ...preset };
@@ -169,7 +171,8 @@ export default function CrmRecordEditor({ module, record, preset, open, onOpenCh
         .sort((a, b) => a.name.localeCompare(b.name));
     }
     return (context.store[kind] ?? [])
-      .filter((option) => option.id !== record?.id && !(kind === "crm-leads" && option.data.leadStatus === "Converted"))
+      // Departed or archived employees aren't picked for new work; one already chosen stays listed.
+      .filter((option) => option.id !== record?.id && !(kind === "crm-leads" && option.data.leadStatus === "Converted") && !(kind === "employees" && ["Inactive", "Archived", "Departed"].includes(option.data.status ?? "") && !Object.values(values).includes(option.id)))
       .map((option) => ({ id: option.id, name: recordTitle(option) }))
       .sort((a, b) => a.name.localeCompare(b.name));
   }
@@ -227,7 +230,12 @@ export default function CrmRecordEditor({ module, record, preset, open, onOpenCh
             const special = item ? priceBookPrice(customerPriceBook(customer, context.store["crm-price-books"] ?? []), item.id, Number(values.quantity) || 1) : undefined;
             if (item) Object.assign(changes, { product: item.data.name ?? "", price: special !== undefined ? special.toFixed(2) : item.data.rate ?? "", ...(item.data.taxRate ? { taxRate: item.data.taxRate } : {}) });
           }
-          // Picking a contact fills in their account, as Zoho does.
+          // An appraisal is done by the employee's own manager.
+          if (field.type === "employee" && chosen && module.kind === "hr-appraisals" && !values.reviewer) {
+            const person = context.store.employees?.find((entry) => entry.id === chosen.id);
+            if (person?.data.manager) changes.reviewer = person.data.manager;
+          }
+          // Picking a contact fills in their account.
           if (field.type === "contact" && chosen && module.fields.some((item) => item.type === "account") && !values.accountId) {
             const contact = context.store["crm-contacts"]?.find((item) => item.id === chosen.id);
             if (contact?.data.accountId) Object.assign(changes, { accountId: contact.data.accountId, account: contact.data.account });

@@ -38,7 +38,7 @@ export const hrModules: readonly CrmModule[] = [
     quickActions: [{ label: "Start contract", key: "status", value: "Running", tone: "primary" }, { label: "Expire", key: "status", value: "Expired" }, { label: "Cancel", key: "status", value: "Cancelled", tone: "danger" }],
     columns: ["reference", "employee", "startDate", "endDate", "wage", "status"],
     fields: [
-      { key: "reference", label: "Contract reference", section: "Contract", readOnly: true },
+      { key: "reference", label: "Contract reference", section: "Contract", help: "Your own reference, e.g. HR/2026/014. Left empty, one is made from the employee and start month." },
       { key: "employee", label: "Employee", type: "employee", section: "Contract", required: true },
       { key: "startDate", label: "Contract start date", type: "date", section: "Contract", required: true },
       { key: "endDate", label: "Contract end date", type: "date", section: "Contract", help: "Leave empty for a permanent contract." },
@@ -325,7 +325,7 @@ export const hrModules: readonly CrmModule[] = [
   },
   {
     key: "fleet", kind: "hr-vehicles", label: "Vehicle", plural: "Fleet", section: "hr",
-    description: "Company vehicles, who drives them, and when their insurance and registration run out, as Odoo's Fleet.",
+    description: "Company vehicles, who drives them, and when their insurance and registration run out.",
     titleKey: "vehicle", statusKey: "status", kanbanKey: "status",
     columns: ["vehicle", "plate", "driver", "odometer", "insuranceExpiry", "status"],
     fields: [
@@ -361,7 +361,7 @@ export const hrModules: readonly CrmModule[] = [
   },
   {
     key: "timesheets", kind: "hr-timesheets", label: "Timesheet", plural: "Timesheets", section: "hr",
-    description: "Hours each employee spends on projects and tasks, as Odoo's Timesheets.",
+    description: "Hours each employee spends on projects and tasks.",
     titleKey: "task", statusKey: "status",
     quickActions: [{ label: "Validate", key: "status", value: "Validated", tone: "primary" }],
     columns: ["date", "employee", "project", "task", "hours", "status"],
@@ -377,7 +377,7 @@ export const hrModules: readonly CrmModule[] = [
   },
   {
     key: "planning", kind: "hr-shifts", label: "Shift", plural: "Planning", section: "hr",
-    description: "Who works when: shifts by role, published to the team, as Odoo's Planning.",
+    description: "Who works when: shifts by role, published to the team.",
     titleKey: "employee", statusKey: "status", kanbanKey: "status",
     quickActions: [{ label: "Publish", key: "status", value: "Published", tone: "primary" }],
     columns: ["date", "employee", "role", "startTime", "endTime", "hours", "status"],
@@ -394,7 +394,7 @@ export const hrModules: readonly CrmModule[] = [
   },
   {
     key: "lunch", kind: "hr-lunch-orders", label: "Lunch order", plural: "Lunch", section: "hr",
-    description: "Lunch ordered by employees from your suppliers, as Odoo's Lunch.",
+    description: "Lunch ordered by employees from your suppliers.",
     titleKey: "product", statusKey: "status", kanbanKey: "status",
     quickActions: [{ label: "Received", key: "status", value: "Received", tone: "primary" }, { label: "Cancel", key: "status", value: "Cancelled", tone: "danger" }],
     columns: ["date", "employee", "supplier", "product", "price", "status"],
@@ -410,7 +410,7 @@ export const hrModules: readonly CrmModule[] = [
   },
   {
     key: "courses", kind: "hr-courses", label: "Course", plural: "eLearning courses", section: "hr",
-    description: "Training courses for your team, with their lessons and how long they take, as Odoo's eLearning.",
+    description: "Training courses for your team, with their lessons and how long they take.",
     titleKey: "course", statusKey: "status",
     columns: ["course", "category", "duration", "status"],
     fields: [

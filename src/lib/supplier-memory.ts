@@ -38,7 +38,8 @@ export function supplierNamed(vendors: BookkeepingRecord[], name: string) {
 /** The supplier's latest bill or expense, other than the one being edited. */
 export function lastPurchase(history: BookkeepingRecord[], supplier: string, excludeId = ""): BookkeepingRecord | undefined {
   return history
-    .filter((record) => purchaseKinds.has(record.kind) && record.id !== excludeId && !closed.has(record.data.status ?? "") && same(supplierOf(record.data), supplier))
+    // An opening balance is not a purchase: its "Opening balance equity" line must never be copied to a new bill.
+    .filter((record) => purchaseKinds.has(record.kind) && record.id !== excludeId && !closed.has(record.data.status ?? "") && record.data.docType !== "Opening balance" && !record.data.openingBalanceFor && same(supplierOf(record.data), supplier))
     .sort((a, b) => dateOf(b).localeCompare(dateOf(a)) || b.createdAt.localeCompare(a.createdAt))[0];
 }
 

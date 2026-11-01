@@ -28,6 +28,8 @@ interface VendorsWorkspaceProps {
   accounts: BookkeepingRecord[];
   currency: string;
   asOfDate: string;
+  /** The business's tax country: US-only fields (1099) are shown only for the US. */
+  taxCountry?: string;
 }
 
 const pageSize = 10;
@@ -50,7 +52,7 @@ function csvValue(value: string) {
   return `"${value.replaceAll('"', '""')}"`;
 }
 
-export default function VendorsWorkspace({ records: initialRecords, bills, accounts, currency, asOfDate }: VendorsWorkspaceProps) {
+export default function VendorsWorkspace({ records: initialRecords, bills, accounts, currency, asOfDate, taxCountry = "" }: VendorsWorkspaceProps) {
   const router = useRouter();
   const [records, setRecords] = useState(initialRecords);
   const [search, setSearch] = useState("");
@@ -115,13 +117,14 @@ export default function VendorsWorkspace({ records: initialRecords, bills, accou
   const pageCount = Math.max(1, Math.ceil(filteredVendors.length / pageSize));
   const visibleVendors = filteredVendors.slice((page - 1) * pageSize, page * pageSize);
   const detail = summaries.find((summary) => summary.vendor.id === detailId) ?? null;
-  const editorModule = moduleBySlug("vendors");
+  const baseModule = moduleBySlug("vendors");
+  const editorModule = baseModule && taxCountry && taxCountry !== "US" ? { ...baseModule, fields: baseModule.fields.filter((field) => field.key !== "track1099") } : baseModule;
 
   useEffect(() => setPage(1), [balanceFilter, search]);
 
   function openNewVendor() {
     setEditingRecord(null);
-    setDefaults({ openingBalance: "0", openingBalanceDate: asOfDate, supplierNumber: nextPartyNumber("vendors", records) });
+    setDefaults({ openingBalance: "", openingBalanceDate: asOfDate, supplierNumber: nextPartyNumber("vendors", records) });
     setActionMessage("");
     setEditorOpen(true);
   }
