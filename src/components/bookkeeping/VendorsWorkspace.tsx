@@ -67,11 +67,14 @@ export default function VendorsWorkspace({ records: initialRecords, bills, accou
 
   const summaries = useMemo(() => records.map((vendor) => {
     const normalizedName = vendor.data.name?.trim().toLocaleLowerCase() || "";
-    const vendorBills = bills.filter((bill) => bill.data.vendor?.trim().toLocaleLowerCase() === normalizedName);
+    // A bill belongs to the supplier it was made for (by id); only bills without an id fall back to the name.
+    const vendorBills = bills.filter((bill) => (bill.data.openingBalanceFor ? bill.data.openingBalanceFor === vendor.id : bill.data.vendorId ? bill.data.vendorId === vendor.id : bill.data.vendor?.trim().toLocaleLowerCase() === normalizedName));
     const openBills = vendorBills.filter((bill) => billBalance(bill, currency) > 0);
     const overdueBills = openBills.filter((bill) => Boolean(bill.data.dueDate && bill.data.dueDate < asOfDate));
     const openingBalance = Number(vendor.data.openingBalance || 0) || 0;
-    const currentBalance = openingBalance + openBills.reduce((sum, bill) => sum + billBalance(bill, currency), 0);
+    // The opening balance is already one of the bills (its "Opening balance" bill), so it isn't added twice.
+    const hasOpeningBill = vendorBills.some((bill) => bill.data.docType === "Opening balance");
+    const currentBalance = (hasOpeningBill ? 0 : openingBalance) + openBills.reduce((sum, bill) => sum + billBalance(bill, currency), 0);
     return { vendor, vendorBills, openBills, overdueBills, openingBalance, currentBalance };
   }), [asOfDate, bills, records, currency]);
 

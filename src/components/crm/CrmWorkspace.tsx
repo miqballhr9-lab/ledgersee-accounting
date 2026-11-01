@@ -359,9 +359,13 @@ export default function CrmWorkspace({ page, initialStore, currency, me, owners,
       else if (!isClosedStage(deal.data.stage)) s.open += Number(deal.data.amount || 0);
     }
     for (const invoice of store.invoices ?? []) {
-      const account = (store.customers ?? []).find((customer) => customer.id === invoice.data.customerId || customer.data.name?.trim().toLowerCase() === invoice.data.customer?.trim().toLowerCase());
+      // By id when the invoice has one; only older invoices without an id fall back to the name.
+      const ownerId = invoice.data.openingBalanceFor || invoice.data.customerId;
+      const account = ownerId ? (store.customers ?? []).find((customer) => customer.id === ownerId) : (store.customers ?? []).find((customer) => customer.data.name?.trim().toLowerCase() === invoice.data.customer?.trim().toLowerCase());
       const s = account ? stats.get(account.id) : undefined;
-      if (s && !["Paid", "Cancelled", "Draft"].includes(invoice.data.status ?? "")) s.outstanding += Math.max(0, Number(invoice.data.amount || 0) - Number(invoice.data.paidAmount || 0) - Number(invoice.data.creditApplied || 0));
+      // A foreign-currency invoice counts in the home currency, at its exchange rate.
+      const rate = invoice.data.currency && invoice.data.currency !== currency ? Number(invoice.data.exchangeRate) || 1 : 1;
+      if (s && !["Paid", "Cancelled", "Draft"].includes(invoice.data.status ?? "")) s.outstanding += Math.max(0, Number(invoice.data.amount || 0) - Number(invoice.data.paidAmount || 0) - Number(invoice.data.creditApplied || 0)) * rate;
     }
     return stats;
   }, [page, store]);

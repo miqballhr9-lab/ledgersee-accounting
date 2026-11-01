@@ -126,11 +126,13 @@ export default function CrmRecordDetail({ record, context, onClose, onOpenRecord
     (record.kind === "crm-contacts" && item.data.contactId === record.id) ||
     (record.kind === "crm-deals" && item.data.dealId === record.id));
   const salesDocs = [...(store.estimates ?? []), ...(store.invoices ?? [])].filter((doc) =>
-    (isAccount && (doc.data.customerId === record.id || doc.data.customer?.trim().toLowerCase() === accountName)) ||
+    (isAccount && ((doc.data.openingBalanceFor || doc.data.customerId) ? (doc.data.openingBalanceFor || doc.data.customerId) === record.id : doc.data.customer?.trim().toLowerCase() === accountName)) ||
     (record.kind === "crm-deals" && doc.data.crmDealId === record.id));
   const invoices = salesDocs.filter((doc) => doc.kind === "invoices");
-  const invoiced = invoices.reduce((sum, doc) => sum + Number(doc.data.amount || 0), 0);
-  const outstanding = invoices.filter((doc) => !["Paid", "Cancelled", "Draft"].includes(doc.data.status ?? "")).reduce((sum, doc) => sum + Math.max(0, Number(doc.data.amount || 0) - Number(doc.data.paidAmount || 0) - Number(doc.data.creditApplied || 0)), 0);
+  // Foreign-currency invoices count in the home currency, at their exchange rate.
+  const homeRate = (doc: BookkeepingRecord) => (doc.data.currency && doc.data.currency !== currency ? Number(doc.data.exchangeRate) || 1 : 1);
+  const invoiced = invoices.reduce((sum, doc) => sum + Number(doc.data.amount || 0) * homeRate(doc), 0);
+  const outstanding = invoices.filter((doc) => !["Paid", "Cancelled", "Draft"].includes(doc.data.status ?? "")).reduce((sum, doc) => sum + Math.max(0, Number(doc.data.amount || 0) - Number(doc.data.paidAmount || 0) - Number(doc.data.creditApplied || 0)) * homeRate(doc), 0);
   const activityPreset: Record<string, string> = { relatedType, relatedId: record.id, related: title };
   if (record.kind === "crm-contacts") Object.assign(activityPreset, { contactId: record.id, contact: title });
   if (record.kind === "crm-deals" && data.contactId) Object.assign(activityPreset, { contactId: data.contactId, contact: data.contact });

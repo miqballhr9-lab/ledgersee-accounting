@@ -164,6 +164,7 @@ function getInitialValues(module: ModuleDefinition, record: BookkeepingRecord | 
       record?.data[field.key] ?? defaults[field.key] ?? (field.type === "checkbox" ? "false" : ""),
     ])),
     customerId: record?.data.customerId ?? "",
+    vendorId: record?.data.vendorId ?? "",
     // An attached file keeps its name, so the form shows which file it is.
     ...Object.fromEntries(module.fields.filter((field) => field.type === "file" && record?.data[`${field.key}Name`]).map((field) => [`${field.key}Name`, record?.data[`${field.key}Name`] ?? ""])),
   };
@@ -800,11 +801,13 @@ export default function RecordEditor({ module, record, customers, vendors, items
         {field.key === "vendor" ? (
           <>
             <Select
-              value={vendorOptions.find((vendor) => vendor.data.name === value)?.id ?? null}
+              value={vendorOptions.find((vendor) => vendor.id === values.vendorId)?.id ?? vendorOptions.find((vendor) => vendor.data.name === value)?.id ?? null}
               onValueChange={(vendorId) => {
                 const vendor = vendorOptions.find((option) => option.id === vendorId);
                 if (vendor?.data.name) {
                   changeValue(field.key, vendor.data.name);
+                  // Kept by id, so two suppliers with the same name never share balances.
+                  changeValue("vendorId", vendor.id);
                   if (module.kind === "bills" || module.kind === "supplier-credits") fillFromSupplier(vendor.data.name);
                 }
               }}
@@ -991,6 +994,12 @@ export default function RecordEditor({ module, record, customers, vendors, items
     return adjustment ? (Math.round(base * (1 + adjustment / 100) * 100) / 100).toFixed(2) : rate ?? "0";
   }
 
+  /** A purchase order buys at the item's purchase cost; sales documents sell at its price (or price book). */
+  function lineRate(item: BookkeepingRecord, quantity: number) {
+    if (module.kind === "purchase-orders") return item.data.cost?.trim() || item.data.purchaseCost?.trim() || "";
+    return priceFor(item.data.rate, item.id, quantity);
+  }
+
   /** On a differential price book the price follows the quantity, unless someone typed their own price. */
   function changeLineQuantity(line: InvoiceLine, quantity: string) {
     const item = line.itemId ? availableItems.find((option) => option.id === line.itemId) : undefined;
@@ -1006,13 +1015,13 @@ export default function RecordEditor({ module, record, customers, vendors, items
       // Like QuickBooks, a bundle brings in its products and services as lines of their own.
       const parts = readBundleParts(item.data.bundleItems ?? "").flatMap((part, partIndex) => {
         const component = availableItems.find((option) => option.id === part.itemId);
-        return component ? [{ id: `${lineId}-b${Date.now()}-${partIndex}`, itemId: component.id, name: component.data.name?.trim() ?? "", description: component.data.description?.trim() || "", quantity: part.quantity || "1", rate: priceFor(component.data.rate, component.id, Number(part.quantity) || 1), bundleId: item.id, bundleName: item.data.name?.trim() ?? "Bundle", bundleShow: item.data.showComponents === "false" ? "false" : "true" }] : [];
+        return component ? [{ id: `${lineId}-b${Date.now()}-${partIndex}`, itemId: component.id, name: component.data.name?.trim() ?? "", description: component.data.description?.trim() || "", quantity: part.quantity || "1", rate: lineRate(component, Number(part.quantity) || 1), bundleId: item.id, bundleName: item.data.name?.trim() ?? "Bundle", bundleShow: item.data.showComponents === "false" ? "false" : "true" }] : [];
       });
       if (parts.length) setInvoiceLines((current) => current.flatMap((currentLine) => (currentLine.id === lineId ? parts : [currentLine])));
       return;
     }
     setInvoiceLines((current) => current.map((currentLine) => currentLine.id === lineId
-      ? { ...currentLine, itemId: item.id, name: item.data.name?.trim() ?? "", description: currentLine.description || item.data.description?.trim() || "", quantity: currentLine.quantity || "1", rate: priceFor(item.data.rate, item.id, Number(currentLine.quantity) || 1) }
+      ? { ...currentLine, itemId: item.id, name: item.data.name?.trim() ?? "", description: currentLine.description || item.data.description?.trim() || "", quantity: currentLine.quantity || "1", rate: lineRate(item, Number(currentLine.quantity) || 1) }
       : currentLine));
   }
 

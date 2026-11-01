@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { paymentAccountType } from "@/lib/payment-accounts";
 import { myToday } from "@/lib/business-time";
 import { notFound } from "next/navigation";
 
@@ -17,7 +18,7 @@ import ModuleWorkspace from "@/components/bookkeeping/ModuleWorkspace";
 import PayrollWorkspace from "@/components/bookkeeping/PayrollWorkspace";
 import EmployeesWorkspace from "@/components/hr/EmployeesWorkspace";
 import { odooHrData } from "@/lib/hr-status";
-import { moduleBySlug, withCustomFields, withPriceBooks, withWarehouses } from "@/lib/bookkeeping-config";
+import { moduleBySlug, withCustomFields, withPriceBooks, withTransactionAccounts, withWarehouses } from "@/lib/bookkeeping-config";
 import { activePriceBookNames } from "@/lib/price-books";
 import { weekendDays } from "@/lib/weekend";
 import { packFor } from "@/lib/tax-packs";
@@ -179,7 +180,8 @@ export default async function SectionPage({ params, searchParams }: SectionPageP
   const kinds = new Set<RecordKind>([module.kind, "settings", "warehouses"]);
   if (module.fields.some((field) => field.key === "customer") || module.kind === "journals") kinds.add("customers");
   if (module.fields.some((field) => field.key === "vendor") || module.kind === "journals") kinds.add("vendors");
-  if (["invoices", "bills", "journals", "supplier-credits", "credit-notes", "purchase-orders", "employees", "items"].includes(module.kind)) kinds.add("accounts");
+  if (["invoices", "bills", "journals", "supplier-credits", "credit-notes", "purchase-orders", "employees", "items", "transactions"].includes(module.kind)) kinds.add("accounts");
+  if (module.kind === "transactions") kinds.add("bank-accounts");
   if (module.fields.some((field) => field.key === "lineItems")) kinds.add("items");
   if (module.kind === "journals") {
     kinds.add("payroll");
@@ -204,6 +206,11 @@ export default async function SectionPage({ params, searchParams }: SectionPageP
   const settings = groups.settings ?? [];
   module = withCustomFields(module, settings[0]?.data);
   module = withPriceBooks(module, activePriceBookNames(groups["crm-price-books"]));
+  module = withTransactionAccounts(
+    module,
+    [...new Set([...accounts.filter((account) => paymentAccountType(account)).map((account) => account.data.name?.trim() ?? ""), ...(groups["bank-accounts"] ?? []).map((bank) => bank.data.name?.trim() ?? "")])].filter(Boolean).sort((a, b) => a.localeCompare(b)),
+    accounts.filter((account) => !paymentAccountType(account) && account.data.locked !== "true" && account.data.name?.trim()).map((account) => account.data.name.trim()).sort((a, b) => a.localeCompare(b)),
+  );
   module = withWarehouses(module, warehouseNames(groups.warehouses), module.kind === "stock-transfers" ? (groups.items ?? []).filter(isInventoryItem).map((item) => item.data.name?.trim() ?? "").filter(Boolean) : []);
   // Only employee names leave the server here; payroll amounts stay out of this page.
   const employeeNames = module.kind === "journals"

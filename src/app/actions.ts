@@ -19,6 +19,7 @@ import { sendEmailOrThrow } from "@/lib/email";
 import { blobConfigured, blobUploadToken, createUploadUrl, privateBlobToken } from "@/lib/storage";
 import { dueDateForTerms, invoiceTax, parseInvoiceLines, serialList } from "@/lib/invoice-utils";
 import { defaultWarehouse, lotRegister, stockByWarehouse } from "@/lib/warehouses";
+import { reconcileItems, type ReconcileItem } from "@/lib/reconciliation";
 import { buildInventory, inventoryKinds, isInventoryItem } from "@/lib/inventory";
 import { siteUrl } from "@/lib/site";
 import { isRecordKind, type BookkeepingRecord, type RecordKind } from "@/lib/bookkeeping-types";
@@ -73,6 +74,30 @@ export async function exportMyAccountData(): Promise<BusinessBackup> {
     business: me.workspaceName,
     records: me.role === "Admin" ? await businessRecords(me.id) : [],
   };
+}
+
+/**
+ * Two records that would be confused are refused: customers or suppliers with the same name
+ * (their balances and documents would mix), items with the same SKU (barcode and POS lookups),
+ * warehouses with the same short code.
+ */
+async function assertNotDuplicate(userId: string, kind: string, data: Record<string, string>, id?: string) {
+  const checks: Record<string, { key: string; label: string; normalize?: (value: string) => string }> = {
+    customers: { key: "name", label: "A customer named" },
+    vendors: { key: "name", label: "A supplier named" },
+    items: { key: "sku", label: "An item with SKU", normalize: (value) => value.replace(/\s+/g, "").toLowerCase() },
+    warehouses: { key: "code", label: "A warehouse with code" },
+  };
+  const check = checks[kind];
+  const value = data[check?.key ?? ""]?.trim();
+  if (!check || !value) return;
+  const normalize = check.normalize ?? ((text: string) => text.replace(/\s+/g, " ").trim().toLowerCase());
+  const rows = await db.select({ id: bookkeepingRecord.id, data: bookkeepingRecord.data }).from(bookkeepingRecord)
+    .where(and(eq(bookkeepingRecord.userId, userId), eq(bookkeepingRecord.kind, kind)));
+  const twin = rows.find((row) => row.id !== id && normalize(row.data[check.key] ?? "") === normalize(value));
+  if (!twin) return;
+  const number = twin.data.customerNumber || twin.data.supplierNumber || twin.data.name || "";
+  throw new ActionError(`${check.label} “${value}” already exists${number && number !== value ? ` (${number})` : ""}. ${kind === "customers" || kind === "vendors" ? "Open that one, or make the name different, e.g. add the city or company." : "Use a different one."}`);
 }
 
 /**
@@ -320,6 +345,8 @@ export async function listBookkeepingRecordGroups(
   // Kinds this role can't open come back empty, so a page still renders what it may show.
   const readable = uniqueKinds.filter((kind) => canReadKind(me.role, kind));
   if (!readable.length) return {};
+  // Banking and the chart of accounts are one list of bank, cash and card accounts.
+  if ((readable.includes("accounts") || readable.includes("bank-accounts")) && !me.viewingAs && !me.access.locked) await syncBankingWithChart(me.id).catch(() => undefined);
   const rows = await db
     .select()
     .from(bookkeepingRecord)
@@ -331,6 +358,62 @@ export async function listBookkeepingRecordGroups(
     (groups[kind] ??= []).push(serializeRow(row));
     return groups;
   }, {});
+}
+
+/** A Banking account's name and opening balance, copied to its chart account so the books use what was typed. */
+async function mirrorBankAccount(bank: BookkeepingRecord) {
+  const me = await requireUser();
+  const chart = await db.select().from(bookkeepingRecord).where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "accounts")));
+  const linked = chart.find((row) => (bank.data.chartAccountId && row.id === bank.data.chartAccountId) || row.data.bankAccountId === bank.id)
+    ?? chart.find((row) => (row.data.name ?? "").trim().toLowerCase() === (bank.data.name ?? "").trim().toLowerCase());
+  if (!linked) return syncBankingWithChart(me.id);
+  await db.update(bookkeepingRecord).set({
+    data: { ...linked.data, name: bank.data.name?.trim() || linked.data.name, openingBalance: bank.data.openingBalance ?? linked.data.openingBalance ?? "", openingBalanceDate: bank.data.openingBalanceDate || linked.data.openingBalanceDate || "", bankAccountId: bank.id },
+    updatedAt: new Date(),
+  }).where(eq(bookkeepingRecord.id, linked.id));
+}
+
+/**
+ * Keeps Banking and the chart of accounts in step: a bank, cash or card account added in Banking
+ * gets its chart account (with the opening balance), so it can be chosen for payments and
+ * transfers; a chart cash, bank or card account shows in Banking, so it can be reconciled.
+ * The ledger treats an account in both as one (the chart's opening balance counts).
+ */
+async function syncBankingWithChart(userId: string) {
+  const rows = await db.select().from(bookkeepingRecord).where(and(eq(bookkeepingRecord.userId, userId), inArray(bookkeepingRecord.kind, ["accounts", "bank-accounts", "settings"])));
+  const chart = rows.filter((row) => row.kind === "accounts");
+  const banking = rows.filter((row) => row.kind === "bank-accounts" && row.data.name?.trim());
+  const currency = rows.find((row) => row.kind === "settings")?.data.currency || "USD";
+  const named = (list: typeof rows) => new Set(list.map((row) => (row.data.name ?? "").trim().toLowerCase()));
+  const chartNames = named(chart);
+  const bankNames = named(banking);
+  const toChart = banking.filter((bank) => !chartNames.has(bank.data.name.trim().toLowerCase())).map((bank) => {
+    const kind = bank.data.accountType ?? "";
+    const card = /card/i.test(kind);
+    const cash = /cash/i.test(kind) || /cash|petty/i.test(bank.data.name);
+    return {
+      userId,
+      kind: "accounts",
+      data: {
+        name: bank.data.name.trim(),
+        type: card ? "Liability" : "Asset",
+        accountType: card ? "Credit card" : "Cash and cash equivalents",
+        detailType: card ? "Credit card" : cash ? "Cash on hand" : "Bank",
+        currency: bank.data.currency || currency,
+        ...(Number(bank.data.openingBalance) ? { openingBalance: bank.data.openingBalance, openingBalanceDate: bank.data.openingBalanceDate || bank.createdAt.toISOString().slice(0, 10) } : {}),
+        bankAccountId: bank.id,
+      },
+    };
+  });
+  const toBanking = chart.filter((account) => {
+    const type = paymentAccountType({ kind: "accounts", data: account.data });
+    return type && account.data.name?.trim() && !bankNames.has(account.data.name.trim().toLowerCase());
+  }).map((account) => {
+    const type = paymentAccountType({ kind: "accounts", data: account.data });
+    return { userId, kind: "bank-accounts", data: { name: account.data.name.trim(), accountType: type === "Credit card" ? "Card" : type === "Cash" ? "Cash" : "Bank", currency: account.data.currency || currency, openingBalance: account.data.openingBalance ?? "", openingBalanceDate: account.data.openingBalanceDate ?? "", chartAccountId: account.id } };
+  });
+  if (toChart.length) await db.insert(bookkeepingRecord).values(toChart);
+  if (toBanking.length) await db.insert(bookkeepingRecord).values(toBanking);
 }
 
 export async function listAllBookkeepingRecords(): Promise<BookkeepingRecord[]> {
@@ -370,6 +453,7 @@ async function auditRecord(me: Awaited<ReturnType<typeof requireUser>>, action: 
 
 export async function saveBookkeepingRecord(kind: string, input: Record<string, string>, id?: string): Promise<BookkeepingRecord> {
   let saved = await saveRecord(kind, input, id);
+  if (kind === "bank-accounts") await mirrorBankAccount(saved);
   // Choosing "Applied" on a credit note applies it now: the invoice or bill balance goes down with it.
   const linked = kind === "credit-notes" ? saved.data.invoiceNumber : kind === "supplier-credits" ? saved.data.billNumber : "";
   if ((kind === "credit-notes" && input.status === "Applied") || (kind === "supplier-credits" && linked?.trim() && !["Applied", "Refunded"].includes(saved.data.status ?? ""))) {
@@ -435,6 +519,7 @@ async function saveRecord(
   await assertBooksOpen(me.id, documentDate(kind, input), documentDate(kind, current?.data));
   let data = amountFromLineItems(sanitizePayload(input), kind);
   data = keepServerOwned(kind, data, current?.data);
+  await assertNotDuplicate(me.id, kind, data, id);
   if (kind === "purchase-orders" && !id) data = { ...data, status: "Draft" };
   if (kind === "mileage") {
     const distance = Number(data.distance);
@@ -2525,44 +2610,36 @@ export async function completeBankReconciliation(
     const priorReconciliation = accountReconciliations
       .filter((record) => record.data.statementDate < statementDate)
       .sort((first, second) => second.data.statementDate.localeCompare(first.data.statementDate))[0];
-    const openingBalanceInput = priorReconciliation?.data.endingBalance ?? bankAccount.data.openingBalance ?? "0";
-    const openingBalance = Number(openingBalanceInput);
-    if (!Number.isFinite(openingBalance)) throw new ActionError("Update this account’s opening balance before reconciling.");
+    // The first statement starts from zero: the account's opening balance is one of its lines to clear.
+    const openingBalance = Number(priorReconciliation?.data.endingBalance ?? "0");
+    if (!Number.isFinite(openingBalance)) throw new ActionError("The previous reconciliation's ending balance isn't a number. Undo it and reconcile again.");
 
-    const transactionRows = await tx
-      .select()
-      .from(bookkeepingRecord)
-      .where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "transactions")))
-      .for("update");
-    const selectedRows = uniqueTransactionIds.map((id) => transactionRows.find((record) => record.id === id));
-    if (selectedRows.some((record) => !record)) throw new ActionError("One or more selected transactions aren’t available in this account.");
-
-    const selectedTransactions = selectedRows.filter((record): record is (typeof transactionRows)[number] => Boolean(record));
+    // The account's lines come from the books (payments, POS sales, transfers, journals, opening balance).
+    const allRows = await tx.select().from(bookkeepingRecord).where(eq(bookkeepingRecord.userId, me.id));
+    const items = reconcileItems(allRows.map(serializeRow), bankAccount.data.name);
+    const selectedItems = uniqueTransactionIds.map((id) => items.find((item) => item.id === id));
+    if (selectedItems.some((item) => !item)) throw new ActionError("One or more selected lines aren’t in this account any more. Refresh and try again.");
     const openingCents = Math.round(openingBalance * 100);
     const endingCents = Math.round(endingBalance * 100);
     let netClearedCents = 0;
     let depositCents = 0;
     let withdrawalCents = 0;
-
-    for (const transaction of selectedTransactions) {
-      const amount = Number(transaction.data.amount);
-      if (transaction.data.account !== bankAccount.data.name) throw new ActionError("Each selected transaction must belong to the chosen bank account.");
-      if (transaction.data.reconciled === "true") throw new ActionError("A selected transaction is already part of a completed reconciliation.");
-      if (!transaction.data.date || transaction.data.date > statementDate || (priorReconciliation && transaction.data.date <= priorReconciliation.data.statementDate)) {
-        throw new ActionError("Selected transactions must fall within this statement period.");
+    for (const item of selectedItems as ReconcileItem[]) {
+      if (item.cleared) throw new ActionError("A selected line is already part of a completed reconciliation.");
+      if (item.date > statementDate || (priorReconciliation && item.date <= priorReconciliation.data.statementDate)) {
+        throw new ActionError("Selected lines must fall within this statement period.");
       }
-      if (!Number.isFinite(amount) || amount <= 0) throw new ActionError("Every selected transaction needs a valid amount greater than zero.");
-      const amountCents = Math.round(amount * 100);
-      if (transaction.data.type === "Withdrawal") {
+      const amountCents = Math.round(item.amount * 100);
+      if (item.type === "Withdrawal") {
         netClearedCents -= amountCents;
         withdrawalCents += amountCents;
-      } else if (transaction.data.type === "Deposit") {
+      } else {
         netClearedCents += amountCents;
         depositCents += amountCents;
-      } else {
-        throw new ActionError("Choose Deposit or Withdrawal for each selected transaction.");
       }
     }
+    // Bank-feed transactions keep their own cleared mark too, so they can't be deleted once reconciled.
+    const selectedTransactions = allRows.filter((row) => row.kind === "transactions" && uniqueTransactionIds.includes(`txn-${row.id}`));
 
     const differenceCents = endingCents - openingCents - netClearedCents;
     if (differenceCents !== 0) throw new ActionError("The selected transactions don’t balance to the statement ending balance yet.");
@@ -2581,7 +2658,8 @@ export async function completeBankReconciliation(
           endingBalance: (endingCents / 100).toFixed(2),
           clearedDeposits: (depositCents / 100).toFixed(2),
           clearedWithdrawals: (withdrawalCents / 100).toFixed(2),
-          clearedCount: String(selectedTransactions.length),
+          clearedCount: String(uniqueTransactionIds.length),
+          clearedTxnIds: JSON.stringify(uniqueTransactionIds),
           difference: "0.00",
         },
       })

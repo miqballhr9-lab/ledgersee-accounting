@@ -422,6 +422,7 @@ export const modules: readonly ModuleDefinition[] = [
       { key: "institution", label: "Bank or institution" },
       { key: "currency", label: "Currency", type: "currency" },
       { key: "openingBalance", label: "Opening balance", type: "number" },
+      { key: "openingBalanceDate", label: "Opening balance as of", type: "date", help: "The date of the opening balance, e.g. your first bank statement's date." },
     ],
   },
   {
@@ -431,10 +432,10 @@ export const modules: readonly ModuleDefinition[] = [
     fields: [
       { key: "date", label: "Date", type: "date", required: true },
       { key: "description", label: "Description", required: true },
-      { key: "account", label: "Bank or cash account", required: true },
+      { key: "account", label: "Bank or cash account", type: "select", options: [], required: true },
       { key: "type", label: "Direction", type: "select", required: true, options: ["Deposit", "Withdrawal", "Transfer"] },
-      { key: "toAccount", label: "Transfer to", help: "For a transfer: the bank, cash or card account the money went to." },
-      { key: "category", label: "Category" },
+      { key: "toAccount", label: "Transfer to", type: "select", options: [], help: "For a transfer: the bank, cash or card account the money went to." },
+      { key: "category", label: "Category", type: "select", options: [], help: "The income or expense account (or other chart account) this money belongs to." },
       { key: "amount", label: "Amount", type: "number", required: true },
       { key: "matched", label: "Matched", type: "checkbox" },
     ],
@@ -776,6 +777,15 @@ export function withPriceBooks(module: ModuleDefinition, names: string[]): Modul
 }
 
 /** Fields that pick a warehouse or a stock item, filled with this business's own; without warehouses the warehouse field is left off. */
+/** A bank line's account boxes list the chart's real accounts, so a typo can't make an unlinked account. */
+export function withTransactionAccounts(module: ModuleDefinition, bankAccounts: string[], categories: string[]): ModuleDefinition {
+  if (module.kind !== "transactions") return module;
+  return {
+    ...module,
+    fields: module.fields.map((field) => (field.key === "account" || field.key === "toAccount" ? { ...field, options: bankAccounts } : field.key === "category" ? { ...field, options: categories } : field)),
+  };
+}
+
 export function withWarehouses(module: ModuleDefinition, warehouses: string[], stockItems: string[] = []): ModuleDefinition {
   const keys = new Set(["warehouse", "fromWarehouse", "toWarehouse"]);
   if (!module.fields.some((field) => keys.has(field.key) || (module.kind === "stock-transfers" && field.key === "item"))) return module;

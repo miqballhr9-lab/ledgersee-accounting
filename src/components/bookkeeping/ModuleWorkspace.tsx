@@ -391,6 +391,9 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
   // Money received from customers can also go to Undeposited funds, banked later with a bank deposit.
   const paymentAccounts = accounts.filter((account) => (module.kind === "invoices" || module.kind === "supplier-credits" ? receivingAccountType(account) : paymentAccountType(account)));
   const expenseAccounts = accounts.filter((account) => account.kind === "accounts" && account.data.type === "Expense" && account.data.locked !== "true");
+  /** A purchase order recorded as an expense defaults to a purchases/supplies account, never salaries. */
+  const purchaseCategory = () => expenseAccounts.find((account) => /purchase|cost of (goods|sales)|supplies|materials|stock/i.test(account.data.name ?? ""))
+    ?? expenseAccounts.find((account) => !/salar|wage|payroll|employer|gratuity/i.test(account.data.name ?? ""));
   const customization = LIST_CUSTOMIZATIONS[module.kind];
   const listPreferences = customization ? storedListPreferences ?? { columns: [...customization.defaultColumns], pageSize: customization.defaultPageSize } : null;
   const pageSize = listPreferences?.pageSize ?? DEFAULT_PAGE_SIZE;
@@ -621,13 +624,13 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
   }
 
   // Actions on several checked records at once, offered from the toolbar menu.
-  type BulkAction = "estimates" | "sales-orders" | "invoices" | "expense" | "pay" | "undo-payment" | "apply-credit" | "refund" | "open" | "delete" | "invoice-time";
+  type BulkAction = "estimates" | "sales-orders" | "invoices" | "bills" | "expense" | "pay" | "undo-payment" | "apply-credit" | "refund" | "open" | "delete" | "invoice-time";
   const bulkMenu: { label: string; items: { action: BulkAction; label: string }[] } | null = module.kind === "sales-orders"
     ? { label: "Convert", items: [{ action: "estimates", label: "Convert to estimate" }, { action: "invoices", label: "Convert to invoice" }] }
     : module.kind === "estimates"
       ? { label: "Convert", items: [{ action: "sales-orders", label: "Convert to sales order" }, { action: "invoices", label: "Convert to invoice" }] }
       : module.kind === "purchase-orders"
-      ? { label: "Convert", items: [{ action: "expense", label: "Convert to expense" }] }
+      ? { label: "Convert", items: [{ action: "bills", label: "Convert to bill" }, { action: "expense", label: "Convert to expense" }] }
       : module.kind === "invoices"
         ? { label: "Actions", items: [{ action: "pay", label: "Record payment" }, { action: "undo-payment", label: "Undo payment" }] }
         : module.kind === "credit-notes"
@@ -735,7 +738,7 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
       const vendor = vendors.find((item) => item.data.name?.trim().toLowerCase() === selectedRecords[0]?.data.vendor?.trim().toLowerCase());
       setBulkExpenseIds(selectedRecords.map((record) => record.id));
       setExpenseConversionRecord(selectedRecords[0]);
-      setExpenseCategoryId(expenseAccounts.find((account) => account.id === vendor?.data.defaultExpenseAccount)?.id ?? expenseAccounts[0]?.id ?? "");
+      setExpenseCategoryId(expenseAccounts.find((account) => account.id === vendor?.data.defaultExpenseAccount)?.id ?? purchaseCategory()?.id ?? "");
       setExpensePaymentAccountId("");
       setExpenseConversionError("");
       return;
@@ -774,6 +777,7 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
       estimates: "converted to estimates",
       "sales-orders": "converted to sales orders",
       invoices: "converted to invoices",
+      bills: "converted to bills",
       expense: "recorded as expenses",
       pay: "marked paid",
       "undo-payment": "reopened as unpaid",
@@ -812,7 +816,7 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
         ?? vendors.find((item) => item.data.name?.trim().toLowerCase() === record.data.vendor?.trim().toLowerCase());
       const preferredCategory = expenseAccounts.find((account) => account.id === vendor?.data.defaultExpenseAccount);
       setExpenseConversionRecord(record);
-      setExpenseCategoryId(preferredCategory?.id ?? expenseAccounts[0]?.id ?? "");
+      setExpenseCategoryId(preferredCategory?.id ?? purchaseCategory()?.id ?? "");
       setExpensePaymentAccountId("");
       setExpenseConversionError("");
       return;

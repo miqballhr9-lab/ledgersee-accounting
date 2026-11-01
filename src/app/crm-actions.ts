@@ -466,6 +466,13 @@ export async function saveCrmRecord(kind: string, input: Record<string, string>,
     if (!existing) throw new ActionError(`We couldn’t find that ${mod.label.toLowerCase()}. Refresh and try again.`);
   }
   let data = buildData(mod, input, context, existing?.data, me.name, existing?.id);
+  // One vehicle per registration number.
+  if (kind === "hr-vehicles" && data.plate?.trim()) {
+    const plate = data.plate.replace(/[\s-]/g, "").toLowerCase();
+    const vehicles = await db.select().from(bookkeepingRecord).where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "hr-vehicles")));
+    const twin = vehicles.find((row) => row.id !== existing?.id && (row.data.plate ?? "").replace(/[\s-]/g, "").toLowerCase() === plate);
+    if (twin) throw new ActionError(`Registration ${data.plate} is already on ${twin.data.vehicle || "another vehicle"}.`);
+  }
   data = withHistory(data, changeEntries(mod, existing?.data, data, me.name));
   if (existing) {
     const [saved] = await db.update(bookkeepingRecord).set({ data, updatedAt: new Date() })
