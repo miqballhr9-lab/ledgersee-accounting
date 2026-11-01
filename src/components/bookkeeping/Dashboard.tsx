@@ -21,6 +21,8 @@ interface DashboardProps {
   records: BookkeepingRecord[];
   setup: SetupProgress;
   asOfDate: string;
+  /** Income and expenses from the books (the Profit and Loss), all time and per month this year. */
+  profit?: { income: number; expenses: number; months: Array<{ income: number; expenses: number }>; cashBasis: boolean };
 }
 
 function daysBetween(from: string, to: string) {
@@ -37,7 +39,7 @@ function dateFor(record: BookkeepingRecord) {
   return record.data.issueDate || record.data.date || record.data.expenseDate || record.data.billDate || record.createdAt.slice(0, 10);
 }
 
-export default function Dashboard({ records, setup, asOfDate }: DashboardProps) {
+export default function Dashboard({ records, setup, asOfDate, profit }: DashboardProps) {
   const company = records.find((record) => record.kind === "settings")?.data ?? {};
   const currency = company.currency || "USD";
   const companyName = company.companyName?.trim() ?? "";
@@ -47,8 +49,8 @@ export default function Dashboard({ records, setup, asOfDate }: DashboardProps) 
   const expenses = records.filter((record) => record.kind === "expenses");
   const bills = records.filter((record) => record.kind === "bills" && record.data.status !== "Cancelled");
   const invoiceNet = (record: BookkeepingRecord) => Math.max(0, amount(record) - amount(record, "creditApplied"));
-  const income = invoices.reduce((sum, record) => sum + invoiceNet(record), 0);
-  const totalExpenses = expenses.reduce((sum, record) => sum + amount(record), 0) + bills.reduce((sum, record) => sum + amount(record), 0);
+  const income = profit ? profit.income : invoices.reduce((sum, record) => sum + invoiceNet(record), 0);
+  const totalExpenses = profit ? profit.expenses : expenses.reduce((sum, record) => sum + amount(record), 0) + bills.reduce((sum, record) => sum + amount(record), 0);
   const receivables = invoices.reduce((sum, record) => sum + Math.max(0, amount(record) - amount(record, "paidAmount") - amount(record, "creditApplied")), 0);
   const payables = bills.reduce((sum, record) => sum + Math.max(0, amount(record) - amount(record, "paidAmount") - amount(record, "creditApplied")), 0);
   const netProfit = income - totalExpenses;
@@ -64,8 +66,8 @@ export default function Dashboard({ records, setup, asOfDate }: DashboardProps) 
     }, 0);
     return {
       month,
-      income: getMonthTotal(invoices),
-      expenses: getMonthTotal([...expenses, ...bills]),
+      income: profit ? profit.months[index].income : getMonthTotal(invoices),
+      expenses: profit ? profit.months[index].expenses : getMonthTotal([...expenses, ...bills]),
     };
   });
 
@@ -78,8 +80,8 @@ export default function Dashboard({ records, setup, asOfDate }: DashboardProps) 
   };
 
   const stats = [
-    { label: "Total income", value: income, note: `${invoices.length} issued invoices`, icon: ArrowUpRight, tone: "text-accent-foreground bg-accent" },
-    { label: "Total expenses", value: totalExpenses, note: `${expenses.length + bills.length} recorded costs`, icon: ArrowDownRight, tone: "text-destructive bg-destructive/10" },
+    { label: "Total income", value: income, note: profit ? `As in Profit and Loss · ${profit.cashBasis ? "cash" : "accrual"} basis` : `${invoices.length} issued invoices`, icon: ArrowUpRight, tone: "text-accent-foreground bg-accent" },
+    { label: "Total expenses", value: totalExpenses, note: profit ? "Costs, salaries and HR expenses, excluding tax and stock" : `${expenses.length + bills.length} recorded costs`, icon: ArrowDownRight, tone: "text-destructive bg-destructive/10" },
     { label: "Net profit", value: netProfit, note: "Income minus expenses", icon: CircleDollarSign, tone: "text-primary bg-primary/10" },
     { label: "Receivables", value: receivables, note: "Remaining customer balances", icon: FileText, tone: "text-secondary-foreground bg-secondary" },
     { label: "Payables", value: payables, note: "Remaining supplier balances", icon: Wallet, tone: "text-muted-foreground bg-muted" },
@@ -141,7 +143,7 @@ export default function Dashboard({ records, setup, asOfDate }: DashboardProps) 
           <div className="flex items-start justify-between gap-3 border-b border-border px-5 py-4">
             <div>
               <h2 className="text-sm font-semibold">Income vs expenses</h2>
-              <p className="mt-1 text-xs text-muted-foreground">Monthly totals for {chartYear}, from invoices, bills, and expenses</p>
+              <p className="mt-1 text-xs text-muted-foreground">Monthly totals for {chartYear}, from the books</p>
             </div>
             <span className="rounded-md bg-muted px-2 py-1 text-[11px] font-medium text-muted-foreground">By month</span>
           </div>

@@ -58,6 +58,7 @@ export const modules: readonly ModuleDefinition[] = [
       { key: "phone", label: "Phone" },
       { key: "mobile", label: "Mobile" },
       { key: "website", label: "Website" },
+      { key: "currency", label: "Currency", type: "currency", help: "For a customer abroad: their invoices start in this currency. Empty uses your home currency." },
       { key: "address", label: "Street address", type: "textarea", section: "Billing address" },
       { key: "addressLine2", label: "Address line 2" },
       { key: "city", label: "City" },

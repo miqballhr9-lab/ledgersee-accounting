@@ -191,7 +191,8 @@ export default function ReportViewer({ reportKey, records, today }: ReportViewer
   function zoomHref(spec: ZoomSpec, label: string) {
     const back = `${pathname}?${params.toString()}`;
     const next = new URLSearchParams({ z: JSON.stringify(spec), back, title: `Transaction Report · ${label}` });
-    if (method === "cash") next.set("method", "cash");
+    // The drill-down keeps the report's basis, whichever the business's default is.
+    next.set("method", method);
     return `/app/reports/transaction-report?${next.toString()}`;
   }
 

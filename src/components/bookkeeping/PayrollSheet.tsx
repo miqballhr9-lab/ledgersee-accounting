@@ -13,7 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { readableError } from "@/lib/action-error";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
 import { calculatePayroll, emptyPayrollValues, type PayrollValues, type SalaryTaxRule } from "@/lib/payroll-utils";
-import { adjustedWorkedDays, claimsToReimburse, contractCoversMonth, parseSalaryRules, payrollAdjustments, salaryRuleAmounts } from "@/lib/payroll-adjustments";
+import { adjustedWorkedDays, claimsToReimburse, contractCoversMonth, daysNotEmployed, monthWorkingDays, parseSalaryRules, payrollAdjustments, salaryRuleAmounts, wageForMonth } from "@/lib/payroll-adjustments";
 
 export interface PayrollHrRecords {
   leaves: BookkeepingRecord[];
@@ -63,7 +63,7 @@ function hrLine(month: string, employee: BookkeepingRecord, workingDays: string,
  * lines and when copying an earlier month, so nothing stale carries over.
  */
 function hrRefresh(month: string, employee: BookkeepingRecord, workingDays: string, hr?: PayrollHrRecords): Partial<SheetRow> {
-  const wage = employee.data.baseSalary ? { baseSalary: employee.data.baseSalary } : {};
+  const wage = wageForMonth(employee, month) ? { baseSalary: wageForMonth(employee, month) } : {};
   if (!hr) return { ...wage, workedDays: workingDays };
   const person = { id: employee.id, name: employee.data.name };
   const adjustments = payrollAdjustments(month, person, hr.leaves, hr.loans, hr.attendance, hr.weekend);
@@ -71,7 +71,8 @@ function hrRefresh(month: string, employee: BookkeepingRecord, workingDays: stri
   const overtimeRate = Number(employee.data.overtimeRate) || 0;
   return {
     ...wage,
-    workedDays: adjustedWorkedDays(workingDays, adjustments),
+    // Joined this month, or contract ended this month: only the days employed are paid.
+    workedDays: adjustedWorkedDays(workingDays, { ...adjustments, notEmployedDays: daysNotEmployed(month, hr.weekend ?? [0], employee.data.joiningDate, person, hr.contracts ?? []) }),
     loanDeduction: adjustments.loanDeduction ? String(adjustments.loanDeduction) : "",
     reimbursement: claims.amount ? String(claims.amount) : "",
     reimbursedClaims: claims.ids.join(","),
@@ -231,8 +232,9 @@ export default function PayrollSheet({ open, onOpenChange, month: initialMonth, 
   const monthEntries = existingRecords.filter((entry) => entry.data.month === initialMonth);
   const [month, setMonth] = useState(initialMonth);
   const [reference, setReference] = useState(() => (copyFrom ? "" : monthEntries.find((entry) => entry.data.reference)?.data.reference) || defaultReference(initialMonth));
-  const [workingDays, setWorkingDays] = useState(() => (copyFrom ?? monthEntries[0])?.data.workingDays || "26");
-  const [rows, setRows] = useState<SheetRow[]>(() => startingRows(initialMonth, existingRecords, activeEmployees, employees, (copyFrom ?? monthEntries[0])?.data.workingDays || "26", copyFrom, hr));
+  // A new month's working days follow the weekly days off in Settings (22 with Saturday and Sunday off).
+  const [workingDays, setWorkingDays] = useState(() => monthEntries[0]?.data.workingDays || String(monthWorkingDays(initialMonth, hr?.weekend ?? [0])));
+  const [rows, setRows] = useState<SheetRow[]>(() => startingRows(initialMonth, existingRecords, activeEmployees, employees, monthEntries[0]?.data.workingDays || String(monthWorkingDays(initialMonth, hr?.weekend ?? [0])), copyFrom, hr));
   const [nextId, setNextId] = useState(() => rows.length + 1);
   // People who appear only on saved entries (not on the Employees list) stay pickable.
   const entryPeople = new Map<string, Person>();

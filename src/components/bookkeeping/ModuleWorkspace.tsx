@@ -1255,7 +1255,7 @@ export default function ModuleWorkspace({ module, records: initialRecords, custo
           onOpenChange={setEditorOpen}
           onSaved={handleSaved}
           onSaveComplete={handleInvoiceSaveComplete}
-          history={module.kind === "credit-notes" ? invoices : undefined}
+          history={module.kind === "credit-notes" ? invoices : module.kind === "invoices" || module.kind === "estimates" ? records : undefined}
         />
       )}
 

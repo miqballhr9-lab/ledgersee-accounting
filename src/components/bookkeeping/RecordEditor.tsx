@@ -34,6 +34,7 @@ import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
 import { formatCustomerAddress } from "@/lib/customer-utils";
 import { expenseCategoryLabel, expenseLinesFromData } from "@/lib/expense-utils";
 import { categoryLines, lastPurchase, possibleDuplicates, supplierNamed, supplierOf, supplierSuggestion, type SuggestedLine } from "@/lib/supplier-memory";
+import { marketExchangeRate } from "@/app/fx-actions";
 import { creditFromInvoice, currencyAmount, dueDateForTerms, invoiceSubtotal, invoiceTax, parseInvoiceLines } from "@/lib/invoice-utils";
 import { accountCategoryForType } from "@/lib/account-types";
 import { paymentAccountLabel, paymentAccountType, receivingAccountType } from "@/lib/payment-accounts";
@@ -388,6 +389,29 @@ export default function RecordEditor({ module, record, customers, vendors, items
       }
       return next;
     });
+    if ((key === "currency" || key === "exchangeRate") && hasStructuredLines) {
+      const nextRate = key === "exchangeRate" ? value : !value || value === defaultCurrency ? "1" : values.currency === value && values.exchangeRate !== "1" ? values.exchangeRate : lastRateFor(value);
+      repriceLines(values, { ...values, [key]: value, exchangeRate: nextRate });
+    }
+    // No rate used before for this currency: start from today's market rate.
+    if (key === "currency" && value && defaultCurrency && value !== defaultCurrency && "exchangeRate" in values && !lastRateFor(value)) {
+      void marketExchangeRate(value, defaultCurrency).then((rate) => {
+        if (!rate) return;
+        setValues((current) => (current.currency !== value || Number(current.exchangeRate) > 0 ? current : { ...current, exchangeRate: rate }));
+        if (hasStructuredLines) repriceLines({ ...values, currency: value, exchangeRate: "" }, { ...values, currency: value, exchangeRate: rate });
+      });
+    }
+  }
+
+  /** Lines priced from an item follow the document's currency; a price someone typed is left alone. */
+  function repriceLines(before: Record<string, string>, after: Record<string, string>) {
+    setInvoiceLines((lines) => lines.map((line) => {
+      const item = line.itemId ? itemsRef.current.find((option) => option.id === line.itemId) : undefined;
+      if (!item || item.data.itemType === "Bundle") return line;
+      const home = module.kind === "purchase-orders" ? item.data.cost?.trim() || item.data.purchaseCost?.trim() || "" : homePriceFor(item.data.rate, item.id, Number(line.quantity) || 1);
+      if (Number(line.rate) !== Number(inDocumentCurrency(home, before.currency, before.exchangeRate))) return line;
+      return { ...line, rate: inDocumentCurrency(home, after.currency, after.exchangeRate) };
+    }));
   }
 
   async function shareDocument() {
@@ -769,6 +793,12 @@ export default function RecordEditor({ module, record, customers, vendors, items
                 const customer = customerOptions.find((option) => option.id === customerId);
                 if (customer?.data.name) {
                   changeValue(field.key, customer.data.name);
+                  // A customer abroad is billed in their currency: theirs, else the one their last invoice was in.
+                  if (!record && "currency" in values) {
+                    const last = history.filter((entry) => entry.kind === module.kind && (entry.data.customerId === customer.id || entry.data.customer?.trim().toLowerCase() === customer.data.name.trim().toLowerCase())).sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+                    const wanted = customer.data.currency || last?.data.currency || "";
+                    if (wanted && wanted !== (values.currency || defaultCurrency)) changeValue("currency", wanted);
+                  }
                   setValues((current) => ({
                     ...current,
                     customer: customer.data.name,
@@ -985,6 +1015,17 @@ export default function RecordEditor({ module, record, customers, vendors, items
 
   // A customer's price book sets its own price for the items it lists; QuickBooks price rules raise or lower the rest.
   function priceFor(rate: string | undefined, itemId = "", quantity = 1) {
+    return inDocumentCurrency(homePriceFor(rate, itemId, quantity));
+  }
+
+  /** Item prices are kept in the home currency; a foreign-currency document shows them in its own. */
+  function inDocumentCurrency(price: string, currency = values.currency, exchangeRate = values.exchangeRate) {
+    const fx = Number(exchangeRate);
+    if (!price || !defaultCurrency || !currency || currency === defaultCurrency || !(fx > 0) || fx === 1) return price;
+    return (Math.round((Number(price) / fx) * 100) / 100).toFixed(2);
+  }
+
+  function homePriceFor(rate: string | undefined, itemId = "", quantity = 1) {
     const base = Number(rate) || 0;
     if (!salesPricing) return rate ?? "0";
     const customer = customers.find((option) => option.id === values.customerId) ?? customers.find((option) => (option.data.name ?? "").trim().toLowerCase() === (values.customer ?? "").trim().toLowerCase());
@@ -996,7 +1037,7 @@ export default function RecordEditor({ module, record, customers, vendors, items
 
   /** A purchase order buys at the item's purchase cost; sales documents sell at its price (or price book). */
   function lineRate(item: BookkeepingRecord, quantity: number) {
-    if (module.kind === "purchase-orders") return item.data.cost?.trim() || item.data.purchaseCost?.trim() || "";
+    if (module.kind === "purchase-orders") return inDocumentCurrency(item.data.cost?.trim() || item.data.purchaseCost?.trim() || "");
     return priceFor(item.data.rate, item.id, quantity);
   }
 

@@ -122,6 +122,11 @@ export function budgetActualPostings(line: BudgetLine, books: BudgetBooks): Post
   const categoryOf = (name: string) => books.ledger.accounts.get(name.trim().toLowerCase())?.category;
   const within = books.ledger.postings.filter((posting) => (!books.startDate || posting.date >= books.startDate) && (!books.endDate || posting.date <= books.endDate) && categoryOf(posting.account) === category);
   const named = books.ledger.accounts.get(head);
+  // A salaries head is what payroll posts, whichever salaries account the chart books it to.
+  const salaries = books.ledger.salaries.trim().toLowerCase();
+  if (category === "Expense" && /salar|wages/.test(head) && (named?.category === "Expense" || !named)) {
+    return within.filter((posting) => posting.account.trim().toLowerCase() === head || posting.account.trim().toLowerCase() === salaries);
+  }
   if (named?.category === category) return within.filter((posting) => posting.account.trim().toLowerCase() === head);
   if (category === "Income") {
     if (allIncomeHeads.includes(head)) return within;

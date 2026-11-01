@@ -9,6 +9,7 @@ import { bookkeepingRecord } from "@/db/schema";
 import { ActionError } from "@/lib/action-error";
 import { sendEmail } from "@/lib/email";
 import { isWeekend, weekendDays } from "@/lib/weekend";
+import { monthWorkingDays } from "@/lib/payroll-adjustments";
 import { isCompletedAttachment, isHiredStage, isRunningAttachment, isToApprove, odooHrData } from "@/lib/hr-status";
 
 /**
@@ -289,12 +290,20 @@ export function applyHrRules(kind: string, data: Record<string, string>, existin
     if (!data.gratuityDaysPerYear) data.gratuityDaysPerYear = "30";
     // Paid time off left in the departure year: each limited paid type's allowance less what was taken.
     const year = (data.lastWorkingDay || (context.today ?? dateInZone(undefined))).slice(0, 4);
+    // A year's allowance is earned over the year: someone who joined or leaves part way through
+    // gets the share for the months they worked that year (accruing allocations already count so).
+    const lastDay = data.lastWorkingDay || (context.today ?? dateInZone(undefined));
+    const yearStart = data.joiningDate && data.joiningDate > `${year}-01-01` ? data.joiningDate : `${year}-01-01`;
+    const workedShare = lastDay < yearStart ? 0 : Math.min(1, ((new Date(`${lastDay}T12:00:00Z`).getTime() - new Date(`${yearStart}T12:00:00Z`).getTime()) / 86_400_000 + 1) / 365);
     const unused = context.byKind("hr-leave-types")
       .filter((type) => type.data.paid !== "false")
       .reduce((sum, type) => {
         const person = { employeeId: data.employeeId ?? "", employee: data.employee ?? "", leaveTypeId: type.id };
         const allowance = timeOffAllowance(context, person, year);
-        return allowance === null ? sum : sum + Math.max(0, allowance - leaveUsed(context.byKind("hr-leaves"), person, year));
+        if (allowance === null) return sum;
+        const accrues = context.byKind("hr-allocations").some((row) => row.data.leaveTypeId === type.id && sameEmployee(row.data, person) && row.data.allocationType === "Accrual");
+        const earned = accrues ? allowance : allowance * workedShare;
+        return sum + Math.max(0, earned - leaveUsed(context.byKind("hr-leaves"), person, year));
       }, 0);
     data.unusedTimeOffDays = String(Math.round(unused * 100) / 100);
     // Filled from the unused paid time off until a different figure is typed in.
@@ -302,14 +311,18 @@ export function applyHrRules(kind: string, data: Record<string, string>, existin
     const auto = !typed || (existingData?.leaveEncashmentAuto === "true" && typed === existingData.leaveEncashmentDays);
     if (auto) data.leaveEncashmentDays = data.unusedTimeOffDays;
     data.leaveEncashmentAuto = auto ? "true" : "false";
-    const daily = money(data.monthlySalary) / 30;
+    // Pending salary and leave are paid per working day, as payroll pays them (the month's working
+    // days from the weekly days off); gratuity is a number of days' wages a year, on 30 days a month.
+    const lastMonth = lastDay.slice(0, 7);
+    const daily = money(data.monthlySalary) / Math.max(1, monthWorkingDays(lastMonth, weekendDays(context.byKind("settings")[0]?.data.weekendDays)));
+    const calendarDaily = money(data.monthlySalary) / 30;
     let years = 0;
     if (data.joiningDate && data.lastWorkingDay && data.lastWorkingDay > data.joiningDate) {
       const months = (new Date(data.lastWorkingDay).getTime() - new Date(data.joiningDate).getTime()) / (1000 * 60 * 60 * 24 * 30.4375);
       // A part year of six months or more counts as a full year, as is usual for gratuity.
       years = Math.floor(months / 12) + (months % 12 >= 6 ? 1 : 0);
     }
-    const gratuity = daily * money(data.gratuityDaysPerYear) * years;
+    const gratuity = calendarDaily * money(data.gratuityDaysPerYear) * years;
     const gross = daily * money(data.pendingSalaryDays) + daily * money(data.leaveEncashmentDays) + gratuity + money(data.bonus);
     data.serviceYears = String(years);
     data.gratuity = fixed(gratuity);
@@ -436,9 +449,19 @@ export async function afterHrSave(userId: string, kind: string, before: Record<s
     // A raise agreed in the appraisal becomes the employee's wage, and the old wage is kept in the notes.
     const [employee] = await db.select().from(bookkeepingRecord).where(and(eq(bookkeepingRecord.id, data.employeeId), eq(bookkeepingRecord.userId, userId))).limit(1);
     if (employee && money(employee.data.baseSalary) !== money(data.newWage)) {
-      const note = `Wage changed from ${employee.data.baseSalary || "0"} to ${fixed(money(data.newWage))}${data.wageEffectiveMonth ? ` from ${data.wageEffectiveMonth}` : ""} (appraisal ${data.period || data.reviewDate || ""}).`.replace(" ().", ".");
-      await db.update(bookkeepingRecord).set({ data: { ...employee.data, baseSalary: fixed(money(data.newWage)), notes: [employee.data.notes, note].filter(Boolean).join("\n") }, updatedAt: new Date() }).where(eq(bookkeepingRecord.id, employee.id));
-      return `${employee.data.name}'s wage is now ${fixed(money(data.newWage))}.`;
+      const wage = fixed(money(data.newWage));
+      const note = `Wage changed from ${employee.data.baseSalary || "0"} to ${wage}${data.wageEffectiveMonth ? ` from ${data.wageEffectiveMonth}` : ""} (appraisal ${data.period || data.reviewDate || ""}).`.replace(" ().", ".");
+      const thisMonth = (await todayFor(userId)).slice(0, 7);
+      // A raise from a later month waits: payroll uses it from that month (wageForMonth), and the
+      // running contract carries the same, so contract and employee never disagree.
+      const later = Boolean(data.wageEffectiveMonth && data.wageEffectiveMonth > thisMonth);
+      const change: Record<string, string> = later ? { pendingWage: wage, pendingWageFrom: data.wageEffectiveMonth } : { baseSalary: wage, pendingWage: "", pendingWageFrom: "" };
+      await db.update(bookkeepingRecord).set({ data: { ...employee.data, ...change, notes: [employee.data.notes, note].filter(Boolean).join("\n") }, updatedAt: new Date() }).where(eq(bookkeepingRecord.id, employee.id));
+      const contracts = await db.select().from(bookkeepingRecord).where(and(eq(bookkeepingRecord.userId, userId), eq(bookkeepingRecord.kind, "hr-contracts")));
+      for (const contract of contracts.filter((row) => row.data.employeeId === employee.id && row.data.status === "Running")) {
+        await db.update(bookkeepingRecord).set({ data: { ...contract.data, ...(later ? { pendingWage: wage, pendingWageFrom: data.wageEffectiveMonth } : { wage, pendingWage: "", pendingWageFrom: "" }) }, updatedAt: new Date() }).where(eq(bookkeepingRecord.id, contract.id));
+      }
+      return later ? `${employee.data.name}'s wage becomes ${wage} from ${data.wageEffectiveMonth}; until then it stays ${employee.data.baseSalary || "0"}.` : `${employee.data.name}'s wage is now ${wage}.`;
     }
   }
   if (kind === "hr-contracts" && data.status === "Running" && data.employeeId && (before?.status !== "Running" || before?.wage !== data.wage)) {

@@ -173,6 +173,7 @@ export default function ChartOfAccountsWorkspace({ accounts: initialAccounts, cu
           <p className="text-xs font-medium uppercase tracking-[0.12em] text-primary">Books / Accounting</p>
           <h1 className="mt-1 text-[26px] font-semibold tracking-tight sm:text-3xl">Chart of accounts</h1>
           <p className="mt-1.5 max-w-2xl text-sm text-muted-foreground">Manage the accounts that organize your business activity and journal entries.</p>
+          <p className="mt-1 text-xs text-muted-foreground">Balances today on the <span className="font-medium text-foreground">{cashBasis ? "cash" : "accrual"} basis</span>, as in the Balance Sheet and Profit and Loss{cashBasis ? ": unpaid invoices, bills and payroll are not in them yet" : ""}. Change the basis in Settings.</p>
         </div>
         <div className="flex flex-wrap gap-2">
           <StandardAccountsButton onAdded={handleStandardAdded} />
@@ -234,7 +235,7 @@ export default function ChartOfAccountsWorkspace({ accounts: initialAccounts, cu
                 <TableHead className="min-w-52 text-xs font-medium text-muted-foreground">Name</TableHead>
                 <TableHead className="min-w-48 text-xs font-medium text-muted-foreground">Type / detail type</TableHead>
                 <TableHead className="text-right text-xs font-medium text-muted-foreground">Opening balance</TableHead>
-                <TableHead className="text-right text-xs font-medium text-muted-foreground">Balance</TableHead>
+                <TableHead className="text-right text-xs font-medium text-muted-foreground">{cashBasis ? "Balance (cash)" : "Balance (accrual)"}</TableHead>
                 <TableHead className="w-28 text-right text-xs font-medium text-muted-foreground">Status</TableHead>
                 <TableHead className="w-14 px-5 text-right" aria-label="Account actions" />
               </TableRow>

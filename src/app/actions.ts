@@ -517,7 +517,13 @@ async function saveRecord(
   if (current?.data.docType === "Opening balance" && (kind === "invoices" || kind === "bills")) throw new ActionError(`Change this opening balance on the ${kind === "invoices" ? "customer" : "supplier"} instead.`);
   // Nothing dated in a closed period can be added or changed.
   await assertBooksOpen(me.id, documentDate(kind, input), documentDate(kind, current?.data));
-  let data = amountFromLineItems(sanitizePayload(input), kind);
+  let payload = sanitizePayload(input);
+  // A tax picked by name carries its rate, so the document's tax is never left at 0 by a missing rate.
+  if (payload.taxName?.trim() && !payload.taxRate?.trim() && payload.lineItems?.trim()) {
+    const [tax] = await db.select().from(bookkeepingRecord).where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "taxes"), sql`${bookkeepingRecord.data}->>'name' = ${payload.taxName.trim()}`)).limit(1);
+    if (tax?.data.rate) payload = { ...payload, taxRate: tax.data.rate };
+  }
+  let data = amountFromLineItems(payload, kind);
   data = keepServerOwned(kind, data, current?.data);
   await assertNotDuplicate(me.id, kind, data, id);
   if (kind === "purchase-orders" && !id) data = { ...data, status: "Draft" };

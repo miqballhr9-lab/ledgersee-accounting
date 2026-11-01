@@ -74,8 +74,39 @@ export function claimsToReimburse(month: string, employee: { id?: string; name?:
 }
 
 /** Worked days after unpaid time off and absences, never below zero. */
-export function adjustedWorkedDays(workingDays: string, adjustments: { unpaidDays: number; absentDays: number }) {
-  const off = adjustments.unpaidDays + adjustments.absentDays;
+/** An employee's wage for a month: a raise waiting for a later month counts from that month on. */
+export function wageForMonth(employee: { data: Record<string, string> } | undefined, month: string) {
+  if (!employee) return "";
+  const data = employee.data;
+  return data.pendingWage && data.pendingWageFrom && month >= data.pendingWageFrom ? data.pendingWage : data.baseSalary || "";
+}
+
+/** The working days of a month: every day that isn't a weekly day off (Settings). */
+export function monthWorkingDays(month: string, weekend: number[] = [0]) {
+  if (!/^\d{4}-\d{2}$/.test(month)) return 26;
+  const [year, monthNumber] = month.split("-").map(Number);
+  const last = new Date(Date.UTC(year, monthNumber, 0)).getUTCDate();
+  return dates(`${month}-01`, `${month}-${String(last).padStart(2, "0")}`).filter((day) => !weekend.includes(new Date(`${day}T12:00:00Z`).getUTCDay())).length;
+}
+
+/**
+ * Working days of the month the person wasn't employed: before their joining date, or after
+ * their contract ended. A joiner on the 28th is paid for the days from the 28th, not the month.
+ */
+export function daysNotEmployed(month: string, weekend: number[], joiningDate: string | undefined, employee: { id?: string; name?: string }, contracts: Row[] = []) {
+  if (!/^\d{4}-\d{2}$/.test(month)) return 0;
+  const [year, monthNumber] = month.split("-").map(Number);
+  const last = new Date(Date.UTC(year, monthNumber, 0)).getUTCDate();
+  const first = `${month}-01`;
+  const end = `${month}-${String(last).padStart(2, "0")}`;
+  const theirs = contracts.filter((row) => row.data.status !== "Cancelled" && ((employee.id && row.data.employeeId === employee.id) || (row.data.employee && row.data.employee === employee.name)));
+  const ends = theirs.map((row) => row.data.endDate).filter((date): date is string => Boolean(date) && date >= first && date < end);
+  const endsOn = ends.length && theirs.every((row) => !row.data.endDate || row.data.endDate < end) ? ends.sort().pop() : "";
+  return dates(first, end).filter((day) => !weekend.includes(new Date(`${day}T12:00:00Z`).getUTCDay()) && ((joiningDate && day < joiningDate) || (endsOn && day > endsOn))).length;
+}
+
+export function adjustedWorkedDays(workingDays: string, adjustments: { unpaidDays: number; absentDays: number; notEmployedDays?: number }) {
+  const off = adjustments.unpaidDays + adjustments.absentDays + (adjustments.notEmployedDays ?? 0);
   return off > 0 ? String(Math.max(0, Math.ceil(Number(workingDays || 0) - off))) : workingDays;
 }
 

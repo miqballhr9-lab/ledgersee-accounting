@@ -15,7 +15,7 @@ import { billingAccess } from "@/lib/billing";
 import { planFor, type Feature } from "@/lib/plans";
 import { sendEmail, sendEmailOrThrow } from "@/lib/email";
 import type { BookkeepingRecord } from "@/lib/bookkeeping-types";
-import { adjustedWorkedDays, claimsToReimburse, contractCoversMonth, parseSalaryRules, payrollAdjustments, salaryRuleAmounts } from "@/lib/payroll-adjustments";
+import { adjustedWorkedDays, claimsToReimburse, contractCoversMonth, daysNotEmployed, monthWorkingDays, parseSalaryRules, payrollAdjustments, salaryRuleAmounts, wageForMonth } from "@/lib/payroll-adjustments";
 import { weekendDays } from "@/lib/weekend";
 import { supplierCategoryForBankLine } from "@/lib/supplier-memory";
 import { runCaseEscalation, runLeadFollowUp, runOverdueTasks, runStaleDeals, runWonDealInvoices } from "@/lib/crm-automation";
@@ -191,7 +191,7 @@ async function runMonthlyPayroll(userId: string) {
       joiningDate: employee.data.joiningDate || "",
       paymentAccountId: employee.data.paymentAccountId || "",
       baseSalary: employee.data.baseSalary || "0",
-      workingDays: "26",
+      workingDays: String(monthWorkingDays(month, weekend)),
     });
   }
   for (const entry of lastMonthEntries) {
@@ -203,7 +203,8 @@ async function runMonthlyPayroll(userId: string) {
   const errors: string[] = [];
   for (const source of sources) {
     if (hasEntry(source.employeeId || "", source.employeeName || "")) continue;
-    const workingDays = source.workingDays || "26";
+    // This month's working days from the weekly days off in Settings, not last month's count.
+    const workingDays = String(monthWorkingDays(month, weekend));
     const payload: Record<string, string> = {
       reference: `SAL-${month}`,
       employeeId: source.employeeId || "",
@@ -225,9 +226,10 @@ async function runMonthlyPayroll(userId: string) {
     const hr = payrollAdjustments(month, { id: employee?.id, name: payload.employeeName }, leaves, loans, attendance, weekend);
     // Salary rules from Settings fill a new employee's allowances and deductions; last month's figures carry over otherwise.
     if (!lastMonthEntries.some((row) => row.data.employeeId === payload.employeeId && row.data.employeeName?.trim() === payload.employeeName.trim())) Object.assign(payload, salaryRuleAmounts(salaryRules, Number(payload.baseSalary) || 0, employee?.data.department));
-    payload.workedDays = adjustedWorkedDays(workingDays, hr);
+    // Joined this month, or contract ended this month: only the days employed are paid.
+    payload.workedDays = adjustedWorkedDays(workingDays, { ...hr, notEmployedDays: daysNotEmployed(month, weekend, employee?.data.joiningDate || payload.joiningDate, { id: employee?.id, name: payload.employeeName }, contracts) });
     // This month's figures from HR, not last month's: the current wage, loan installments, fines and overtime.
-    if (employee?.data.baseSalary) payload.baseSalary = employee.data.baseSalary;
+    if (wageForMonth(employee, month)) payload.baseSalary = wageForMonth(employee, month);
     payload.loanDeduction = hr.loanDeduction.toFixed(2);
     payload.advanceDeduction = "0";
     payload.fineDeduction = "0";

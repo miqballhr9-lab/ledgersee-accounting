@@ -58,12 +58,43 @@ function categoryFor(doc: BookkeepingRecord, rate: number, taxes: BookkeepingRec
   return { category: match?.data.type || "Standard", taxName: match?.data.name || `${rate}%` };
 }
 
+/** A document's taxable value and tax split by rate: lines with their own rate keep it; the rest take the document's. */
+function rateParts(doc: BookkeepingRecord, docRate: number, subtotal: number, tax: number): Array<{ rate: number; taxable: number; tax: number }> {
+  let lines: Array<{ quantity?: string; rate?: string; taxRate?: string }> = [];
+  try {
+    const parsed: unknown = JSON.parse(doc.data.lineItems || "[]");
+    if (Array.isArray(parsed)) lines = parsed;
+  } catch {
+    lines = [];
+  }
+  if (!lines.some((line) => line.taxRate?.trim())) {
+    // A tax amount with no rate on the document (older records): the rate it works out to.
+    const rate = docRate || (subtotal > 0 && tax > 0 ? Math.round((tax / subtotal) * 10000) / 100 : 0);
+    return [{ rate, taxable: subtotal, tax }];
+  }
+  const groups = new Map<number, { gross: number; tax: number }>();
+  for (const line of lines) {
+    const gross = (Number(line.quantity) || 0) * (Number(line.rate) || 0);
+    const rate = line.taxRate?.trim() ? Math.max(0, Number(line.taxRate) || 0) : docRate;
+    const group = groups.get(rate) ?? { gross: 0, tax: 0 };
+    group.gross += gross;
+    group.tax += gross * (rate / 100);
+    groups.set(rate, group);
+  }
+  const grossTotal = [...groups.values()].reduce((total, group) => total + group.gross, 0) || 1;
+  const taxTotal = [...groups.values()].reduce((total, group) => total + group.tax, 0) || 1;
+  // Scaled to the document's own totals, so the parts always add up to what was saved.
+  return [...groups.entries()].map(([rate, group]) => ({ rate, taxable: subtotal * (group.gross / grossTotal), tax: tax * (group.tax / taxTotal) }));
+}
+
 /** Amounts are in the home currency: a foreign document is converted at its exchange rate. */
 export function taxLines(records: BookkeepingRecord[], taxes: BookkeepingRecord[], parties: BookkeepingRecord[], from: string, to: string, homeCurrency = ""): TaxLine[] {
   return records.flatMap((doc) => {
     const type = documentTypes[doc.kind];
     if (!type) return [];
     if (["Draft", "Cancelled", "Void"].includes(doc.data.status ?? "")) return [];
+    // An opening balance is money already owed before these books began, not a supply or a purchase.
+    if (doc.data.docType === "Opening balance" || doc.data.openingBalanceFor) return [];
     const date = doc.data[type.date] ?? "";
     if (!date || date < from || date > to) return [];
     const rate = money(doc.data.taxRate);
@@ -71,19 +102,24 @@ export function taxLines(records: BookkeepingRecord[], taxes: BookkeepingRecord[
     const tax = doc.data.taxAmount !== undefined ? money(doc.data.taxAmount) : subtotal * (rate / 100);
     const partyName = doc.data[type.party] ?? "";
     const party = parties.find((row) => row.data.name?.trim().toLowerCase() === partyName.trim().toLowerCase());
-    return [{
-      id: doc.id,
+    // A credit card credit is money back on a purchase: it reduces purchases and input tax.
+    const sign = doc.kind === "expenses" && doc.data.docType === "Credit card credit" ? -1 : type.sign;
+    const fx = homeRate(doc.data, homeCurrency);
+    const parts = rateParts(doc, rate, subtotal, tax);
+    return parts.map((part, index) => ({
+      id: parts.length > 1 ? `${doc.id}:${index}` : doc.id,
       side: type.side,
-      kind: type.label,
+      kind: sign < 0 && doc.kind === "expenses" ? "Credit card credit" : type.label,
       number: doc.data[type.number] || "—",
       date,
       party: partyName,
       partyTaxId: party?.data.taxId ?? "",
-      rate,
-      ...categoryFor(doc, rate, taxes, type.side),
-      taxable: subtotal * type.sign * homeRate(doc.data, homeCurrency),
-      tax: tax * type.sign * homeRate(doc.data, homeCurrency),
-    }];
+      rate: part.rate,
+      // The named tax applies to the part charged at the document's rate; other parts go by their own rate.
+      ...categoryFor(part.rate === rate ? doc : { ...doc, data: { ...doc.data, taxName: "" } }, part.rate, taxes, type.side),
+      taxable: part.taxable * sign * fx,
+      tax: part.tax * sign * fx,
+    }));
   }).sort((a, b) => a.date.localeCompare(b.date));
 }
 
