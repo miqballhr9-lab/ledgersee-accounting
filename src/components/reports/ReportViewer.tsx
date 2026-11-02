@@ -325,6 +325,8 @@ export default function ReportViewer({ reportKey, records, today }: ReportViewer
                 <SelectTrigger className="w-[150px]"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="total">Total only</SelectItem>
+                  <SelectItem value="days">Days</SelectItem>
+                  <SelectItem value="weeks">Weeks</SelectItem>
                   <SelectItem value="months">Months</SelectItem>
                   <SelectItem value="quarters">Quarters</SelectItem>
                   <SelectItem value="years">Years</SelectItem>

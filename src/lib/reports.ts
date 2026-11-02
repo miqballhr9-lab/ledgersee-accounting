@@ -3,7 +3,7 @@ import { accountOf, type Ledger, type LedgerAccount, type Posting } from "@/lib/
 
 /** Report builders in the QuickBooks Online layout, all computed from the ledger. */
 
-export type ColumnsBy = "total" | "months" | "quarters" | "years" | "customers" | "suppliers" | "classes" | "locations" | "projects";
+export type ColumnsBy = "total" | "days" | "weeks" | "months" | "quarters" | "years" | "customers" | "suppliers" | "classes" | "locations" | "projects";
 type DimensionField = "customer" | "supplier" | "className" | "location" | "project";
 /** Columns that split by a name on the postings (customer, class…) rather than by time. */
 const dimensionFields: Partial<Record<ColumnsBy, DimensionField>> = { customers: "customer", suppliers: "supplier", classes: "className", locations: "location", projects: "project" };
@@ -180,12 +180,24 @@ function splitPeriods(from: string, to: string, by: ColumnsBy, ledger: Ledger, n
   const periods: Period[] = [];
   let cursor = from;
   let guard = 0;
-  while (cursor <= to && guard < 400) {
+  while (cursor <= to && guard < 400) { // up to 400 columns (a year and more, day by day)
     guard += 1;
     const { y, m } = parse(cursor);
     let end: string;
     let label: string;
-    if (by === "months") {
+    const day = Number(cursor.slice(8, 10));
+    if (by === "days") {
+      end = cursor;
+      label = `${day} ${monthNames[m - 1].slice(0, 3)} ${y}`;
+    } else if (by === "weeks") {
+      // Weeks run Monday to Sunday; the first and last may be cut short by the report's dates.
+      const weekday = new Date(`${cursor}T12:00:00Z`).getUTCDay();
+      end = addDays(cursor, (7 - weekday) % 7);
+      const last = end > to ? to : end;
+      const lastDay = Number(last.slice(8, 10));
+      const { m: lastMonth } = parse(last);
+      label = lastMonth === m ? `${day}–${lastDay} ${monthNames[m - 1].slice(0, 3)}` : `${day} ${monthNames[m - 1].slice(0, 3)}–${lastDay} ${monthNames[lastMonth - 1].slice(0, 3)}`;
+    } else if (by === "months") {
       end = endOfMonth(y, m);
       label = `${monthNames[m - 1].slice(0, 3)} ${y}`;
     } else if (by === "quarters") {
