@@ -1,7 +1,7 @@
 // MIK LEDGER service worker: lets the employee app install on phones and shows
 // a friendly page when there is no connection. Data is always fetched live.
 const OFFLINE = "/offline.html";
-const CACHE = "mik-ledger-v1";
+const CACHE = "mik-ledger-v2";
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll([OFFLINE, "/icons/icon-192.png"])));
