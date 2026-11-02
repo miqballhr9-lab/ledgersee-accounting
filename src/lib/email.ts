@@ -13,6 +13,7 @@ import "server-only";
 import nodemailer from "nodemailer";
 
 import { ActionError } from "@/lib/action-error";
+import { siteUrl } from "@/lib/site";
 
 type SendEmail = {
   to: string;
@@ -51,13 +52,35 @@ export async function sendEmailOrThrow(input: SendEmail): Promise<void> {
   }
 }
 
+/**
+ * Every email carries the MIK LEDGER logo: MIK LEDGER's own messages (sign-in links,
+ * invites) open with it; a business's own email to its customers keeps the business
+ * in front and shows it small at the end. Email apps don't show SVG, so the PNG icon.
+ */
+async function withLogo(html: string, fromName: string | undefined) {
+  let base = process.env.NEXT_PUBLIC_SITE_URL || process.env.BETTER_AUTH_URL || "";
+  try {
+    base ||= await siteUrl();
+  } catch {
+    // Outside a request (a scheduled job without a site address): send without the logo.
+  }
+  if (!/^https?:\/\//.test(base)) return html;
+  const icon = `${base.replace(/\/$/, "")}/icons/icon-192.png`;
+  const font = "font-family:Arial,Helvetica,sans-serif";
+  if (fromName) {
+    return `${html}<table role="presentation" style="margin-top:28px;border-top:1px solid #e5e7eb;padding-top:12px;${font}"><tr><td style="vertical-align:middle"><img src="${icon}" width="20" height="20" alt="MIK" style="display:block;border-radius:5px"></td><td style="vertical-align:middle;padding-left:8px;font-size:12px;color:#6b7280">Sent with MIK LEDGER</td></tr></table>`;
+  }
+  return `<table role="presentation" style="margin-bottom:20px;${font}"><tr><td style="vertical-align:middle"><img src="${icon}" width="40" height="40" alt="MIK" style="display:block;border-radius:9px"></td><td style="vertical-align:middle;padding-left:10px;font-size:18px;font-weight:700;letter-spacing:0.5px;color:#283A5A">MIK LEDGER</td></tr></table>${html}`;
+}
+
 export async function sendEmail({
   to,
   subject,
-  html,
+  html: message,
   replyTo,
   fromName,
 }: SendEmail): Promise<boolean> {
+  const html = await withLogo(message, fromName);
   const smtp = smtpSettings();
   if (smtp) return sendBySmtp(smtp, { to, subject, html, replyTo, fromName });
   const base = process.env.IMAGINE_SERVICES_URL;

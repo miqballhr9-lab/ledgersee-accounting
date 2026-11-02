@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import PoweredBy from "@/components/brand/PoweredBy";
 import { and, eq, sql } from "drizzle-orm";
 import { notFound } from "next/navigation";
 
@@ -19,5 +20,10 @@ export default async function CareersPage({ params }: { params: Promise<{ token:
     .filter((job) => !["Not recruiting", "Closed", "On hold"].includes(job.data.status ?? ""))
     .map((job) => ({ id: job.id, title: job.data.jobTitle || "Job", department: job.data.department ?? "", location: job.data.location ?? "", type: job.data.employmentType ?? "", description: job.data.description ?? "" }))
     .sort((a, b) => a.title.localeCompare(b.title));
-  return <CareersBoard token={token} company={settings.data.companyName || "Our company"} logo={settings.data.logo || ""} jobs={jobs} />;
+  return (
+    <>
+      <CareersBoard token={token} company={settings.data.companyName || "Our company"} logo={settings.data.logo || ""} jobs={jobs} />
+      <PoweredBy className="pb-8" />
+    </>
+  );
 }

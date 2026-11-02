@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import PoweredBy from "@/components/brand/PoweredBy";
 import { and, eq, sql } from "drizzle-orm";
 import { notFound } from "next/navigation";
 
@@ -16,5 +17,10 @@ export default async function WebFormPage({ params }: { params: Promise<{ token:
     .where(and(eq(bookkeepingRecord.kind, "settings"), sql`${bookkeepingRecord.data}->>'webFormToken' = ${token}`)).limit(1);
   if (!settings) notFound();
   const territories = (settings.data.crmTerritories ?? "").split("\n").map((line) => (line.includes(":") ? line.split(":")[0].trim() : "")).filter(Boolean);
-  return <WebLeadForm token={token} company={settings.data.companyName || "Us"} territories={territories} />;
+  return (
+    <>
+      <WebLeadForm token={token} company={settings.data.companyName || "Us"} territories={territories} />
+      <PoweredBy className="pb-8" />
+    </>
+  );
 }

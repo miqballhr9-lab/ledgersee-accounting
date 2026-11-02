@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import PoweredBy from "@/components/brand/PoweredBy";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { notFound } from "next/navigation";
 
@@ -50,6 +51,7 @@ export default async function SharedInvoicePage({ params }: SharedInvoicePagePro
         customer={customer}
         documentKind={invoice.kind as "invoices" | "estimates" | "sales-orders" | "credit-notes"}
       />
+      <PoweredBy className="mt-8" />
     </main>
   );
 }

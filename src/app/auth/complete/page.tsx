@@ -64,12 +64,15 @@ export default function AuthComplete() {
       style={{
         display: "grid",
         placeItems: "center",
+        alignContent: "center",
         minHeight: "100vh",
         padding: "1.5rem",
         textAlign: "center",
         fontFamily: "system-ui, sans-serif",
       }}
     >
+      {/* eslint-disable-next-line @next/next/no-img-element -- a small static SVG */}
+      <img src="/icons/icon.svg" alt="MIK LEDGER" width={56} height={56} style={{ borderRadius: "22%", marginBottom: "1rem" }} />
       {failure ? (
         <div style={{ maxWidth: "26rem", display: "grid", gap: "1rem" }}>
           <p style={{ margin: 0 }}>{failure}</p>

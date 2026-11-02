@@ -390,6 +390,11 @@ export default function AppFrame({ userName, userEmail, role, workspaceName, com
             <Button variant="ghost" size="icon" className="-ml-2 md:hidden" onClick={() => setMenuOpen(true)} aria-label="Open navigation">
               <Menu size={19} />
             </Button>
+            {/* On phones the sidebar (and its logo) is tucked away, so the logo sits in the top bar. */}
+            <Link href="/app" className="shrink-0 md:hidden" aria-label="MIK LEDGER home">
+              {/* eslint-disable-next-line @next/next/no-img-element -- a small static SVG */}
+              <img src="/icons/icon.svg" alt="" width={30} height={30} className="size-[30px] rounded-[22%]" />
+            </Link>
             <Button variant="ghost" size="icon" className="shrink-0 text-muted-foreground hover:text-foreground" onClick={handleBack} aria-label="Go back" title="Go back">
               <ArrowLeft size={19} strokeWidth={1.75} />
             </Button>
