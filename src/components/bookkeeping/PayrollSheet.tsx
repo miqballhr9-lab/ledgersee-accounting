@@ -513,9 +513,11 @@ export default function PayrollSheet({ open, onOpenChange, month: initialMonth, 
               </tbody>
               <tfoot>
                 <tr className="text-sm font-semibold">
-                  <td />
-                  <td className={cellBorder} />
-                  <td colSpan={6} className={`px-2.5 py-3 text-right ${cellBorder}`}>Total</td>
+                  {/* Pinned like the header, so the totals stay under their columns when the sheet scrolls sideways. */}
+                  <td className="sticky left-0 z-10 bg-card" />
+                  <td className={`sticky left-8 z-10 bg-card ${cellBorder}`} />
+                  <td className={`sticky left-[4.25rem] z-10 bg-card px-2.5 py-3 text-left ${cellBorder}`}>Total</td>
+                  <td colSpan={5} className={cellBorder} />
                   {allowanceColumns.map((column) => <td key={column.key} className={`px-2.5 py-3 text-right tabular-nums ${cellBorder}`}>{rupees(columnTotal(column.key))}</td>)}
                   <td className={`bg-muted/40 px-2.5 py-3 text-right tabular-nums ${cellBorder}`}>{rupees(allowanceColumns.reduce((sum, column) => sum + columnTotal(column.key), 0))}</td>
                   <td className={`px-2.5 py-3 text-right tabular-nums ${cellBorder}`}>{rupees(sheetTotals.gross)}</td>

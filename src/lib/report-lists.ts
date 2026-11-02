@@ -623,6 +623,26 @@ export function buildListReport(key: string, records: BookkeepingRecord[], ledge
       return asOfResult(columns, lines, asOf, kind === "customers" ? "No customers yet." : "No suppliers yet.");
     }
 
+    case "withholding-deducted": {
+      // Each payment to a supplier with tax kept back, as the tax office's withholding statement lists it.
+      const vendors = records.filter((record) => record.kind === "vendors");
+      const vendorOf = (name: string) => vendors.find((record) => (record.data.name ?? "").trim().toLowerCase() === name.trim().toLowerCase());
+      const columns = [text("date", "Payment date"), text("ntn", "NTN / Tax ID"), text("status", "Filer"), text("bill", "Bill"), pct("rate", "Rate"), amount("paid", "Amount paid (gross)"), amount("wht", "Tax withheld"), amount("net", "Paid to supplier")];
+      const rows = records
+        .filter((record) => record.kind === "payments" && record.data.billId && Number(record.data.withheld) > 0 && inPeriod(record.data.paymentDate || record.createdAt.slice(0, 10), options))
+        .sort((a, b) => (a.data.paymentDate ?? "").localeCompare(b.data.paymentDate ?? ""))
+        .map((record): Row & { label: string } => {
+          const vendor = vendorOf(record.data.vendor ?? "");
+          const fx = Number(record.data.exchangeRate) > 0 ? Number(record.data.exchangeRate) : 1;
+          const gross = num(record.data.amount) * fx;
+          const wht = num(record.data.withheld) * fx;
+          return { label: record.data.vendor || "Supplier", values: [record.data.paymentDate ?? "", record.data.vendorTaxId || vendor?.data.taxId || "", vendor?.data.filerStatus ?? "", record.data.billNumber ?? "", num(record.data.withholdingRate) || null, gross, wht, gross - wht], source: { kind: "bills", id: record.data.billId } };
+        });
+      const lines: ReportLine[] = rows.map((row, index) => ({ id: String(index), label: row.label, kind: "account" as const, depth: 0, values: row.values, source: row.source }));
+      if (lines.length) lines.push({ id: "total", label: "TOTAL", kind: "grand", depth: 0, values: columns.map((_, index) => index >= 5 ? lines.reduce((total, line) => total + ((line.values[index] as number) || 0), 0) : null) });
+      return periodResult(columns, lines, options, "No tax withheld from supplier payments in this period. Set a withholding rate on a supplier, then pay their bill.");
+    }
+
     case "contractor-1099-summary":
     case "contractor-1099-detail": {
       // Card payments are reported by the card company, so only cash and bank payments count.

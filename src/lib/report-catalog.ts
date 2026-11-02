@@ -120,6 +120,7 @@ export const reportCategories: ReportCategory[] = [
       { key: "tax-detail", label: "Tax Detail", description: "Each transaction with tax on it.", ready: true, engine: "list" },
       { key: "tax-exception", label: "Tax Exception", description: "Changes to transactions in periods already filed.", ready: true, engine: "list" },
       { key: "taxable-sales-summary", label: "Taxable Sales Summary", description: "Taxable and non-taxable sales.", ready: true, engine: "list" },
+      { key: "withholding-deducted", label: "Withholding Tax Deducted", description: "Income tax kept back from supplier payments, with each supplier's NTN, for the withholding statement.", ready: true, engine: "list" },
     ],
   },
   {

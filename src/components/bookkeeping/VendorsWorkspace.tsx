@@ -118,7 +118,9 @@ export default function VendorsWorkspace({ records: initialRecords, bills, accou
   const visibleVendors = filteredVendors.slice((page - 1) * pageSize, page * pageSize);
   const detail = summaries.find((summary) => summary.vendor.id === detailId) ?? null;
   const baseModule = moduleBySlug("vendors");
-  const editorModule = baseModule && taxCountry && taxCountry !== "US" ? { ...baseModule, fields: baseModule.fields.filter((field) => field.key !== "track1099") } : baseModule;
+  // Country-only fields: 1099 for the US; STRN and ATL status for Pakistan.
+  const hidden = new Set([...(taxCountry && taxCountry !== "US" ? ["track1099"] : []), ...(taxCountry !== "PK" ? ["strn", "filerStatus"] : [])]);
+  const editorModule = baseModule && hidden.size ? { ...baseModule, fields: baseModule.fields.filter((field) => !hidden.has(field.key)).map((field) => field.key === "taxId" && taxCountry === "PK" ? { ...field, label: "NTN" } : field) } : baseModule;
 
   useEffect(() => setPage(1), [balanceFilter, search]);
 

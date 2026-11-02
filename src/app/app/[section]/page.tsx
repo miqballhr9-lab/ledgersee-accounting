@@ -108,9 +108,10 @@ export default async function SectionPage({ params, searchParams }: SectionPageP
   }
 
   if (section === "expenses") {
-    const groups = await listBookkeepingRecordGroups(["expenses", "bills", "vendors", "accounts", "settings", "warehouses", ...inventoryKinds]);
+    const groups = await listBookkeepingRecordGroups(["expenses", "bills", "vendors", "accounts", "settings", "warehouses", "hr-claims", ...inventoryKinds]);
     return (
       <ExpensesWorkspace
+        claims={(groups["hr-claims"] ?? []).filter((claim) => ["Approved", "Paid", "Reimbursed", "Done"].includes(claim.data.status ?? ""))}
         expenses={groups.expenses ?? []}
         bills={groups.bills ?? []}
         vendors={groups.vendors ?? []}

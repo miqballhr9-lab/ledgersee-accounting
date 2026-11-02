@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowDownToLine, Ban, CalendarDays, CircleDollarSign, Undo2, Filter, MoreHorizontal, Pencil, Plus, Printer, Search, Trash2 } from "lucide-react";
 import { toast } from "sonner";
@@ -39,6 +40,8 @@ interface ExpensesWorkspaceProps {
   items?: BookkeepingRecord[];
   /** Warehouse names, for where purchased stock goes. */
   warehouses?: string[];
+  /** Employees' approved expense claims from HR: in the books already, listed here so all spending is in one place. */
+  claims?: BookkeepingRecord[];
 }
 
 type DatePreset = "last30" | "last90" | "last12" | "thisYear" | "all" | "custom";
@@ -119,7 +122,7 @@ function createDefaults(kind: "bills" | "expenses", records: BookkeepingRecord[]
   return values;
 }
 
-export default function ExpensesWorkspace({ expenses: initialExpenses, bills: initialBills, vendors, accounts, currency, asOfDate, items = [], warehouses = [] }: ExpensesWorkspaceProps) {
+export default function ExpensesWorkspace({ expenses: initialExpenses, bills: initialBills, vendors, accounts, currency, asOfDate, items = [], warehouses = [], claims = [] }: ExpensesWorkspaceProps) {
   const router = useRouter();
   const [records, setRecords] = useState([...initialBills, ...initialExpenses]);
   const [search, setSearch] = useState("");
@@ -618,6 +621,26 @@ export default function ExpensesWorkspace({ expenses: initialExpenses, bills: in
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {claims.length ? (
+        <section className="mx-auto mt-6 w-full max-w-[1440px] overflow-hidden rounded-lg border border-border bg-card">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3.5 sm:px-5">
+            <div>
+              <h2 className="text-base font-semibold">Employee expense claims</h2>
+              <p className="mt-0.5 text-xs text-muted-foreground">Approved in HR › Expenses and already in your books. Change them there. Total {formatMoney(String(claims.reduce((sum, claim) => sum + (Number(claim.data.amount) || 0), 0)), currency)}.</p>
+            </div>
+            <Button variant="outline" size="sm" nativeButton={false} render={<Link href="/app/hr/expenses" />}>Open HR expenses</Button>
+          </div>
+          <ul className="max-h-80 divide-y divide-border overflow-y-auto">
+            {[...claims].sort((a, b) => (b.data.date ?? "").localeCompare(a.data.date ?? "")).map((claim) => (
+              <li key={claim.id} className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 text-sm sm:px-5">
+                <span className="min-w-0"><span className="font-medium">{claim.data.description || claim.data.category || "Expense"}</span> <span className="text-muted-foreground">· {claim.data.employee || "Employee"} · {claim.data.category || "Other"} · {claim.data.date || ""} · {claim.data.status}</span></span>
+                <span className="tabular-nums font-medium">{formatMoney(claim.data.amount || "0", currency)}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
 
       <PaymentDialog
         open={Boolean(paymentTargets)}

@@ -313,8 +313,8 @@ export default function AttendanceDialog({ open, onOpenChange, context }: { open
               </tbody>
               <tfoot>
                 <tr className="text-sm font-semibold">
-                  <td />
-                  <td className={cellBorder} />
+                  <td className="sticky left-0 z-10 bg-card" />
+                  <td className={`sticky left-8 z-10 bg-card ${cellBorder}`} />
                   <td colSpan={6} className={`px-2.5 py-3 text-right ${cellBorder}`}>
                     <span className="font-normal text-muted-foreground">{counted.length} employees · Present {countOf("Present")} · Late {countOf("Late")} · Half day {countOf("Half day")} · Absent {countOf("Absent")} · On leave {countOf("On leave")}</span>
                     <span className="ml-4">Total</span>

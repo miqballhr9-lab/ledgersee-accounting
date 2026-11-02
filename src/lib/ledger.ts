@@ -106,6 +106,8 @@ interface DocPayment {
   date: string;
   amount: number;
   account: string;
+  /** Income tax kept back from a supplier's payment (Pakistan's section 153), owed to the tax office instead. */
+  withheld?: number;
   id: string;
   /** The exchange rate on the day the money moved, when it differs from the document's. */
   rate?: number;
@@ -196,6 +198,8 @@ export function buildLedger(allRecords: BookkeepingRecord[], method: AccountingM
   const lazy = (make: () => string) => { let name = ""; return () => (name ||= make()); };
   const employeeLoans = lazy(() => find((account) => account.category === "Asset" && /employee (loans|advances)|staff (loans|advances)|salary advance/i.test(account.name)) ?? ensure("Employee loans and advances", "Asset", "Current assets"));
   const reimbursements = lazy(() => find((account) => account.category === "Liability" && /reimburse/i.test(account.name)) ?? ensure("Employee reimbursements payable", "Liability", "Current liabilities"));
+  // Tax withheld from suppliers' payments, owed to the tax office until deposited.
+  const supplierWithholding = lazy(() => find((account) => account.category === "Liability" && /withholding (income )?tax|wht payable|tax withheld/i.test(account.name)) ?? ensure("Withholding income tax payable", "Liability", "Current liabilities"));
   const settlementExpense = lazy(() => find((account) => account.category === "Expense" && /gratuity|final settlement|severance/i.test(account.name)) ?? ensure("Gratuity and final settlement", "Expense", "Expenses"));
   // Foreign currency paid at a different rate than invoiced or billed: the difference is a realized gain or loss.
   const exchangeGainLoss = lazy(() => find((account) => /exchange gain|exchange loss|foreign exchange|fx gain/i.test(account.name)) ?? ensure("Exchange gain or loss", "Expense", "Other expense"));
@@ -331,7 +335,8 @@ export function buildLedger(allRecords: BookkeepingRecord[], method: AccountingM
     if (!target) continue;
     const list = paymentsFor.get(target) ?? [];
     const rate = num(record.data.exchangeRate);
-    list.push({ date: record.data.paymentDate || record.createdAt.slice(0, 10), amount: num(record.data.amount), account: paymentAccountName(record.data, record.data.invoiceId ? "in" : "out"), id: record.id, ...(rate > 0 ? { rate } : {}) });
+    const withheld = record.data.billId ? num(record.data.withheld) : 0;
+    list.push({ date: record.data.paymentDate || record.createdAt.slice(0, 10), amount: num(record.data.amount), account: paymentAccountName(record.data, record.data.invoiceId ? "in" : "out"), id: record.id, ...(rate > 0 ? { rate } : {}), ...(withheld > 0 ? { withheld } : {}) });
     paymentsFor.set(target, list);
   }
   /** Payments on a document; a paid amount with no payment records (older data) counts as one payment. */
@@ -478,13 +483,16 @@ export function buildLedger(allRecords: BookkeepingRecord[], method: AccountingM
         post({ ...base, txnId: `bill-${record.id}`, date }, [...debitLines, [inputTax, tax], [ap, -total]]);
         for (const payment of docPayments(record, date)) {
           const spent = payment.amount * paidRate(payment);
-          post({ ...base, type: "Bill payment", txnId: `bp-${payment.id}-${record.id}`, date: payment.date }, [[ap, payment.amount * rate], [payment.account, -spent], ...fxLine(spent - payment.amount * rate)]);
+          // Withheld tax settles the bill too, but goes to the tax office, not out of the bank.
+          const kept = (payment.withheld ?? 0) * paidRate(payment);
+          post({ ...base, type: "Bill payment", txnId: `bp-${payment.id}-${record.id}`, date: payment.date }, [[ap, payment.amount * rate], [payment.account, -(spent - kept)], ...(kept ? [[supplierWithholding(), -kept] as [string, number]] : []), ...fxLine(spent - payment.amount * rate)]);
         }
       } else if (total > 0) {
         for (const payment of docPayments(record, date)) {
           const share = (payment.amount * rate) / total;
           const spent = payment.amount * paidRate(payment);
-          post({ ...base, type: "Bill payment", txnId: `bp-${payment.id}-${record.id}`, date: payment.date }, [...debitLines.map(([account, amount]) => [account, amount * share] as [string, number]), [inputTax, tax * share], [payment.account, -spent], ...fxLine(spent - payment.amount * rate)]);
+          const kept = (payment.withheld ?? 0) * paidRate(payment);
+          post({ ...base, type: "Bill payment", txnId: `bp-${payment.id}-${record.id}`, date: payment.date }, [...debitLines.map(([account, amount]) => [account, amount * share] as [string, number]), [inputTax, tax * share], [payment.account, -(spent - kept)], ...(kept ? [[supplierWithholding(), -kept] as [string, number]] : []), ...fxLine(spent - payment.amount * rate)]);
         }
       }
       continue;

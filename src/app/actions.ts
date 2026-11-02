@@ -1737,7 +1737,26 @@ function isPaymentDate(value: string) {
 }
 
 /** Pays all or part of a bill's remaining balance from a Cash, Bank or Credit card account and records where it came from. */
-export async function recordBillPayment(id: string, paymentDate: string, accountId: string, amountInput?: string, reference = "", exchangeRate = ""): Promise<void> {
+/**
+ * Income tax to keep back from a payment to a supplier: the rate on their profile (Pakistan's
+ * section 153, higher for non-filers), on the part of the payment that isn't sales tax.
+ * A figure typed on the payment wins; it can be 0.
+ */
+function withholdingOn(bill: Record<string, string>, vendor: Record<string, string> | undefined, amount: number, input: string | undefined) {
+  if (input !== undefined && input.trim() !== "") {
+    const typed = Number(input);
+    if (!Number.isFinite(typed) || typed < 0) throw new ActionError("Enter the tax withheld as 0 or more.");
+    if (typed > amount + 0.005) throw new ActionError("The tax withheld can’t be more than the payment.");
+    return Math.round(typed * 100) / 100;
+  }
+  const rate = Number(vendor?.whtRate) || 0;
+  if (!(rate > 0)) return 0;
+  const total = Number(bill.amount) || 0;
+  const beforeTax = total > 0 ? Math.max(0, total - (Number(bill.taxAmount) || 0)) / total : 1;
+  return Math.round(amount * beforeTax * (rate / 100) * 100) / 100;
+}
+
+export async function recordBillPayment(id: string, paymentDate: string, accountId: string, amountInput?: string, reference = "", exchangeRate = "", withheldInput?: string): Promise<void> {
   const me = await requireUser();
   assertCanWrite(me, "bills");
   if (!isPaymentDate(paymentDate)) throw new ActionError("Choose a payment date.");
@@ -1757,6 +1776,10 @@ export async function recordBillPayment(id: string, paymentDate: string, account
     const due = (Number(bill.data.amount) || 0) - paid - (Number(bill.data.creditApplied) || 0);
     if (due <= 0.005) throw new ActionError(`${bill.data.billNumber || "This bill"} is already paid.`);
     const amount = paymentAmount(amountInput, due, bill.data.billNumber || "this bill");
+    // An opening balance was owed before these books; tax on it was handled then.
+    const vendors = bill.data.docType === "Opening balance" ? [] : await transaction.select().from(bookkeepingRecord).where(and(eq(bookkeepingRecord.userId, me.id), eq(bookkeepingRecord.kind, "vendors")));
+    const vendor = vendors.find((row) => row.id === bill.data.vendorId) ?? vendors.find((row) => (row.data.name ?? "").trim().toLowerCase() === (bill.data.vendor ?? "").trim().toLowerCase());
+    const withheld = bill.data.docType === "Opening balance" && withheldInput === undefined ? 0 : withholdingOn(bill.data, vendor?.data, amount, withheldInput);
     await transaction
       .update(bookkeepingRecord)
       .set({
@@ -1767,7 +1790,7 @@ export async function recordBillPayment(id: string, paymentDate: string, account
     await transaction.insert(bookkeepingRecord).values({
       userId: me.id,
       kind: "payments",
-      data: { billId: id, billNumber: bill.data.billNumber ?? "Bill", vendor: bill.data.vendor ?? "", amount: amount.toFixed(2), paymentDate, method, paymentAccountId: account.id, paymentAccountName: name, direction: "out", ...(typeof reference === "string" && reference.trim() ? { referenceNumber: reference.trim().slice(0, 120) } : {}), ...paymentRate(bill.data, exchangeRate) },
+      data: { billId: id, billNumber: bill.data.billNumber ?? "Bill", vendor: bill.data.vendor ?? "", vendorTaxId: vendor?.data.taxId ?? "", amount: amount.toFixed(2), ...(withheld > 0 ? { withheld: withheld.toFixed(2), withholdingRate: vendor?.data.whtRate ?? "" } : {}), paymentDate, method, paymentAccountId: account.id, paymentAccountName: name, direction: "out", ...(typeof reference === "string" && reference.trim() ? { referenceNumber: reference.trim().slice(0, 120) } : {}), ...paymentRate(bill.data, exchangeRate) },
     });
   });
   await auditPayment(me, "bills", id);

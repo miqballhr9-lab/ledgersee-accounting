@@ -188,7 +188,17 @@ export default function BillsWorkspace({ records: initialRecords, vendors, accou
     await processBills(selectedBills, action);
   }
 
-  async function processBills(targets: BookkeepingRecord[], action: "pay" | "undo-payment" | "delete", payment?: { date: string; accountId: string; amount?: string; exchangeRate?: string }) {
+  /** The supplier's withholding tax rate, for the payment dialog; none for an opening balance. */
+  function withholdingFor(bill: BookkeepingRecord) {
+    if (bill.data.docType === "Opening balance") return undefined;
+    const vendor = vendors.find((row) => row.id === bill.data.vendorId) ?? vendors.find((row) => (row.data.name ?? "").trim().toLowerCase() === (bill.data.vendor ?? "").trim().toLowerCase());
+    const rate = Number(vendor?.data.whtRate) || 0;
+    if (!(rate > 0)) return undefined;
+    const total = Number(bill.data.amount) || 0;
+    return { rate, beforeTaxShare: total > 0 ? Math.max(0, total - (Number(bill.data.taxAmount) || 0)) / total : 1 };
+  }
+
+  async function processBills(targets: BookkeepingRecord[], action: "pay" | "undo-payment" | "delete", payment?: { date: string; accountId: string; amount?: string; exchangeRate?: string; withheld?: string }) {
     setBulkPending(true);
     setActionMessage("");
     const done: string[] = [];
@@ -198,7 +208,7 @@ export default function BillsWorkspace({ records: initialRecords, vendors, accou
       try {
         if (action === "delete") await deleteBookkeepingRecord("bills", record.id);
         else if (action === "undo-payment") await undoBillPayments(record.id);
-        else if (payment) await recordBillPayment(record.id, payment.date, payment.accountId, payment.amount, "", payment.exchangeRate ?? "");
+        else if (payment) await recordBillPayment(record.id, payment.date, payment.accountId, payment.amount, "", payment.exchangeRate ?? "", payment.withheld);
         done.push(record.id);
       } catch (error) {
         const message = error instanceof Error ? readableError(error) : "it couldn’t be updated.";
@@ -452,7 +462,8 @@ export default function BillsWorkspace({ records: initialRecords, vendors, accou
         pending={bulkPending}
         amountDue={paymentTargets?.length === 1 ? amountDue(paymentTargets[0]) : undefined}
         foreign={paymentTargets?.length === 1 && paymentTargets[0].data.currency && paymentTargets[0].data.currency !== currency ? { currency: paymentTargets[0].data.currency, baseCurrency: currency, rate: paymentTargets[0].data.exchangeRate || "1" } : undefined}
-        onSubmit={(date, accountId, amount, exchangeRate) => void processBills(paymentTargets ?? [], "pay", { date, accountId, amount, exchangeRate })}
+        withholding={paymentTargets?.length === 1 ? withholdingFor(paymentTargets[0]) : undefined}
+        onSubmit={(date, accountId, amount, exchangeRate, withheld) => void processBills(paymentTargets ?? [], "pay", { date, accountId, amount, exchangeRate, withheld })}
       />
       {editorModule ? (
         <RecordDetailPanel

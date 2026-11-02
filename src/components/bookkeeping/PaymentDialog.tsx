@@ -29,7 +29,9 @@ interface PaymentDialogProps {
   amountLabel?: string;
   /** A foreign-currency document: asks for the day's exchange rate, filled with the document's. */
   foreign?: { currency: string; baseCurrency: string; rate: string };
-  onSubmit: (date: string, accountId: string, amount?: string, exchangeRate?: string) => void;
+  /** A supplier with income tax withheld from payments: the rate, and the share of the bill before sales tax. */
+  withholding?: { rate: number; beforeTaxShare: number };
+  onSubmit: (date: string, accountId: string, amount?: string, exchangeRate?: string, withheld?: string) => void;
 }
 
 function today() {
@@ -37,13 +39,17 @@ function today() {
 }
 
 /** Asks for a date and the Cash, Bank or Credit card account a payment or refund went through. */
-export default function PaymentDialog({ open, onOpenChange, title, description, accountLabel = "Payment method / account", submitLabel, paymentAccounts, pending, amountDue, amountLabel = "Amount paid", foreign, onSubmit }: PaymentDialogProps) {
+export default function PaymentDialog({ open, onOpenChange, title, description, accountLabel = "Payment method / account", submitLabel, paymentAccounts, pending, amountDue, amountLabel = "Amount paid", foreign, withholding, onSubmit }: PaymentDialogProps) {
   const [date, setDate] = useState(today);
   const [accountId, setAccountId] = useState("");
   const [amount, setAmount] = useState("");
   const [amountFor, setAmountFor] = useState<string>("");
   const [error, setError] = useState("");
   const [rate, setRate] = useState("");
+  // Tax kept back from the supplier: worked out from the amount until someone types their own.
+  const [withheldTyped, setWithheldTyped] = useState<string | null>(null);
+  const autoWithheld = withholding && Number(amount) > 0 ? (Number(amount) * withholding.beforeTaxShare * withholding.rate / 100).toFixed(2) : "";
+  const withheld = withheldTyped ?? autoWithheld;
   const selectedAccount = paymentAccounts.some((account) => account.id === accountId) ? accountId : paymentAccounts[0]?.id ?? "";
   // Start from the full balance each time the dialog opens for a document.
   const key = open && amountDue !== undefined ? `${title}-${description}-${amountDue}` : "";
@@ -51,6 +57,7 @@ export default function PaymentDialog({ open, onOpenChange, title, description, 
     setAmountFor(key);
     setAmount(amountDue !== undefined ? amountDue.toFixed(2) : "");
     setRate(foreign?.rate || "1");
+    setWithheldTyped(null);
     setError("");
   }
 
@@ -62,7 +69,8 @@ export default function PaymentDialog({ open, onOpenChange, title, description, 
       if (!Number.isFinite(value) || value <= 0) { setError("Enter an amount greater than zero."); return; }
       if (value > amountDue + 0.005) { setError(`That is more than the ${amountDue.toFixed(2)} still to pay.`); return; }
       if (foreign && !(Number(rate) > 0)) { setError("Enter an exchange rate greater than zero."); return; }
-      onSubmit(date, selectedAccount, value.toFixed(2), foreign ? rate : undefined);
+      if (withholding && (!(Number(withheld) >= 0) || Number(withheld) > value)) { setError("The tax withheld must be between 0 and the amount paid."); return; }
+      onSubmit(date, selectedAccount, value.toFixed(2), foreign ? rate : undefined, withholding ? (Number(withheld) || 0).toFixed(2) : undefined);
       return;
     }
     onSubmit(date, selectedAccount);
@@ -81,6 +89,13 @@ export default function PaymentDialog({ open, onOpenChange, title, description, 
               <Label htmlFor="payment-dialog-amount">{amountLabel}</Label>
               <Input id="payment-dialog-amount" type="number" min="0.01" step="0.01" max={amountDue.toFixed(2)} value={amount} onChange={(event) => { setAmount(event.target.value); setError(""); }} required />
               <p className="text-xs text-muted-foreground">Balance {amountDue.toFixed(2)}. Pay less to leave the rest open.</p>
+            </div>
+          ) : null}
+          {withholding && amountDue !== undefined ? (
+            <div className="space-y-2">
+              <Label htmlFor="payment-dialog-wht">Income tax withheld ({withholding.rate}%)</Label>
+              <Input id="payment-dialog-wht" type="number" min="0" step="0.01" value={withheld} onChange={(event) => { setWithheldTyped(event.target.value); setError(""); }} />
+              <p className="text-xs text-muted-foreground">Kept back and owed to the tax office. The bank pays {Math.max(0, (Number(amount) || 0) - (Number(withheld) || 0)).toFixed(2)}; the bill is settled by {(Number(amount) || 0).toFixed(2)}.</p>
             </div>
           ) : null}
           <div className="space-y-2">
