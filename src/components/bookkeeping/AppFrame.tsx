@@ -283,7 +283,7 @@ export default function AppFrame({ userName, userEmail, role, workspaceName, com
     if (group) setOpenGroup(group);
   }
   const activeLabel = navigationGroups.flatMap((group) => group.items).find((item) => isItemActive(item.slug, pathname))?.label
-    ?? (pathname === "/app/profile" ? "Profile & privacy" : "Workspace");
+    ?? (pathname === "/app/profile" ? "Profile & privacy" : pathname.startsWith("/app/billing") ? "Plan and billing" : "Workspace");
 
   async function handleSignOut() {
     setIsSigningOut(true);
