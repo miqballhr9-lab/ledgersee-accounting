@@ -13,9 +13,9 @@ import { Label } from "@/components/ui/label";
 import { signIn, signUp, twoFactor } from "@/lib/auth-client";
 import { describeAuthError } from "@/lib/errors";
 
-export default function AccountAccess() {
+export default function AccountAccess({ initialMode = "sign-in" }: { initialMode?: "sign-in" | "sign-up" }) {
   const router = useRouter();
-  const [mode, setMode] = useState<"sign-in" | "sign-up">("sign-in");
+  const [mode, setMode] = useState<"sign-in" | "sign-up">(initialMode);
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -105,6 +105,7 @@ export default function AccountAccess() {
 
       <section className="flex min-h-dvh items-center justify-center px-5 py-10 sm:px-8">
         <div className="w-full max-w-[420px]">
+          <Link href="/" className="mb-6 inline-flex items-center text-xs font-medium text-muted-foreground hover:text-foreground">← MIK LEDGER home</Link>
           <div className="brand-lockup group mb-10 flex items-center lg:hidden">
             <BrandWordmark />
           </div>

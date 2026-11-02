@@ -8,7 +8,7 @@ export const metadata: Metadata = { title: "Profile & privacy" };
 
 export default async function ProfilePage() {
   const user = await getWorkspaceUser();
-  if (!user) redirect("/");
+  if (!user) redirect("/login");
 
   return <ProfilePrivacyWorkspace initialName={user.name} email={user.email} membership={user.isOwner || user.viewingAs ? null : { business: user.workspaceName, role: user.role }} />;
 }

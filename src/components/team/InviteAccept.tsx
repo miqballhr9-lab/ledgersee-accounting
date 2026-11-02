@@ -79,7 +79,7 @@ export default function InviteAccept({ token, invite, signedInEmail }: InviteAcc
             <div className="text-center">
               <h1 className="text-xl font-semibold">This invitation can’t be used</h1>
               <p className="mt-2 text-sm text-muted-foreground">It has already been accepted, or a newer invitation replaced it. Ask the person who invited you to send a new one.</p>
-              <Button className="mt-5" nativeButton={false} render={<Link href="/" />}>Go to sign in</Button>
+              <Button className="mt-5" nativeButton={false} render={<Link href="/login" />}>Go to sign in</Button>
             </div>
           ) : (
             <>

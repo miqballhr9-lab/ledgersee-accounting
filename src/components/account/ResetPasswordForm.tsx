@@ -60,7 +60,7 @@ export default function ResetPasswordForm({ token, invalid }: { token: string; i
               <p className="mt-6 text-sm font-medium text-primary">Password updated</p>
               <h1 className="mt-2 text-2xl font-semibold tracking-tight">You’re ready to sign in</h1>
               <p className="mt-2 text-sm leading-6 text-muted-foreground">Your new password is set. Use it the next time you sign in.</p>
-              <Button type="button" className="mt-6 h-10 w-full gap-2" onClick={() => { router.replace("/"); router.refresh(); }}>
+              <Button type="button" className="mt-6 h-10 w-full gap-2" onClick={() => { router.replace("/login"); router.refresh(); }}>
                 Back to sign in <ArrowRight size={16} />
               </Button>
             </>
@@ -99,7 +99,7 @@ export default function ResetPasswordForm({ token, invalid }: { token: string; i
         </div>
 
         {!isUpdated && !isLinkInvalid ? (
-          <Link href="/" className="mt-5 inline-flex items-center gap-2 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground">
+          <Link href="/login" className="mt-5 inline-flex items-center gap-2 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground">
             <ArrowLeft size={15} /> Back to sign in
           </Link>
         ) : null}

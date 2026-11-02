@@ -13,7 +13,7 @@ export const dynamic = "force-dynamic";
 /** The platform owner's panel: every business, every user, feedback, system status and the announcement. */
 export default async function AdminPage() {
   const me = await getUser();
-  if (!me) redirect("/");
+  if (!me) redirect("/login");
   // Anyone else gets a plain 404, so the panel's address gives nothing away.
   if (!isPlatformAdmin(me.email)) notFound();
   if (!me.emailVerified) return <AdminConfirmEmail email={me.email} />;

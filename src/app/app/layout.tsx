@@ -13,7 +13,7 @@ import { activeAnnouncement, isPlatformAdmin } from "@/lib/platform";
 
 export default async function BookkeepingLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   const user = await getWorkspaceUser();
-  if (!user) redirect("/");
+  if (!user) redirect("/login");
   // Automation mode: run any rules that are due. In Manual mode this returns at once.
   // Never while support is only looking: that view must not change anything.
   if (!user.viewingAs) await runDueAutomations().catch(() => undefined);
